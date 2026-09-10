@@ -11,12 +11,19 @@
 </p>
 
 <p align="center">
+  <a href="#参与内测">参与内测</a> ·
   <a href="#快速开始">快速开始</a> ·
   <a href="#v2-能做什么">能力边界</a> ·
   <a href="#模型与联网">模型与联网</a> ·
   <a href="#小米手环与健康数据">手环接入</a> ·
   <a href="docs/local-ai-architecture.md">架构文档</a>
 </p>
+
+## 参与内测
+
+内测邀请码请添加微信获取：**`jokerB0906L`**。
+
+获取邀请码后，在 App 注册页面填写即可。
 
 > [!IMPORTANT]
 > **`v2.0.1` 是 Caesar∞ 当前的版本基线。** 当前重点适配 Xiaomi 15 Pro（Android 16、16 GB RAM）。模型权重、个人密钥、健康原始序列、设备日志和 APK 均不会进入源码历史。请从 [Releases](https://github.com/liburce0412-alt/Caesar-Infinity/releases) 下载提供 SHA-256 的 APK，并核对发布说明中的签名与适用设备；体验版使用独立的预发布条目，明确标注 debug 签名。
