@@ -24,13 +24,13 @@ import org.robolectric.annotation.Config
 class AuthFlowTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun `registration mode asks only for email password and confirmation`() {
+    @Test fun `registration mode requires invitation alongside email and password confirmation`() {
         compose.setContent {
             CampusTheme(ThemeMode.LIGHT) {
                 AuthScreen(
                     state = AuthState(),
                     onSignIn = { _, _ -> false },
-                    onSignUp = { _, _ -> false },
+                    onSignUp = { _, _, _ -> false },
                     onClearMessage = {},
                     onBack = {},
                 )
@@ -41,6 +41,7 @@ class AuthFlowTest {
         compose.onAllNodesWithText("邮箱").assertCountEquals(1)
         compose.onAllNodesWithText("密码").assertCountEquals(1)
         compose.onAllNodesWithText("确认密码").assertCountEquals(1)
+        compose.onAllNodesWithText("邀请码").assertCountEquals(1)
         compose.onAllNodesWithText("直接注册并登录").assertCountEquals(1)
     }
 

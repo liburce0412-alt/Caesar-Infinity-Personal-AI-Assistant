@@ -142,6 +142,7 @@ class CampusSyncWorker(appContext: Context, params: WorkerParameters) : Coroutin
             "time_entries",
             mapOf(
                 "select" to "id,user_id,client_id,title,category,description,starts_at,ends_at,version,updated_at,deleted_at",
+                "user_id" to "eq.$userId",
                 "order" to "updated_at.asc",
                 "limit" to "1000",
             ),
@@ -165,6 +166,7 @@ class CampusSyncWorker(appContext: Context, params: WorkerParameters) : Coroutin
             "course_schedules",
             mapOf(
                 "select" to "id,user_id,client_id,name,weekday,start_minute,end_minute,location,teacher,weeks,source_hash,version,updated_at,deleted_at",
+                "user_id" to "eq.$userId",
                 "order" to "updated_at.asc",
                 "limit" to "1000",
             ),

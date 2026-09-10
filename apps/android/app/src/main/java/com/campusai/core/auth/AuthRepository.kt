@@ -1,6 +1,7 @@
 package com.campusai.core.auth
 
 import android.content.Context
+import com.campusai.BuildConfig
 import android.util.Base64
 import com.campusai.core.network.AuthSession
 import com.campusai.core.network.SupabaseClient
@@ -20,10 +21,11 @@ data class AuthState(
 )
 
 class AuthRepository(private val context: Context) {
-    private val accessKey = "supabase_access_token"
-    private val refreshKey = "supabase_refresh_token"
-    private val emailKey = "supabase_email"
-    private val userIdKey = "supabase_user_id"
+    private val backendScope = BuildConfig.SUPABASE_URL.trimEnd('/')
+    private val accessKey = "supabase_access_token:$backendScope"
+    private val refreshKey = "supabase_refresh_token:$backendScope"
+    private val emailKey = "supabase_email:$backendScope"
+    private val userIdKey = "supabase_user_id:$backendScope"
     private val _state = MutableStateFlow(AuthState())
     val state: StateFlow<AuthState> = _state.asStateFlow()
 
@@ -55,15 +57,15 @@ class AuthRepository(private val context: Context) {
         )
     }
 
-    suspend fun signUp(email: String, password: String): Boolean {
+    suspend fun signUp(email: String, password: String, inviteCode: String): Boolean {
         _state.value = _state.value.copy(busy = true, error = null, notice = null)
-        return SupabaseClient.signUp(email, password).fold(
+        return SupabaseClient.signUp(email, password, inviteCode).fold(
             onSuccess = { result ->
                 val session = result.session?.let { normalizeSession(it, result.email) }
                 if (session == null) {
                     _state.value = AuthState(
                         email = result.email,
-                        notice = "账号已创建，但 Supabase 仍要求邮箱确认。请先确认邮箱，或由项目管理员关闭邮箱确认后直接登录。",
+                        notice = "账号已创建，请先完成邮箱确认再登录。",
                     )
                     false
                 } else if (!persist(session)) {

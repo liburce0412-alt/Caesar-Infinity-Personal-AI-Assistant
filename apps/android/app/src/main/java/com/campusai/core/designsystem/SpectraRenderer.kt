@@ -54,8 +54,8 @@ class SpectraSurfaceView(context: Context) : GLSurfaceView(context) {
         super.onDetachedFromWindow()
     }
 
-    fun configure(environment: SpectraEnvironment, quality: RenderQuality, darkMode: Boolean, phase: SpectraPhase) {
-        queueEvent { spectraRenderer.configure(environment, quality, darkMode, phase) }
+    fun configure(environment: SpectraEnvironment, quality: RenderQuality, darkMode: Boolean, phase: SpectraPhase, glassEffects: GlassEffects = GlassEffects()) {
+        queueEvent { spectraRenderer.configure(environment, quality, darkMode, phase, glassEffects) }
     }
 
     fun setPointer(x: Float, y: Float) {
@@ -110,6 +110,7 @@ private class SpectraGlRenderer(
     private var sceneHandles: SceneHandles? = null
     private var blitHandles: BlitHandles? = null
     private var opticalHandles: OpticalHandles? = null
+    private val glassAtmospheres = mutableMapOf<Long, GlassAtmosphere>()
     private var sceneFramebuffer = 0
     private var sceneTexture = 0
     private var sceneWidth = 1
@@ -123,6 +124,7 @@ private class SpectraGlRenderer(
     private var environmentTransitionAt = 0f
     private var quality = RenderQuality.AUTO
     private var darkMode = false
+    private var glassEffects = GlassEffects()
     private var phase = SpectraPhase.AMBIENT
     private var pointerX = .62f
     private var pointerY = .45f
@@ -133,7 +135,7 @@ private class SpectraGlRenderer(
     private var windowOriginX = 0f
     private var windowOriginY = 0f
 
-    fun configure(environment: SpectraEnvironment, quality: RenderQuality, darkMode: Boolean, phase: SpectraPhase) {
+    fun configure(environment: SpectraEnvironment, quality: RenderQuality, darkMode: Boolean, phase: SpectraPhase, glassEffects: GlassEffects) {
         if (this.environment != environment) {
             previousEnvironment = this.environment
             this.environment = environment
@@ -141,6 +143,7 @@ private class SpectraGlRenderer(
         }
         this.quality = quality
         this.darkMode = darkMode
+        this.glassEffects = glassEffects.active(dark = darkMode, motion = true)
         this.phase = phase
     }
 
@@ -169,6 +172,7 @@ private class SpectraGlRenderer(
         sceneFramebuffer = 0
         sceneTexture = 0
         sceneFramebufferReady = false
+        glassAtmospheres.clear()
         val fallback = fallbackColor()
         GLES20.glClearColor(fallback[0], fallback[1], fallback[2], 1f)
         lastFrameAt = SystemClock.elapsedRealtime()
@@ -270,6 +274,7 @@ private class SpectraGlRenderer(
             viewWidth = width.toFloat(),
             viewHeight = height.toFloat(),
         )
+        glassAtmospheres.keys.retainAll(regions.map { it.id }.toSet())
         if (regions.isEmpty()) return
 
         GLES20.glUseProgram(opticalProgram)
@@ -280,6 +285,7 @@ private class SpectraGlRenderer(
         GLES20.glUniform2f(handles.surfaceSize, width.toFloat(), height.toFloat())
         GLES20.glUniform1f(handles.dark, if (darkMode) 1f else 0f)
         GLES20.glUniform1f(handles.time, seconds)
+        GLES20.glUniform4f(handles.effects, if (glassEffects.deformation) 1f else 0f, if (glassEffects.rimLight) 1f else 0f, if (glassEffects.aurora) 1f else 0f, if (glassEffects.meteors) 1f else 0f)
         GLES20.glEnable(GLES20.GL_SCISSOR_TEST)
 
         regions.forEach { region ->
@@ -321,6 +327,14 @@ private class SpectraGlRenderer(
             GLES20.glUniform1f(handles.dispersion, region.dispersionPx)
             GLES20.glUniform1f(handles.flow, region.flowPx)
             GLES20.glUniform1f(handles.bodyOpacity, region.bodyOpacity)
+            GLES20.glUniform1f(handles.interaction, region.interaction)
+            GLES20.glUniform2f(handles.touch, region.touch.x, 1f - region.touch.y)
+            val atmosphere = glassAtmospheres.getOrPut(region.id) { GlassAtmosphere() }
+            atmosphere.update(seconds, if (darkMode) region.interaction else 0f, regionWidth, regionHeight, glassEffects.meteors)
+            GLES20.glUniform1f(handles.auroraColor, atmosphere.hue)
+            GLES20.glUniform1f(handles.effectSeed, atmosphere.phase)
+            GLES20.glUniform4fv(handles.meteorHead, 5, atmosphere.heads, 0)
+            GLES20.glUniform2fv(handles.meteorDir, 5, atmosphere.directions, 0)
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
         }
 
@@ -418,6 +432,13 @@ private class SpectraGlRenderer(
         val dispersion = GLES20.glGetUniformLocation(program, "uDispersionPx")
         val flow = GLES20.glGetUniformLocation(program, "uFlowPx")
         val bodyOpacity = GLES20.glGetUniformLocation(program, "uBodyOpacity")
+        val interaction = GLES20.glGetUniformLocation(program, "uInteraction")
+        val touch = GLES20.glGetUniformLocation(program, "uTouch")
+        val auroraColor = GLES20.glGetUniformLocation(program, "uAuroraColor")
+        val effectSeed = GLES20.glGetUniformLocation(program, "uEffectSeed")
+        val effects = GLES20.glGetUniformLocation(program, "uEffects")
+        val meteorHead = GLES20.glGetUniformLocation(program, "uMeteorHead[0]")
+        val meteorDir = GLES20.glGetUniformLocation(program, "uMeteorDir[0]")
         val dark = GLES20.glGetUniformLocation(program, "uDark")
         val time = GLES20.glGetUniformLocation(program, "uTime")
     }
@@ -983,6 +1004,13 @@ private class SpectraGlRenderer(
             uniform float uDispersionPx;
             uniform float uFlowPx;
             uniform float uBodyOpacity;
+            uniform float uInteraction;
+            uniform vec2 uTouch;
+            uniform float uAuroraColor;
+            uniform float uEffectSeed;
+            uniform vec4 uEffects;
+            uniform vec4 uMeteorHead[5];
+            uniform vec2 uMeteorDir[5];
             uniform float uDark;
             uniform float uTime;
 
@@ -1024,7 +1052,14 @@ private class SpectraGlRenderer(
                 // so stronger optics never smear foreground content.
                 vec2 centre = uRegion.xy + uRegion.zw * 0.5;
                 float interior = 1.0 - edge;
-                vec2 lensWarp = (centre - vUv) * (0.020 + 0.012 * interior);
+                // A convex clear lens magnifies the owned scene; its thick rim bends in the
+                // opposite direction. Text and controls remain sharp in the Compose layer.
+                float dome = sqrt(max(0.0, 1.0 - edge * edge));
+                vec2 focusUv = uRegion.xy + uRegion.zw * uTouch;
+                vec2 focusDelta = (local - uTouch) * vec2(uRegionSize.x / max(uRegionSize.y, 1.0), 1.0);
+                float touchFalloff = exp(-dot(focusDelta, focusDelta) * 4.0);
+                vec2 lensWarp = (centre - vUv) * (0.045 + 0.085 * dome + uInteraction * uEffects.x * 0.055);
+                lensWarp += (focusUv - vUv) * uInteraction * uEffects.x * touchFalloff * 0.20;
 
                 // Two low-frequency waves replace the former sub-pixel micro warp. They bend the
                 // background throughout the lens while keeping the texture-read count unchanged.
@@ -1045,8 +1080,8 @@ private class SpectraGlRenderer(
                     normal * (0.35 + 0.65 * curvature) +
                     flowDirection * (0.55 + 0.65 * interior) + vec2(0.0001)
                 );
-                float chromaAmount = 0.35 + 0.75 * curvature + 0.45 * flowBand * interior;
-                vec2 dispersionWarp = chromaDirection * (uDispersionPx / uSurfaceSize) * chromaAmount;
+                float chromaAmount = 0.12 + 0.65 * curvature;
+                vec2 dispersionWarp = chromaDirection * (uDispersionPx / uSurfaceSize) * chromaAmount * (1.0 - uDark);
                 vec2 sampleUv = clamp(
                     vUv + lensWarp + edgeWarp + foldWarp + flowWarp,
                     vec2(0.001),
@@ -1056,19 +1091,57 @@ private class SpectraGlRenderer(
                 float r = texture2D(uScene, clamp(sampleUv + dispersionWarp, vec2(0.001), vec2(0.999))).r;
                 float g = texture2D(uScene, sampleUv).g;
                 float b = texture2D(uScene, clamp(sampleUv - dispersionWarp, vec2(0.001), vec2(0.999))).b;
-                vec3 refracted = saturateColor(vec3(r, g, b), 1.38) * 1.025;
+                vec3 refracted = saturateColor(vec3(r, g, b), 1.20) * 1.015;
                 float caustic = flowBand * flowBand * interior;
                 vec3 causticTint = mix(vec3(0.82, 0.94, 1.0), vec3(0.20, 0.34, 0.62), uDark);
                 refracted = mix(refracted, causticTint, caustic * mix(0.065, 0.045, uDark));
 
-                vec3 tint = mix(vec3(0.965, 0.975, 1.0), vec3(0.045, 0.064, 0.105), uDark);
+                vec3 tint = mix(vec3(0.93, 0.975, 1.0), vec3(0.035, 0.060, 0.115), uDark);
                 float body = mix(uBodyOpacity, uBodyOpacity * 0.72, uDark);
                 vec3 glass = mix(refracted, tint, body);
+
+                // Desktop LiquidDesktop's single-hue filament curtain and irregular meteors,
+                // adapted to the existing mobile scene texture and touch lifecycle.
+                float energy = clamp(abs(uInteraction), 0.0, 1.0);
+                if (uDark > 0.5 && energy > 0.003) {
+                    vec2 a = vec2(local.x, 1.0 - local.y);
+                    float t = uTime + uEffectSeed;
+                    float wave = 0.57 + sin(a.x * 5.5 + t * 0.38) * 0.16 + sin(a.x * 12.0 - t * 0.28) * 0.055;
+                    float above = wave - a.y;
+                    float curtain = exp(-max(above, 0.0) * 6.0) * smoothstep(-0.035, 0.015, above);
+                    float filaments = 0.38 + 0.62 * pow(0.5 + 0.5 * sin(a.x * 73.0 + sin(a.x * 16.0 - t * 0.6) * 3.0 + t * 0.4), 2.0);
+                    float hem = exp(-pow(above * 38.0, 2.0));
+                    float veil = (curtain * filaments * 0.34 + hem * 0.28) * (0.65 + 0.35 * sin(a.x * 3.0 + t * 0.25));
+                    glass += uEffects.z * energy * (uAuroraColor < 0.5 ? vec3(0.10, 0.85, 0.49) : vec3(0.95, 0.13, 0.28)) * veil;
+                    for (int i = 0; i < 5; i++) {
+                        if (uEffects.w > 0.5 && uMeteorHead[i].w > 0.001) {
+                            vec2 dir = uMeteorDir[i];
+                            vec2 rel = p - uMeteorHead[i].xy;
+                            float trail = dot(-rel, dir);
+                            float crossing = dot(rel, vec2(-dir.y, dir.x));
+                            float streak = exp(-crossing * crossing / 3.0) * smoothstep(0.0, 4.0, trail) * (1.0 - smoothstep(10.0, uMeteorHead[i].z, trail));
+                            float spark = exp(-dot(rel, rel) / 6.0);
+                            glass += (streak * 0.72 + spark) * uMeteorHead[i].w * energy * vec3(0.66, 0.87, 1.0);
+                        }
+                    }
+                }
+
+                // Deliberately decorative cyan/violet light, independent of optical dispersion.
+                vec2 lean = (uTouch - 0.5) * 2.0;
+                vec2 edgeCursor = lean / max(max(abs(lean.x), abs(lean.y)), 0.05) * halfSize;
+                vec2 edgeDelta = (p - edgeCursor) / max(min(halfSize.x, halfSize.y), 1.0);
+                float following = exp(-dot(edgeDelta, edgeDelta) * 1.8);
+                float rimFlow = 0.5 + 0.5 * sin((p.x + p.y) * 0.021 - uTime * 1.4);
+                vec3 rimColor = mix(vec3(0.20, 0.88, 1.0), vec3(0.80, 0.43, 1.0), rimFlow);
+                float rimBand = exp(-pow((distanceInside - 2.0) / 1.7, 2.0));
+                glass += uEffects.y * rimColor * following * energy * (rimBand * 0.65 + exp(-distanceInside / 7.0) * 0.12);
 
                 // Quiet inner illumination and a darker contact edge give the lens real thickness.
                 float innerHighlight = (1.0 - smoothstep(0.0, 2.0, distanceInside)) * (1.0 - uDark * 0.35);
                 float contact = smoothstep(0.0, 8.0, distanceInside) * (1.0 - smoothstep(8.0, 18.0, distanceInside));
-                glass += vec3(1.0) * innerHighlight * 0.11;
+                vec2 lightDirection = normalize(mix(vec2(-0.6, 0.8), (uTouch - 0.5) * 2.0 + vec2(0.001), clamp(abs(uInteraction), 0.0, 1.0)));
+                float lightFacing = pow(max(dot(normal, lightDirection), 0.0), 3.0);
+                glass += vec3(1.0) * innerHighlight * (0.045 + 0.24 * lightFacing + 0.12 * abs(uInteraction) * touchFalloff);
                 glass *= 1.0 - contact * mix(0.025, 0.05, uDark);
                 gl_FragColor = vec4(glass, 1.0);
             }

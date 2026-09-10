@@ -1,18 +1,22 @@
-name: Deploy Admin
+name: Admin Checks
 
 on:
   push:
     branches: [main]
     paths: ['apps/admin/**', '.github/workflows/deploy-admin.yml']
+  pull_request:
+    paths: ['apps/admin/**', '.github/workflows/deploy-admin.yml']
   workflow_dispatch:
 
 permissions:
   contents: read
-  deployments: write
 
 jobs:
-  deploy:
+  check:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/admin
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -21,31 +25,6 @@ jobs:
           cache: npm
           cache-dependency-path: apps/admin/package-lock.json
       - run: npm ci
-        working-directory: apps/admin
-      - name: Detect deployment configuration
-        id: deployment
-        shell: bash
-        env:
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          if [[ -n "$VITE_SUPABASE_ANON_KEY" && -n "$CLOUDFLARE_API_TOKEN" && -n "$CLOUDFLARE_ACCOUNT_ID" ]]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Admin deployment skipped because Supabase/Cloudflare secrets are not configured."
-          fi
-      - if: steps.deployment.outputs.enabled == 'true'
-        run: npm run build
-        working-directory: apps/admin
-        env:
-          VITE_SUPABASE_URL: https://mcpjecboqddqelgikvvc.supabase.co
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-      - if: steps.deployment.outputs.enabled == 'true'
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy apps/admin/dist --project-name=campusai-admin --branch=main
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+      - run: npm test
+      - run: npm run build
+      # Production is deployed to the Alibaba ECS after HTTPS verification.

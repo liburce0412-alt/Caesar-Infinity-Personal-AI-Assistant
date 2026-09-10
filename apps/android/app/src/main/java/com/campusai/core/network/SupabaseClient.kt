@@ -122,6 +122,19 @@ object SupabaseClient {
         return "$supabaseUrl/storage/v1/object/public/$bucket/$encodedPath"
     }
 
+    suspend fun signedMediaUrl(bucket: String, path: String, expiresInSeconds: Int = 3600): Result<String> = withContext(Dispatchers.IO) {
+        authenticatedRequest {
+            val encodedPath = path.split('/').joinToString("/") { URLEncoder.encode(it, Charsets.UTF_8.name()).replace("+", "%20") }
+            Request.Builder()
+                .url("$supabaseUrl/storage/v1/object/sign/$bucket/$encodedPath")
+                .post(JSONObject().put("expiresIn", expiresInSeconds.coerceIn(1, 3600)).toString().toRequestBody("application/json".toMediaType()))
+                .build()
+        }.mapCatching { raw ->
+            val signedPath = JSONObject(raw).getString("signedURL")
+            "$supabaseUrl/storage/v1$signedPath"
+        }
+    }
+
     suspend fun uploadObject(bucket: String, path: String, bytes: ByteArray, contentType: String): Result<Unit> = withContext(Dispatchers.IO) {
         if (bytes.isEmpty()) return@withContext Result.failure(IllegalArgumentException("图片内容为空。"))
         authenticatedRequest {
@@ -146,14 +159,16 @@ object SupabaseClient {
         payload = JSONObject().put("email", email.trim()).put("password", password),
     )
 
-    suspend fun signUp(email: String, password: String): Result<AuthSignUpResult> = withContext(Dispatchers.IO) {
+    suspend fun signUp(email: String, password: String, inviteCode: String): Result<AuthSignUpResult> = withContext(Dispatchers.IO) {
         if (!isConfigured()) return@withContext Result.failure(IllegalStateException("Supabase 尚未配置，暂时无法注册。"))
         val normalizedEmail = email.trim()
         val request = Request.Builder()
             .url("$supabaseUrl/auth/v1/signup")
             .header("apikey", supabaseAnonKey)
             .header("Content-Type", "application/json")
-            .post(JSONObject().put("email", normalizedEmail).put("password", password).toString().toRequestBody(jsonMediaType))
+            .post(JSONObject().put("email", normalizedEmail).put("password", password)
+                .put("data", JSONObject().put("invite_code", inviteCode.trim()))
+                .toString().toRequestBody(jsonMediaType))
             .build()
         runCatching {
             client.newCall(request).execute().use { response ->
@@ -167,6 +182,7 @@ object SupabaseClient {
                         response.code == 422 && detail.contains("registered", ignoreCase = true) -> "这个邮箱已经注册，请直接登录。"
                         response.code == 422 -> detail.ifBlank { "邮箱或密码不符合注册要求。" }
                         response.code == 429 -> "注册操作过于频繁，请稍后再试。"
+                        response.code >= 500 -> "注册暂未完成，请确认邀请码仍有效，或稍后重试。"
                         else -> detail.ifBlank { "注册服务暂时不可用（${response.code}）。" }
                     }
                     error(message)

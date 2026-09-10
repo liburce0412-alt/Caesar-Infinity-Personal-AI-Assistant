@@ -2,6 +2,7 @@ package com.campusai.core.designsystem
 
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.node.GlobalPositionAwareModifierNode
@@ -27,6 +28,8 @@ internal data class OpticalGlassRegion(
     val flowPx: Float,
     val bodyOpacity: Float,
     val priority: Int,
+    val interaction: Float = 0f,
+    val touch: Offset = Offset(.5f, .5f),
 ) {
     val area: Float get() = boundsInWindow.width * boundsInWindow.height
 }
@@ -185,10 +188,12 @@ fun Modifier.opticalGlassRegion(
     enabled: Boolean = true,
     radius: Dp = 16.dp,
     priority: Int = 0,
-    refraction: Dp = 4.2.dp,
-    dispersion: Dp = 1.1.dp,
-    flow: Dp = 1.8.dp,
-    bodyOpacity: Float = .12f,
+    refraction: Dp = 4.dp,
+    dispersion: Dp = .35.dp,
+    flow: Dp = .8.dp,
+    bodyOpacity: Float = .065f,
+    interaction: Float = 0f,
+    touch: Offset = Offset(.5f, .5f),
 ): Modifier = this.then(
     OpticalGlassElement(
         enabled = enabled,
@@ -198,6 +203,8 @@ fun Modifier.opticalGlassRegion(
         dispersion = dispersion,
         flow = flow,
         bodyOpacity = bodyOpacity.coerceIn(.06f, .30f),
+        interaction = interaction.coerceIn(-.35f, 1.15f),
+        touch = touch,
     ),
 )
 
@@ -209,6 +216,8 @@ private data class OpticalGlassElement(
     val dispersion: Dp,
     val flow: Dp,
     val bodyOpacity: Float,
+    val interaction: Float,
+    val touch: Offset,
 ) : ModifierNodeElement<OpticalGlassModifierNode>() {
     override fun create(): OpticalGlassModifierNode = OpticalGlassModifierNode(
         scope = OpticalGlassRegistry.currentScope(),
@@ -219,10 +228,12 @@ private data class OpticalGlassElement(
         dispersion = dispersion,
         flow = flow,
         bodyOpacity = bodyOpacity,
+        interaction = interaction,
+        touch = touch,
     )
 
     override fun update(node: OpticalGlassModifierNode) {
-        node.updateParameters(enabled, radius, priority, refraction, dispersion, flow, bodyOpacity)
+        node.updateParameters(enabled, radius, priority, refraction, dispersion, flow, bodyOpacity, interaction, touch)
     }
 
     override fun InspectorInfo.inspectableProperties() {
@@ -246,6 +257,8 @@ private class OpticalGlassModifierNode(
     private var dispersion: Dp,
     private var flow: Dp,
     private var bodyOpacity: Float,
+    private var interaction: Float,
+    private var touch: Offset,
 ) : Modifier.Node(), GlobalPositionAwareModifierNode {
     private val id = OpticalGlassRegistry.nextId()
     private var coordinates: LayoutCoordinates? = null
@@ -273,6 +286,8 @@ private class OpticalGlassModifierNode(
         dispersion: Dp,
         flow: Dp,
         bodyOpacity: Float,
+        interaction: Float,
+        touch: Offset,
     ) {
         this.enabled = enabled
         this.radius = radius
@@ -281,6 +296,8 @@ private class OpticalGlassModifierNode(
         this.dispersion = dispersion
         this.flow = flow
         this.bodyOpacity = bodyOpacity
+        this.interaction = interaction
+        this.touch = touch
         if (isAttached) updateRegion()
     }
 
@@ -306,6 +323,8 @@ private class OpticalGlassModifierNode(
                 flowPx = with(density) { flow.toPx() },
                 bodyOpacity = bodyOpacity,
                 priority = priority,
+                interaction = interaction,
+                touch = touch,
             ),
         )
     }

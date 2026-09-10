@@ -52,6 +52,8 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -76,6 +78,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
@@ -92,6 +95,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selectableGroup
 import androidx.compose.ui.semantics.selected
@@ -116,6 +120,7 @@ import com.campusai.R
 import kotlinx.coroutines.launch
 import java.util.WeakHashMap
 import kotlin.math.roundToInt
+import kotlin.math.abs
 
 @Composable
 fun SpectraBackdrop(
@@ -197,6 +202,7 @@ fun SpectraBackdrop(
         return
     }
     val lifecycleOwner = LocalLifecycleOwner.current
+    val glassEffects = SpectraTheme.tokens.glassEffects
     val darkMode = MaterialTheme.colorScheme.background.luminance() < .35f
     var surface by remember { mutableStateOf<SpectraSurfaceView?>(null) }
     var lifecycleActive by remember(lifecycleOwner) {
@@ -204,7 +210,7 @@ fun SpectraBackdrop(
     }
     AndroidView(
         factory = { context -> SpectraSurfaceView(context).also { surface = it } },
-        update = { it.configure(environment, quality, darkMode, phase) },
+        update = { it.configure(environment, quality, darkMode, phase, glassEffects) },
         modifier = modifier.fillMaxSize().pointerInput(surface) {
             awaitPointerEventScope {
                 while (true) {
@@ -306,38 +312,69 @@ fun GlassPanel(
     emphasized: Boolean = false,
     shadowed: Boolean = true,
     onClick: (() -> Unit)? = null,
-    optical: Boolean = emphasized,
+    optical: Boolean = true,
     opticalPriority: Int = if (emphasized) 1 else 0,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val shape = RoundedCornerShape(radius.dp)
     val dark = MaterialTheme.colorScheme.background.luminance() < .35f
-    val fill = if (dark) Color.White.copy(alpha = if (emphasized) .085f else .055f)
-    else Color.White.copy(alpha = if (emphasized) .09f else .06f)
+    val fill = if (dark) Color.White.copy(alpha = if (emphasized) .075f else .045f)
+    else Color.White.copy(alpha = if (emphasized) .085f else .055f)
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) .99f else 1f, tween(120), label = "glass-press")
-    val depression = with(LocalDensity.current) { if (pressed) 1.dp.toPx() else 0f }
+    val motion = SpectraTheme.tokens.motion.enabled
+    val effects = SpectraTheme.tokens.glassEffects.active(dark, motion)
+    var touching by remember { mutableStateOf(false) }
+    var touch by remember { mutableStateOf(Offset(.5f, .5f)) }
+    val press by animateFloatAsState(
+        if ((touching || pressed) && motion) 1f else 0f,
+        if (motion) spring(dampingRatio = .52f, stiffness = 380f) else tween(0), label = "liquid-glass-press",
+    )
     Box(
         modifier = modifier
+            // Observe without consuming: nested buttons and scrolling retain their gestures.
+            .pointerInput(motion) {
+                try {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val finger = event.changes.firstOrNull { it.pressed }
+                            touching = finger != null
+                            if (finger != null && motion) {
+                                touch = Offset(
+                                    (finger.position.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f),
+                                    (finger.position.y / size.height.coerceAtLeast(1)).coerceIn(0f, 1f),
+                                )
+                            }
+                        }
+                    }
+                } finally {
+                    touching = false
+                }
+            }
+            .then(if (onClick != null) Modifier.clickable(source, null, role = Role.Button) { onClick() } else Modifier),
+    ) {
+        // Only this material layer deforms. Content and hit targets stay in the original layout.
+        Box(Modifier.matchParentSize()
+            .graphicsLayer {
+                scaleX = 1f - if (effects.deformation) press * .018f else 0f
+                scaleY = 1f - if (effects.deformation) press * .032f else 0f
+            }
             .opticalGlassRegion(
                 enabled = optical,
                 radius = radius.dp,
-                priority = opticalPriority,
-                refraction = if (emphasized) 5.4.dp else 3.8.dp,
-                dispersion = if (emphasized) 1.45.dp else .92.dp,
-                flow = if (emphasized) 2.1.dp else 1.45.dp,
-                bodyOpacity = if (emphasized) .12f else .085f,
+                priority = opticalPriority + if (touching || abs(press) > .01f) 100 else 0,
+                refraction = ((if (emphasized) 6f else 4f) + if (effects.deformation) press * 4f else 0f).dp,
+                dispersion = if (dark) 0.dp else if (emphasized) .65.dp else .35.dp,
+                flow = if (emphasized) 1.4.dp else .8.dp,
+                bodyOpacity = if (emphasized) .095f else .065f,
+                interaction = press,
+                touch = touch,
             )
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                translationY = depression
-            }
             .then(
                 if (shadowed) Modifier
                     .shadow(
-                        14.dp,
+                        8.dp,
                         shape,
                         ambientColor = SpectraColors.Ink.copy(if (dark) .16f else .055f),
                         spotColor = SpectraColors.Ink.copy(if (dark) .20f else .08f),
@@ -375,20 +412,61 @@ fun GlassPanel(
                     startX = size.width * .08f,
                     endX = size.width * .72f,
                 )
+                val energy = abs(press).coerceIn(0f, 1f)
+                val focus = Offset(touch.x * size.width, touch.y * size.height)
+                val sheen = Brush.radialGradient(
+                    listOf(Color.White.copy(alpha = energy * .22f), Color.Transparent),
+                    center = focus,
+                    radius = size.maxDimension.coerceAtLeast(1f) * .65f,
+                )
+                val rim = Brush.radialGradient(
+                    listOf(Color.White.copy(alpha = energy * .95f), Color.Transparent),
+                    center = focus,
+                    radius = size.maxDimension.coerceAtLeast(1f) * .8f,
+                )
+                // Sparse four-point glints belong to dark glass, never to the environment.
+                val stars = if (dark) listOf(
+                    Offset(size.width * .84f, 9.dp.toPx()),
+                    Offset(size.width * .12f, size.height - 9.dp.toPx()),
+                ).mapIndexed { index, center ->
+                    val distance = (center - focus).getDistance() / size.maxDimension.coerceAtLeast(1f)
+                    val glow = energy * (1f - distance).coerceAtLeast(0f)
+                    val length = (if (index == 0) 3.4.dp.toPx() else 2.4.dp.toPx()) * (1f + glow * 1.5f)
+                    val path = Path().apply {
+                        moveTo(center.x, center.y - length)
+                        lineTo(center.x + length * .20f, center.y - length * .20f)
+                        lineTo(center.x + length, center.y)
+                        lineTo(center.x + length * .20f, center.y + length * .20f)
+                        lineTo(center.x, center.y + length)
+                        lineTo(center.x - length * .20f, center.y + length * .20f)
+                        lineTo(center.x - length, center.y)
+                        lineTo(center.x - length * .20f, center.y - length * .20f)
+                        close()
+                    }
+                    Triple(path, center, glow)
+                } else emptyList()
                 onDrawWithContent {
                     drawContent()
+                    drawRect(sheen)
                     drawRoundRect(edge, cornerRadius = corner, style = Stroke(one))
+                    if (effects.rimLight) drawRoundRect(rim, cornerRadius = corner, style = Stroke(one * (1.2f + energy)))
                     drawLine(
                         brush = crown,
                         start = Offset(size.width * .08f, one * 1.1f),
                         end = Offset(size.width * .72f, one * 1.1f),
                         strokeWidth = one,
                     )
+                    stars.forEach { (path, center, glow) ->
+                        drawCircle(Color.White.copy(alpha = .06f + glow * .12f), 5.dp.toPx(), center)
+                        drawPath(path, Color.White.copy(alpha = .48f + glow * .48f))
+                    }
                 }
-            }
-            .then(if (onClick != null) Modifier.clickable(source, null) { onClick() } else Modifier),
-        content = content,
-    )
+            },
+        )
+        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
+            content()
+        }
+    }
 }
 
 /** App-owned modal surface. System permission and document-picker windows remain system styled. */
@@ -463,6 +541,32 @@ fun SpectraFullScreenDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
         SpectraBackdropBlurEffect(blurRadius = 32.dp)
+        val dialogView = LocalView.current
+        DisposableEffect(dialogView, dark) {
+            val window = (dialogView.parent as? DialogWindowProvider)?.window
+            if (window != null) {
+                // Android 15 can fit a floating dialog's frame to bars while Compose still
+                // measures it at full display height, placing the footer below that frame.
+                androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+                window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    window.attributes = window.attributes.apply {
+                        setFitInsetsTypes(0)
+                        layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                    }
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    window.attributes = window.attributes.apply {
+                        layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                    }
+                }
+                window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+                androidx.core.view.WindowInsetsControllerCompat(window, dialogView).apply {
+                    isAppearanceLightStatusBars = !dark
+                    isAppearanceLightNavigationBars = !dark
+                }
+            }
+            onDispose { }
+        }
         Box(
             modifier = Modifier.fillMaxSize().background(
                 Brush.linearGradient(
@@ -593,10 +697,10 @@ private fun spectraModalGlass(
 ): Color {
     val environmentTint = lerp(surface, accent, if (dark) .10f else .075f)
     val alpha = when {
-        dark && longForm -> .58f
-        dark -> .55f
-        longForm -> .56f
-        else -> .51f
+        dark && longForm -> .52f
+        dark -> .48f
+        longForm -> .46f
+        else -> .40f
     }
     return environmentTint.copy(alpha = alpha)
 }
@@ -862,13 +966,13 @@ fun CaesarSlidingSelector(
                     .background(
                         Brush.horizontalGradient(
                             if (dark) listOf(
-                                Color(0xFF171A21).copy(.94f),
-                                Color(0xFF343943).copy(.82f),
-                                Color(0xFF171A21).copy(.94f),
+                                Color(0xFF171A21).copy(.58f),
+                                Color(0xFF343943).copy(.36f),
+                                Color(0xFF171A21).copy(.58f),
                             ) else listOf(
-                                Color.White.copy(.82f),
-                                Color(0xFFE7E8EA).copy(.72f),
-                                Color.White.copy(.78f),
+                                Color.White.copy(.46f),
+                                Color(0xFFE7E8EA).copy(.20f),
+                                Color.White.copy(.38f),
                             ),
                         ),
                     )
@@ -950,24 +1054,20 @@ fun SpectraPrimaryButton(
     enabled: Boolean = true,
     icon: ImageVector? = null,
 ) {
-    val source = remember { MutableInteractionSource() }
-    val pressed by source.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) .98f else 1f, tween(110), label = "primary-press")
-    Button(
-        onClick = onClick,
-        enabled = enabled,
-        interactionSource = source,
-        modifier = modifier.scale(scale).defaultMinSize(minHeight = 52.dp),
-        shape = CircleShape,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary,
-        ),
-        border = BorderStroke(1.dp, Color.White.copy(.34f)),
+    GlassPanel(
+        modifier = modifier.defaultMinSize(minHeight = 52.dp).semantics {
+            if (!enabled) disabled()
+        },
+        radius = 50,
+        emphasized = true,
+        shadowed = false,
+        onClick = if (enabled) onClick else null,
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (icon != null) Icon(icon, null)
-            Text(text, style = MaterialTheme.typography.labelLarge)
+        Row(Modifier.align(Alignment.Center).padding(horizontal = 20.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            val ink = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else .38f)
+            if (icon != null) Icon(icon, null, tint = ink)
+            Text(text, style = MaterialTheme.typography.labelLarge, color = ink)
         }
     }
 }

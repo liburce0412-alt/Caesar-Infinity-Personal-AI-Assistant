@@ -253,7 +253,8 @@ fun CampusApp(
     }
     val authRepository = remember { AuthRepository(context.applicationContext) }
     val authState by authRepository.state.collectAsState()
-    val preferences by preferencesRepository.preferences.collectAsState(initial = UserPreferences())
+    val loadedPreferences by preferencesRepository.preferences.collectAsState(initial = null)
+    val preferences = loadedPreferences ?: UserPreferences()
     val timeViewModel: TimeViewModel = viewModel(factory = TimeViewModelFactory(dao, context.applicationContext, authState.userId.takeIf { authState.signedIn }))
     val aiViewModel: AiViewModel = viewModel(
         factory = AiViewModelFactory(
@@ -438,6 +439,7 @@ fun CampusApp(
         ProvideSpectraExperience(preferences.visualStyle) {
         ProvideSpectraTokens(
             styledTokens.copy(
+                glassEffects = preferences.glassEffects,
                 motion = if (preferences.motionMode == MotionMode.ON) styledTokens.motion else styledTokens.motion.disabled(),
             ),
         ) {
@@ -492,6 +494,8 @@ fun CampusApp(
                         ) { selected ->
                             when (selected) {
                             MainDestination.HOME -> HomeScreen(
+                                 collapsedComponents = preferences.collapsedComponents,
+                                 onExpandComponent = { id -> appScope.launch { preferencesRepository.setComponentCollapsed(id, false) } },
                                  records = records,
                                  displayName = profileState.profile.displayName,
                                  avatarUrl = profileState.profile.avatarUrl,
@@ -710,6 +714,9 @@ fun CampusApp(
                     )
                 }
             }
+            if (loadedPreferences?.onboardingCompleted == false) {
+                WelcomeGuide { appScope.launch { preferencesRepository.completeOnboarding() } }
+            }
         }
         }
         }
@@ -731,7 +738,7 @@ private fun MiFitnessUiStatus.toSettingsStatus(): MiFitnessSettingsStatus = when
 }
 
 @Composable
-private fun SpectraDock(
+internal fun SpectraDock(
     destination: MainDestination,
     motionEnabled: Boolean,
     onDestination: (MainDestination) -> Unit,
@@ -934,13 +941,13 @@ private fun LiquidDockSelection(
         }
         val bodyBrush = Brush.horizontalGradient(
             colors = if (dark) listOf(
-                Color(0xFF15171D).copy(if (fluid) .84f else .94f),
-                Color(0xFF373A42).copy(if (fluid) .72f else .84f),
-                Color(0xFF15171D).copy(if (fluid) .84f else .94f),
+                Color(0xFF15171D).copy(if (fluid) .50f else .58f),
+                Color(0xFF373A42).copy(if (fluid) .28f else .36f),
+                Color(0xFF15171D).copy(if (fluid) .50f else .58f),
             ) else listOf(
-                Color.White.copy(if (fluid) .70f else .86f),
-                Color(0xFFE6E7E9).copy(if (fluid) .58f else .78f),
-                Color.White.copy(if (fluid) .66f else .82f),
+                Color.White.copy(if (fluid) .38f else .46f),
+                Color(0xFFE6E7E9).copy(if (fluid) .16f else .24f),
+                Color.White.copy(if (fluid) .32f else .40f),
             ),
             startX = left,
             endX = right,

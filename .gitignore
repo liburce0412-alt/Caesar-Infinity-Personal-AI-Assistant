@@ -21,6 +21,8 @@ local.properties
 debug.keystore
 /my-upload-key.jks
 apps/admin/node_modules/
+apps/admin/.wrangler/
+*.tsbuildinfo
 apps/admin/dist/
 apps/admin/*.tsbuildinfo
 apps/admin/vite.config.js
@@ -33,6 +35,7 @@ supabase/.temp/
 # Local device/build investigation output. These folders can contain APKs,
 # decoded application data, screenshots, logs, and device-specific reports.
 /artifacts/
+/outputs/
 /.storage-analysis.json
 /.phone-storage-analysis.json
 /phone-storage-report.html

@@ -62,7 +62,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import com.campusai.core.designsystem.SpectraTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
@@ -152,6 +152,8 @@ fun HomeScreen(
     onRefreshHealth: () -> Unit,
     onSyncMiFitnessSteps: () -> Unit,
     contentPadding: PaddingValues,
+    collapsedComponents: Set<String> = emptySet(),
+    onExpandComponent: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     val layout = SpectraTheme.layout
@@ -218,6 +220,7 @@ fun HomeScreen(
             }
         }
         item {
+            CollapsibleComponent(OptionalComponent.TODAY, OptionalComponent.TODAY.name in collapsedComponents, { onExpandComponent(OptionalComponent.TODAY.name) }) {
             SpectraSurface(
                 modifier = Modifier.fillMaxWidth(),
                 mood = PageMood.GROWTH,
@@ -253,8 +256,10 @@ fun HomeScreen(
                     SpectraPrimaryButton("开始记录", onStartRecord, Modifier.fillMaxWidth(), icon = Icons.Rounded.Timer)
                 }
             }
+            }
         }
         item {
+            CollapsibleComponent(OptionalComponent.HEALTH, OptionalComponent.HEALTH.name in collapsedComponents, { onExpandComponent(OptionalComponent.HEALTH.name) }) {
             HealthOverviewCard(
                 state = healthState,
                 onRefresh = onRefreshHealth,
@@ -263,8 +268,10 @@ fun HomeScreen(
                     healthPermissionLauncher.launch(Intent(context, HealthPermissionActivity::class.java))
                 },
             )
+            }
         }
         item {
+            CollapsibleComponent(OptionalComponent.STREAK, OptionalComponent.STREAK.name in collapsedComponents, { onExpandComponent(OptionalComponent.STREAK.name) }) {
             SpectraSurface(
                 modifier = Modifier.fillMaxWidth(),
                 mood = PageMood.GROWTH,
@@ -287,9 +294,11 @@ fun HomeScreen(
                     }
                 }
             }
+            }
         }
-        item { SectionLabel("AI 洞察", "基于今天 ${todayRecords.size} 条记录") }
         item {
+            CollapsibleComponent(OptionalComponent.INSIGHTS, OptionalComponent.INSIGHTS.name in collapsedComponents, { onExpandComponent(OptionalComponent.INSIGHTS.name) }) {
+            SectionLabel("AI 洞察", "基于今天 ${todayRecords.size} 条记录")
             SpectraSurface(
                 modifier = Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onOpenAi),
                 mood = PageMood.GROWTH,
@@ -314,9 +323,11 @@ fun HomeScreen(
                     Text("让 Caesar∞ 基于这些记录整理下一步", style = MaterialTheme.typography.labelLarge, color = SpectraColors.Focus)
                 }
             }
+            }
         }
-        item { SectionLabel("消息", "与你有关") }
         item {
+            CollapsibleComponent(OptionalComponent.ANNOUNCEMENTS, OptionalComponent.ANNOUNCEMENTS.name in collapsedComponents, { onExpandComponent(OptionalComponent.ANNOUNCEMENTS.name) }) {
+            SectionLabel("消息", "与你有关")
             when (announcements) {
                 UiState.Loading -> SpectraStatePane(
                     kind = SpectraStateKind.LOADING,
@@ -373,6 +384,7 @@ fun HomeScreen(
                         }
                     }
                 }
+            }
             }
         }
     }
@@ -1247,9 +1259,9 @@ private fun SchedulePreviewDialog(initial:List<CourseDraft>,onDismiss:()->Unit,o
             LazyColumn(Modifier.fillMaxWidth().height(420.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
             item{Text("识别可能会把教室当作课程名。请在保存前快速检查；重复课程会自动跳过。",style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurface.copy(.62f))}
             items(drafts.size){index-> val item=drafts[index]; var startText by remember(index,item.startMinute){mutableStateOf(formatClock(item.startMinute))}; var endText by remember(index,item.endMinute){mutableStateOf(formatClock(item.endMinute))}; GlassPanel(Modifier.fillMaxWidth(),radius=16){Column(Modifier.padding(12.dp)){
-                OutlinedTextField(item.name,{value->drafts=drafts.toMutableList().also{it[index]=item.copy(name=value)}},label={Text("课程名")},singleLine=true,shape=RoundedCornerShape(12.dp))
+                SpectraTextField(item.name,{value->drafts=drafts.toMutableList().also{it[index]=item.copy(name=value)}},label={Text("课程名")},singleLine=true,shape=RoundedCornerShape(12.dp))
                 Spacer(Modifier.height(8.dp))
-                OutlinedTextField(item.location,{value->drafts=drafts.toMutableList().also{it[index]=item.copy(location=value)}},label={Text("教室（可选）")},singleLine=true,shape=RoundedCornerShape(12.dp))
+                SpectraTextField(item.location,{value->drafts=drafts.toMutableList().also{it[index]=item.copy(location=value)}},label={Text("教室（可选）")},singleLine=true,shape=RoundedCornerShape(12.dp))
                 Spacer(Modifier.height(8.dp))
                 com.campusai.core.designsystem.CaesarSlidingSelector(
                     options = (1..7).map { day -> "周${"一二三四五六日"[day - 1]}" },
@@ -1261,8 +1273,8 @@ private fun SchedulePreviewDialog(initial:List<CourseDraft>,onDismiss:()->Unit,o
                 )
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                    OutlinedTextField(startText,{value->startText=value;parseClockOrNull(value)?.let{minute->drafts=drafts.toMutableList().also{it[index]=item.copy(startMinute=minute)}}},label={Text("开始 HH:mm")},singleLine=true,shape=RoundedCornerShape(12.dp),modifier=Modifier.weight(1f),isError=parseClockOrNull(startText)==null)
-                    OutlinedTextField(endText,{value->endText=value;parseClockOrNull(value)?.let{minute->drafts=drafts.toMutableList().also{it[index]=item.copy(endMinute=minute)}}},label={Text("结束 HH:mm")},singleLine=true,shape=RoundedCornerShape(12.dp),modifier=Modifier.weight(1f),isError=parseClockOrNull(endText)==null)
+                    SpectraTextField(startText,{value->startText=value;parseClockOrNull(value)?.let{minute->drafts=drafts.toMutableList().also{it[index]=item.copy(startMinute=minute)}}},label={Text("开始 HH:mm")},singleLine=true,shape=RoundedCornerShape(12.dp),modifier=Modifier.weight(1f),isError=parseClockOrNull(startText)==null)
+                    SpectraTextField(endText,{value->endText=value;parseClockOrNull(value)?.let{minute->drafts=drafts.toMutableList().also{it[index]=item.copy(endMinute=minute)}}},label={Text("结束 HH:mm")},singleLine=true,shape=RoundedCornerShape(12.dp),modifier=Modifier.weight(1f),isError=parseClockOrNull(endText)==null)
                 }
                 if(item.endMinute<=item.startMinute) Text("结束时间必须晚于开始时间。",color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodyMedium)
                 TextButton(onClick={drafts=drafts.filterIndexed{i,_->i!=index}}){Text("移除这条")}
@@ -1302,8 +1314,8 @@ private fun AddTimeRecordDialog(initial: TimeRecord?, onDismiss: () -> Unit, onS
     SpectraDialog(onDismissRequest = onDismiss) {
             Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(if (initial == null) "补录时间" else "编辑记录", style = MaterialTheme.typography.headlineMedium)
-                OutlinedTextField(title, { title = it }, label = { Text("做了什么") }, singleLine = true, shape = RoundedCornerShape(12.dp))
-                OutlinedTextField(category, { category = it }, label = { Text("分类") }, singleLine = true, shape = RoundedCornerShape(12.dp))
+                SpectraTextField(title, { title = it }, label = { Text("做了什么") }, singleLine = true, shape = RoundedCornerShape(12.dp))
+                SpectraTextField(category, { category = it }, label = { Text("分类") }, singleLine = true, shape = RoundedCornerShape(12.dp))
                 Text("$minutes 分钟", style = MaterialTheme.typography.labelMedium)
                 Slider(
                     value = minutes.toFloat(),
@@ -1317,7 +1329,7 @@ private fun AddTimeRecordDialog(initial: TimeRecord?, onDismiss: () -> Unit, onS
                     valueRange = 5f..240f,
                     steps = 46,
                 )
-                OutlinedTextField(note, { note = it }, label = { Text("描述（可选）") }, shape = RoundedCornerShape(12.dp))
+                SpectraTextField(note, { note = it }, label = { Text("描述（可选）") }, shape = RoundedCornerShape(12.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onDismiss) { Text("取消") }
                     TextButton(enabled = title.isNotBlank(), onClick = { onSave(title.trim(), category.trim().ifEmpty { "其他" }, minutes.toLong(), note.trim()) }) { Text("保存") }

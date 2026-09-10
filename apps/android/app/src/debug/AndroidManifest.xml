@@ -2,6 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <activity
+            android:name="com.campusai.debug.PromoCaptureActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:permission="android.permission.DUMP"
+            android:process=":promo_capture" />
+        <activity
             android:name="com.campusai.debug.CaesarEvalActivity"
             android:excludeFromRecents="true"
             android:exported="true"

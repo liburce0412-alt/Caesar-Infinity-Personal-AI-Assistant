@@ -105,6 +105,7 @@ data class SpectraComponentSizes(
 
 @Immutable
 data class SpectraTokens(
+    val glassEffects: GlassEffects = GlassEffects(),
     val spacing: SpectraSpacing = SpectraSpacing(),
     val radii: SpectraRadii = SpectraRadii(),
     val motion: SpectraMotion = SpectraMotion(),
@@ -252,6 +253,7 @@ fun SpectraSurface(
     emphasized: Boolean = false,
     shadowed: Boolean = true,
     opticalPriority: Int = if (emphasized) 1 else 0,
+    onClick: (() -> Unit)? = null,
     contentPadding: PaddingValues = PaddingValues(SpectraTheme.tokens.spacing.md),
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -261,6 +263,7 @@ fun SpectraSurface(
         modifier = modifier,
         radius = tokens.radii.card.value.roundToInt(),
         emphasized = emphasized,
+        onClick = onClick,
         shadowed = shadowed && !fluid,
         opticalPriority = opticalPriority,
     ) {
@@ -316,17 +319,12 @@ fun SpectraAction(
     val dark = MaterialTheme.colorScheme.background.luminance() < .35f
     val isSelected = selected == true
     val visuallyEmphasized = isSelected || emphasized
-    val container = when {
-        visuallyEmphasized && dark -> SpectraColors.Ink.copy(alpha = if (enabled) .88f else .48f)
-        visuallyEmphasized -> Color.White.copy(alpha = if (enabled) .74f else .38f)
-        else -> Color.White.copy(alpha = if (enabled) (if (fluid) .18f else .28f) else .16f)
-    }
     val contentColor = when {
         visuallyEmphasized && dark -> Color.White.copy(alpha = if (enabled) 1f else .6f)
         visuallyEmphasized -> SpectraColors.Ink.copy(alpha = if (enabled) 1f else .54f)
         else -> MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) .78f else .42f)
     }
-    Surface(
+    GlassPanel(
         modifier = modifier
             .defaultMinSize(
                 minWidth = tokens.sizes.minimumTouchTarget,
@@ -339,27 +337,19 @@ fun SpectraAction(
                     stateDescription = if (it) "已选择" else "未选择"
                 }
                 if (!enabled) disabled()
-            }
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
-        shape = CircleShape,
-        color = container,
-        contentColor = contentColor,
-        border = BorderStroke(
-            1.dp,
-            if (visuallyEmphasized) {
-                Color.White.copy(alpha = if (dark) .34f else if (fluid) .52f else .78f)
-            } else {
-                MaterialTheme.colorScheme.onSurface.copy(alpha = if (fluid) .08f else if (dark) .16f else .12f)
             },
-        ),
+        radius = 50,
+        emphasized = visuallyEmphasized,
+        shadowed = false,
+        onClick = if (enabled) onClick else null,
     ) {
         Row(
             modifier = Modifier.padding(horizontal = tokens.spacing.md, vertical = tokens.spacing.xs),
             horizontalArrangement = Arrangement.spacedBy(tokens.spacing.xs),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (icon != null) Icon(icon, contentDescription = null, modifier = Modifier.size(tokens.sizes.icon))
-            Text(text, style = MaterialTheme.typography.labelMedium)
+            if (icon != null) Icon(icon, contentDescription = null, modifier = Modifier.size(tokens.sizes.icon), tint = contentColor)
+            Text(text, style = MaterialTheme.typography.labelMedium, color = contentColor)
         }
     }
 }
@@ -373,18 +363,21 @@ fun SpectraIconAction(
     enabled: Boolean = true,
 ) {
     val tokens = SpectraTheme.tokens
-    IconButton(
-        onClick = onClick,
-        enabled = enabled,
+    GlassPanel(
+        onClick = if (enabled) onClick else null,
         modifier = modifier
             .defaultMinSize(tokens.sizes.iconAction, tokens.sizes.iconAction)
-            .semantics { contentDescription = label },
-        colors = IconButtonDefaults.iconButtonColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = tokens.alpha.subtleSurface),
-            contentColor = MaterialTheme.colorScheme.onSurface,
-        ),
+            .semantics {
+                contentDescription = label
+                role = Role.Button
+                if (!enabled) disabled()
+            },
+        radius = 50,
+        shadowed = false,
     ) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(tokens.sizes.icon))
+        Icon(icon, contentDescription = null,
+            modifier = Modifier.align(Alignment.Center).size(tokens.sizes.icon),
+            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else .38f))
     }
 }
 

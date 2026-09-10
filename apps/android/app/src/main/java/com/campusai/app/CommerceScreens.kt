@@ -35,7 +35,7 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import com.campusai.core.designsystem.SpectraTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -257,7 +257,7 @@ private fun MessageThreadScreen(
             verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(layout.compactGap),
         ) {
-            OutlinedTextField(
+            SpectraTextField(
                 value = draft,
                 onValueChange = { draft = it.take(4000) },
                 modifier = Modifier.weight(1f),

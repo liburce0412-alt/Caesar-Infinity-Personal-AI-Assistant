@@ -65,7 +65,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.OutlinedTextField
+import com.campusai.core.designsystem.SpectraTextField
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -269,6 +269,8 @@ fun ProfileScreen(
                         healthAutomationEntrySubtitle(healthAutomationConfig),
                     ) { sheet = ProfileSheet.HEALTH_AUTOMATION }
                     DividerInset()
+                    SettingLink(Icons.Rounded.Palette, "组件与内容", "折叠暂时用不上的首页卡片") { sheet = ProfileSheet.COMPONENTS }
+                    DividerInset()
                     SettingLink(Icons.Rounded.Palette, "外观与体验", environmentLabel(preferences.environment)) { sheet = ProfileSheet.APPEARANCE }
                     DividerInset()
                     SettingLink(Icons.Rounded.Forum, if (unreadMessages > 0) "消息 · $unreadMessages 条未读" else "消息", onClick = if (authState.signedIn) onOpenMessages else onLogin)
@@ -306,6 +308,7 @@ fun ProfileScreen(
                             ProfileSheet.AI -> "AI 运行方式"
                             ProfileSheet.MI_FITNESS -> "Mi Fitness"
                             ProfileSheet.HEALTH_AUTOMATION -> "健康自动化"
+                            ProfileSheet.COMPONENTS -> "组件与内容"
                             ProfileSheet.APPEARANCE -> "外观与体验"
                             ProfileSheet.ACHIEVEMENTS -> "全部成就"
                         },
@@ -352,6 +355,7 @@ fun ProfileScreen(
                             onDisable = onDisableHealthAutomation,
                         )
                     }
+                    ProfileSheet.COMPONENTS -> item { ComponentSettings(preferences, repository) }
                     ProfileSheet.APPEARANCE -> item {
                         AppearanceSettings(preferences, repository) { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
                     }
@@ -367,7 +371,7 @@ fun ProfileScreen(
     }
 }
 
-private enum class ProfileSheet { EDIT, AI, MI_FITNESS, HEALTH_AUTOMATION, APPEARANCE, ACHIEVEMENTS }
+private enum class ProfileSheet { EDIT, AI, MI_FITNESS, HEALTH_AUTOMATION, APPEARANCE, COMPONENTS, ACHIEVEMENTS }
 
 /** Fixed presentation states keep credentials, responses, and raw errors out of the UI contract. */
 enum class MiFitnessSettingsStatus {
@@ -383,7 +387,7 @@ enum class MiFitnessSettingsStatus {
 }
 
 @Composable
-private fun ProfileHero(profile: CampusProfile, fallbackName: String, level: Int, xp: Long, onEdit: () -> Unit) {
+internal fun ProfileHero(profile: CampusProfile, fallbackName: String, level: Int, xp: Long, onEdit: () -> Unit) {
     val coverUrl = profile.coverUrl
     var coverLoaded by remember(coverUrl) { mutableStateOf(false) }
     val hasCover = coverUrl.isNotBlank() && coverLoaded
@@ -397,7 +401,7 @@ private fun ProfileHero(profile: CampusProfile, fallbackName: String, level: Int
         shadowed = false,
         onClick = onEdit,
     ) {
-        Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().clip(RoundedCornerShape(tokens.radii.hero))) {
             if (!hasCover) {
                 Box(Modifier.fillMaxSize().background(Color.White.copy(.06f)))
                 BrandMark(Modifier.align(Alignment.TopCenter).padding(top = 26.dp).size(100.dp))
@@ -515,8 +519,8 @@ private fun ProfileEditor(profile: CampusProfile, saving: Boolean, message: Stri
                 SpectraPrimaryButton("更换头像", { avatarPicker.launch("image/*") }, Modifier.weight(1f), enabled = !saving, icon = Icons.Rounded.CameraAlt)
                 SpectraPrimaryButton("更换背景", { coverPicker.launch("image/*") }, Modifier.weight(1f), enabled = !saving, icon = Icons.Rounded.Badge)
             }
-            OutlinedTextField(name, { name = it.take(32) }, Modifier.fillMaxWidth(), label = { Text("账号名称") }, singleLine = true, shape = RoundedCornerShape(12.dp))
-            OutlinedTextField(bio, { bio = it.take(160) }, Modifier.fillMaxWidth(), label = { Text("个人简介（可选）") }, minLines = 2, shape = RoundedCornerShape(12.dp), supportingText = { Text("${bio.length}/160") })
+            SpectraTextField(name, { name = it.take(32) }, Modifier.fillMaxWidth(), label = { Text("账号名称") }, singleLine = true, shape = RoundedCornerShape(12.dp))
+            SpectraTextField(bio, { bio = it.take(160) }, Modifier.fillMaxWidth(), label = { Text("个人简介（可选）") }, minLines = 2, shape = RoundedCornerShape(12.dp), supportingText = { Text("${bio.length}/160") })
             message?.let { Text(it, color = SpectraColors.Success, style = MaterialTheme.typography.bodyMedium) }
             error?.let { Text(it, color = SpectraColors.Error, style = MaterialTheme.typography.bodyMedium) }
             SpectraPrimaryButton(if (saving) "正在保存…" else "保存资料", { scope.launch { repository.updateText(userId, name, bio) } }, Modifier.fillMaxWidth(), enabled = !saving && name.trim().length in 2..32, icon = Icons.Rounded.Save)
@@ -577,6 +581,15 @@ private fun AppearanceSettings(preferences: UserPreferences, repository: UserPre
             SettingSelector(Icons.Rounded.Speed, "渲染质量", RenderQuality.entries, preferences.renderQuality, { qualityLabel(it) }) { onFeedback(); scope.launch { repository.setQuality(it) } }
             DividerInset()
             SettingSwitch(Icons.Rounded.MotionPhotosOff, "动态与折射", preferences.motionMode == MotionMode.ON) { onFeedback(); scope.launch { repository.setMotion(if (it) MotionMode.ON else MotionMode.OFF) } }
+            DividerInset()
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Text("玻璃交互", style = MaterialTheme.typography.titleMedium)
+                Text("各项可独立选择。极光和流星只在暗色模式下响应触摸；关闭总动效时，所有动画停止。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(.65f))
+            }
+            SettingSwitch(Icons.Rounded.MotionPhotosOff, "玻璃形变", preferences.glassEffects.deformation) { scope.launch { repository.setGlassDeformation(it) } }
+            SettingSwitch(Icons.Rounded.Palette, "跟手边框光", preferences.glassEffects.rimLight) { scope.launch { repository.setGlassRimLight(it) } }
+            SettingSwitch(Icons.Rounded.Palette, "极光 · 仅暗色", preferences.glassEffects.aurora) { scope.launch { repository.setGlassAurora(it) } }
+            SettingSwitch(Icons.Rounded.GraphicEq, "流星 · 仅暗色", preferences.glassEffects.meteors) { scope.launch { repository.setGlassMeteors(it) } }
             DividerInset()
             SettingSwitch(Icons.Rounded.GraphicEq, "计时完成声音", preferences.soundEnabled) { onFeedback(); scope.launch { repository.setSound(it) } }
         }
@@ -1062,7 +1075,7 @@ private fun MiFitnessCloudSettings(
                 )
             }
             HorizontalDivider(color = SpectraColors.Silver.copy(.68f))
-            OutlinedTextField(
+            SpectraTextField(
                 value = userId,
                 onValueChange = { userId = it },
                 modifier = Modifier.fillMaxWidth(),
@@ -1071,7 +1084,7 @@ private fun MiFitnessCloudSettings(
                 singleLine = true,
                 shape = RoundedCornerShape(12.dp),
             )
-            OutlinedTextField(
+            SpectraTextField(
                 value = passToken,
                 onValueChange = { passToken = it },
                 modifier = Modifier.fillMaxWidth(),
@@ -1599,7 +1612,7 @@ private fun LocalAiSettings(
                     personalKeyMessageIsError = false
                     availableModels = emptyList()
                 }
-                OutlinedTextField(
+                SpectraTextField(
                     value = baseUrl,
                     onValueChange = {
                         if (cloudProvider.baseUrlConfigurable) {
@@ -1673,7 +1686,7 @@ private fun LocalAiSettings(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(.66f),
                 )
-                OutlinedTextField(
+                SpectraTextField(
                     value = personalKey,
                     onValueChange = { personalKey = it; personalKeyMessage = null; personalKeyMessageIsError = false },
                     modifier = Modifier.fillMaxWidth(),
@@ -1719,7 +1732,7 @@ private fun LocalAiSettings(
                     modifier = Modifier.fillMaxWidth(),
                 )
 
-                OutlinedTextField(
+                SpectraTextField(
                     value = modelId,
                     onValueChange = { modelId = it; personalKeyMessage = null; personalKeyMessageIsError = false },
                     modifier = Modifier.fillMaxWidth(),

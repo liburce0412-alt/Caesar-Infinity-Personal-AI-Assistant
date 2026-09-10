@@ -101,7 +101,8 @@ ksp {
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
 // to match the convention used in Web projects.
 secrets {
-  propertiesFileName = ".env"
+  // Allow a migration candidate without changing the current production config.
+  propertiesFileName = providers.gradleProperty("campusBackendConfig").getOrElse(".env")
   defaultPropertiesFileName = ".env.example"
   // Only public Supabase client configuration may enter the APK. Everything
   // else in a developer's local .env (especially old provider keys) is ignored.

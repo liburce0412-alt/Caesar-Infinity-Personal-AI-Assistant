@@ -19,7 +19,7 @@
 </p>
 
 > [!IMPORTANT]
-> **`v2.0.1` 是 Caesar∞ 当前的源码与发布基线。** 当前重点适配 Xiaomi 15 Pro（Android 16、16 GB RAM）。模型权重、个人密钥、健康原始序列、设备日志和调试 APK 均不会进入仓库。请只从 [Releases](https://github.com/liburce0412-alt/Caesar-Infinity/releases) 下载同时提供 SHA-256 的正式 APK；如果某个版本没有 APK，表示发布签名尚未配置，请按源码构建，不要安装第三方重打包文件。
+> **`v2.0.1` 是 Caesar∞ 当前的版本基线。** 当前重点适配 Xiaomi 15 Pro（Android 16、16 GB RAM）。模型权重、个人密钥、健康原始序列、设备日志和 APK 均不会进入源码历史。请从 [Releases](https://github.com/liburce0412-alt/Caesar-Infinity/releases) 下载提供 SHA-256 的 APK，并核对发布说明中的签名与适用设备；体验版使用独立的预发布条目，明确标注 debug 签名。
 
 ## V2 是什么
 
@@ -49,15 +49,23 @@ Caesar∞ 把模型、工具、个人上下文和原生界面放进同一个受�
 | 动态界面 | 类型化 CaesarSurface Compose Renderer、A2UI 稳定子集适配 | 未知组件、任意 URI、代码、SQL 与未注册 `actionId` 会被拒绝 |
 | 受控联网 | Supabase 业务数据；直连 DeepSeek、Google Gemini 或 OpenAI-compatible Codex；云端 Agent 可调用只读 `web.search` | 搜索只发送查询词并读取 Bing RSS 摘要，不抓取结果网页、浏览器 Cookie 或任意 URL；没有 `web.open` |
 
-## 真机预览
+## 宣传海报
 
 <p align="center">
-  <a href="design/readme/caesar-home.png"><img src="design/readme/caesar-home.png" width="29%" alt="Caesar∞ 首页：行动记录与 Mi Fitness 今日健康" /></a>&nbsp;
-  <a href="design/readme/caesar-ai.png"><img src="design/readme/caesar-ai.png" width="29%" alt="Caesar∞ AI：Aurora 森屿环境与 DeepSeek" /></a>&nbsp;
-  <a href="design/readme/caesar-profile.png"><img src="design/readme/caesar-profile.png" width="29%" alt="Caesar∞ 个人页：年度节奏与成就" /></a>
+  <a href="design/readme/posters/health-automation.png"><img src="design/readme/posters/health-automation.png" width="47%" alt="健康自动化：让关心融入日常，当前仅在 App 前台运行" /></a>&nbsp;
+  <a href="design/readme/posters/health-permission.png"><img src="design/readme/posters/health-permission.png" width="47%" alt="明确授权：只发送必要的今日健康汇总" /></a>
 </p>
 
-<p align="center"><sub>首页 · 行动与健康　｜　AI · Aurora 森屿　｜　个人页 · 年度节奏</sub></p>
+<p align="center">
+  <a href="design/readme/posters/component-folding.png"><img src="design/readme/posters/component-folding.png" width="47%" alt="组件与内容：按需折叠首页卡片，设置重启后保留" /></a>&nbsp;
+  <a href="design/readme/posters/glass-environments.png"><img src="design/readme/posters/glass-environments.png" width="47%" alt="环境与玻璃：五种环境，经典与流体，浅色与深色" /></a>
+</p>
+
+<p align="center">
+  <a href="design/readme/posters/peace-and-wishes.png"><img src="design/readme/posters/peace-and-wishes.png" width="47%" alt="新的开始：世界和平逐字浮现，也给自己的心愿留一个位置" /></a>
+</p>
+
+<p align="center"><sub>沿用新版宣传片的五张海报，点击查看原图。画面使用开发候选与演示数据；健康自动化当前仅在 App 前台运行，演示画面不代表真实联网或发送记录。</sub></p>
 
 ## 从一句话到一次可靠执行
 

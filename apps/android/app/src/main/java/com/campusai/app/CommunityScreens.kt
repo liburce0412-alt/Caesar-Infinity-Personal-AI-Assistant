@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,9 +51,17 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import com.campusai.core.designsystem.SpectraTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Switch
+import androidx.compose.foundation.selection.toggleable
+import com.campusai.features.community.wishPriceCents
+import com.campusai.features.community.wishPriceValid
+import com.campusai.features.community.wishPriceLabel
+import com.campusai.features.community.wishRecordedTime
+import com.campusai.features.community.wishDateMessage
+import com.campusai.features.community.wishToRevisit
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -102,6 +111,7 @@ import com.campusai.features.community.CommunityComment
 import com.campusai.features.community.CommunityPost
 import com.campusai.features.community.MarketplaceListing
 import com.campusai.features.community.UploadImage
+import com.campusai.features.community.CommunityFeedScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -115,6 +125,7 @@ fun CampusScreen(
     viewModel: CampusViewModel,
     onLogin: () -> Unit,
     contentPadding: PaddingValues,
+    onScopeChange: (CommunityFeedScope) -> Unit = viewModel::selectPostsScope,
 ) {
     val ownerName = displayName.trim().ifBlank { "我" }.take(16)
     val layout = SpectraTheme.layout
@@ -122,6 +133,8 @@ fun CampusScreen(
     var composing by rememberSaveable { mutableStateOf(false) }
     var selectedPost by remember { mutableStateOf<CommunityPost?>(null) }
     var reportingPost by remember { mutableStateOf<CommunityPost?>(null) }
+    var editingPost by remember { mutableStateOf<CommunityPost?>(null) }
+    var managingPost by remember { mutableStateOf<CommunityPost?>(null) }
     SpectraPageScaffold(mood = PageMood.SOCIAL) {
         Box(Modifier.fillMaxSize()) {
             LazyColumn(
@@ -135,7 +148,7 @@ fun CampusScreen(
             ) {
             item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Column { Text("${ownerName}的树洞", style = MaterialTheme.typography.headlineLarge); Text("收起喧闹，留下对你真正重要的声音", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.6f)) }
+                    Column(Modifier.weight(1f)) { Text(if (state.postsScope == CommunityFeedScope.MINE) "${ownerName}的树洞" else "树洞广场", style = MaterialTheme.typography.headlineLarge); Text("收起喧闹，留下对你真正重要的声音", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.6f)) }
                     SpectraAction(
                         text = "刷新动态",
                         onClick = { if (signedIn) viewModel.refreshPosts() else onLogin() },
@@ -144,6 +157,9 @@ fun CampusScreen(
                         icon = Icons.Rounded.Refresh,
                     )
                 }
+            }
+            item {
+                CommunityScopeChoice(state.postsScope, onScopeChange, enabled = signedIn)
             }
             state.operationError?.let { message -> item { ErrorBar(message, PageMood.SOCIAL) { viewModel.clearOperationError() } } }
             when (val posts = state.posts) {
@@ -157,8 +173,8 @@ fun CampusScreen(
                 }
                 UiState.Empty -> item {
                     EmptyRemote(
-                        title = "树洞还很安静",
-                        detail = "已读取最新结果；你可以先写下第一句。",
+                        title = if (state.postsScope == CommunityFeedScope.MINE) "还没有写下自己的故事" else "公开广场还很安静",
+                        detail = if (state.postsScope == CommunityFeedScope.MINE) "你发表的私密与公开内容，都会留在这里。" else "审核通过的公开内容，会出现在这里。",
                         action = "写进树洞",
                         mood = PageMood.SOCIAL,
                     ) { composing = true }
@@ -166,7 +182,7 @@ fun CampusScreen(
                 is UiState.Error -> item { RemoteError(posts.message, signedIn, onLogin, viewModel::refreshPosts, PageMood.SOCIAL) }
                 is UiState.Data -> items(posts.value.size) { index ->
                     val post = posts.value[index]
-                    PostCard(post, { viewModel.toggleLike(post.id) }, { viewModel.toggleBookmark(post.id) }, { selectedPost = post; viewModel.openPostComments(post.id) }) { reportingPost = post }
+                    PostCard(post, { viewModel.toggleLike(post.id) }, { viewModel.toggleBookmark(post.id) }, { selectedPost = post; viewModel.openPostComments(post.id) }) { if (post.authorId == userId) managingPost = post else reportingPost = post }
                 }
                 is UiState.Offline -> {
                     item {
@@ -181,27 +197,47 @@ fun CampusScreen(
                     }
                     items(posts.value.size) { index ->
                         val post = posts.value[index]
-                        PostCard(post, { viewModel.toggleLike(post.id) }, { viewModel.toggleBookmark(post.id) }, { selectedPost = post; viewModel.openPostComments(post.id) }) { reportingPost = post }
+                        PostCard(post, { viewModel.toggleLike(post.id) }, { viewModel.toggleBookmark(post.id) }, { selectedPost = post; viewModel.openPostComments(post.id) }) { if (post.authorId == userId) managingPost = post else reportingPost = post }
                     }
                 }
             }
             }
-            FloatingActionButton(
+            GlassPanel(
                 onClick = { if (signedIn) composing = true else onLogin() },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(end = layout.pageHorizontalPadding, bottom = pageBottom + layout.compactGap),
-                shape = CircleShape,
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-            ) { Icon(Icons.Rounded.Add, "写进树洞") }
+                radius = 32,
+                emphasized = true,
+                opticalPriority = 2,
+            ) {
+                Row(Modifier.padding(horizontal = 20.dp).heightIn(min = 56.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Rounded.Add, null)
+                    Text("写进树洞", style = MaterialTheme.typography.labelLarge)
+                }
+            }
         }
     }
     if (composing) PostComposer(
         busy = state.operationBusy,
         onClose = { composing = false },
-        onPublish = { body, topic, anonymous, image -> viewModel.publishPost(userId, body, topic, anonymous, image) { composing = false } },
+        error = state.operationError,
+        onPublish = { body, topic, anonymous, image, isPublic, _ -> viewModel.publishPost(userId, body, topic, anonymous, image, isPublic) { composing = false } },
     )
+    editingPost?.let { post -> PostComposer(
+        busy = state.operationBusy, initial = post, error = state.operationError,
+        onClose = { editingPost = null },
+        onPublish = { body, topic, anonymous, image, isPublic, removeImage ->
+            viewModel.updatePost(post, body, topic, anonymous, image, removeImage, isPublic) { editingPost = null; selectedPost = null }
+        },
+    ) }
+    managingPost?.let { post -> OwnedContentDialog(
+        title = "管理树洞", busy = state.operationBusy, error = state.operationError,
+        onClose = { managingPost = null },
+        onEdit = { managingPost = null; selectedPost = null; editingPost = post; viewModel.clearOperationError() },
+        onDelete = { viewModel.deletePost(post.id) { managingPost = null; selectedPost = null } },
+    ) }
     selectedPost?.let { post ->
         PostDetails(
             post = post,
@@ -212,6 +248,7 @@ fun CampusScreen(
             onRetry = { viewModel.openPostComments(post.id) },
             onClearError = viewModel::clearOperationError,
             onPublish = { body, onSuccess -> viewModel.publishComment(post.id, body, onSuccess) },
+            onManage = if (post.authorId == userId) ({ managingPost = post }) else null,
         )
     }
     reportingPost?.let { post -> ReportDialog(
@@ -223,80 +260,28 @@ fun CampusScreen(
 }
 
 @Composable
-private fun PostCard(post: CommunityPost, onLike: () -> Unit, onBookmark: () -> Unit, onComments: () -> Unit, onReport: () -> Unit) {
-    val haptic = LocalHapticFeedback.current
-    SpectraSurface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .defaultMinSize(minHeight = 48.dp)
-            .clickable(role = Role.Button, onClick = onComments),
-        mood = PageMood.SOCIAL,
-        contentPadding = PaddingValues(0.dp),
-    ) {
-        Column {
-            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(44.dp).background(Color.White.copy(.12f), CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (post.avatarUrl.isNotBlank()) {
-                        AsyncImage(
-                            model = post.avatarUrl,
-                            contentDescription = "${post.author}的头像",
-                            modifier = Modifier.size(40.dp).clip(CircleShape),
-                            contentScale = ContentScale.Crop,
-                        )
-                    } else {
-                        BrandMark(Modifier.size(32.dp))
-                    }
+internal fun PostCard(post: CommunityPost, onLike: () -> Unit, onBookmark: () -> Unit, onComments: () -> Unit, onReport: () -> Unit) {
+    val hasImage = post.mediaUrl.isNotBlank()
+    GlassPanel(Modifier.fillMaxWidth().then(if (hasImage) Modifier.aspectRatio(1f) else Modifier), onClick = onComments) {
+        if (hasImage) {
+            AsyncImage(post.mediaUrl, "树洞图片", Modifier.matchParentSize().clip(RoundedCornerShape(24.dp)), contentScale = ContentScale.Crop)
+            Box(Modifier.matchParentSize().clip(RoundedCornerShape(24.dp)).background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.surface.copy(.88f), Color.Transparent, MaterialTheme.colorScheme.surface.copy(.96f)))))
+        }
+        Column(Modifier.then(if (hasImage) Modifier.fillMaxSize() else Modifier.fillMaxWidth()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(post.author, style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                    Text(remoteTime(post.createdAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(.6f))
                 }
-                Spacer(Modifier.size(10.dp))
-                Column(Modifier.weight(1f)) { Text(post.author, style = MaterialTheme.typography.titleMedium); Text(remoteTime(post.createdAt), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.52f)) }
-                SpectraIconAction(
-                    icon = Icons.Rounded.MoreHoriz,
-                    label = "举报或反馈",
-                    onClick = onReport,
-                )
+                SpectraIconAction(Icons.Rounded.MoreHoriz, "更多操作", onReport)
             }
-            if (post.mediaUrl.isNotBlank()) {
-                AsyncImage(model = post.mediaUrl, contentDescription = "帖子图片", modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(2.dp)))
-            }
-            Column(Modifier.padding(16.dp)) {
-                if (post.topic.isNotBlank()) Text("# ${post.topic}", style = MaterialTheme.typography.labelMedium, color = SpectraColors.Focus)
-                Spacer(Modifier.height(7.dp))
-                Text(post.body, style = MaterialTheme.typography.bodyLarge)
-                Spacer(Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    SpectraAction(
-                        text = post.likes.toString(),
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onLike()
-                        },
-                        selected = post.likedByMe,
-                        mood = PageMood.SOCIAL,
-                        icon = if (post.likedByMe) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                    )
-                    SpectraAction(
-                        text = if (post.comments == 0) "评论" else "${post.comments} 条评论",
-                        onClick = onComments,
-                        modifier = Modifier.weight(1f),
-                        mood = PageMood.SOCIAL,
-                        icon = Icons.Rounded.ChatBubbleOutline,
-                    )
-                    SpectraIconAction(
-                        icon = Icons.Rounded.BookmarkBorder,
-                        label = "收藏",
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onBookmark()
-                        },
-                    )
-                }
+            if (hasImage) Spacer(Modifier.weight(1f))
+            if (post.topic.isNotBlank()) Text("# ${post.topic}", style = MaterialTheme.typography.labelMedium, maxLines = 1)
+            Text(post.body, style = MaterialTheme.typography.bodyLarge, maxLines = if (hasImage) 2 else 3, overflow = TextOverflow.Ellipsis)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                SpectraAction(post.likes.toString(), onLike, selected = post.likedByMe, icon = if (post.likedByMe) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder)
+                SpectraAction(if (post.comments == 0) "评论" else "${post.comments} 条评论", onComments, Modifier.weight(1f), icon = Icons.Rounded.ChatBubbleOutline)
+                SpectraIconAction(Icons.Rounded.BookmarkBorder, "收藏", onBookmark)
             }
         }
     }
@@ -310,8 +295,8 @@ private fun ReportDialog(targetLabel: String, busy: Boolean, onDismiss: () -> Un
         Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("举报内容", style = MaterialTheme.typography.titleLarge)
             Text(targetLabel, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurface.copy(.58f))
-            OutlinedTextField(reason, { reason = it.take(120) }, label = { Text("原因") }, singleLine = true, shape = RoundedCornerShape(12.dp))
-            OutlinedTextField(details, { details = it.take(1000) }, label = { Text("补充说明") }, minLines = 3, shape = RoundedCornerShape(12.dp))
+            SpectraTextField(reason, { reason = it.take(120) }, label = { Text("原因") }, singleLine = true, shape = RoundedCornerShape(12.dp))
+            SpectraTextField(details, { details = it.take(1000) }, label = { Text("补充说明") }, minLines = 3, shape = RoundedCornerShape(12.dp))
             Text("举报会进入审核队列，不会直接删除内容。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.58f))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(enabled = !busy, onClick = onDismiss) { Text("取消") }
@@ -331,6 +316,7 @@ private fun PostDetails(
     onRetry: () -> Unit,
     onClearError: () -> Unit,
     onPublish: (String, () -> Unit) -> Unit,
+    onManage: (() -> Unit)? = null,
 ) {
     var draft by rememberSaveable(post.id) { mutableStateOf("") }
     SpectraFullScreenDialog(onDismissRequest = onDismiss, mood = PageMood.SOCIAL) {
@@ -368,7 +354,9 @@ private fun PostDetails(
                             emphasized = true,
                         ) {
                             if (post.topic.isNotBlank()) Text("# ${post.topic}", color = SpectraColors.Focus, style = MaterialTheme.typography.labelMedium)
+                            if (post.mediaUrl.isNotBlank()) AsyncImage(post.mediaUrl, "树洞图片", Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(20.dp)), contentScale = ContentScale.Crop)
                             Text(post.body, style = MaterialTheme.typography.bodyLarge)
+                            onManage?.let { SpectraAction("管理我的内容", it) }
                         }
                     }
                     error?.let { message -> item { ErrorBar(message, PageMood.SOCIAL, onClearError) } }
@@ -418,7 +406,7 @@ private fun PostDetails(
                         verticalAlignment = Alignment.Bottom,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        OutlinedTextField(
+                        SpectraTextField(
                             value = draft,
                             onValueChange = { draft = it.take(2000) },
                             modifier = Modifier.weight(1f),
@@ -439,7 +427,7 @@ private fun PostDetails(
 }
 
 @Composable
-private fun CommentRow(comment: CommunityComment) {
+internal fun CommentRow(comment: CommunityComment) {
     SpectraSurface(Modifier.fillMaxWidth(), mood = PageMood.SOCIAL) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(comment.author, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
@@ -461,11 +449,20 @@ fun MarketScreen(
     onLogin: () -> Unit,
     onOpenConversation: (String) -> Unit,
     contentPadding: PaddingValues,
+    onScopeChange: (CommunityFeedScope) -> Unit = viewModel::selectListingsScope,
 ) {
     val layout = SpectraTheme.layout
     val pageBottom = maxOf(contentPadding.calculateBottomPadding(), layout.pageBottomSpacing)
     var composing by rememberSaveable { mutableStateOf(false) }
     var selected by remember { mutableStateOf<MarketplaceListing?>(null) }
+    var editing by remember { mutableStateOf<MarketplaceListing?>(null) }
+    var managing by remember { mutableStateOf<MarketplaceListing?>(null) }
+    var completing by remember { mutableStateOf<MarketplaceListing?>(null) }
+    val visibleWishes = when (val listings = state.listings) {
+        is UiState.Data -> listings.value
+        is UiState.Offline -> listings.value
+        else -> emptyList()
+    }
     LaunchedEffect(signedIn, state.listingsRefreshing, state.listingsHasSynced, state.listingsSyncError) {
         if (signedIn && !state.listingsRefreshing && !state.listingsHasSynced && state.listingsSyncError == null) {
             viewModel.refreshListings()
@@ -487,7 +484,15 @@ fun MarketScreen(
             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                 Column { Text("心愿墙", style = MaterialTheme.typography.headlineLarge); Text("把想遇见、想交换的东西，认真留在这里", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.6f)); Spacer(Modifier.height(layout.compactGap)) }
             }
+            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                CommunityScopeChoice(state.listingsScope, onScopeChange, enabled = signedIn)
+            }
             state.operationError?.let { message -> item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) { ErrorBar(message, PageMood.COMMERCE) { viewModel.clearOperationError() } } }
+            wishToRevisit(visibleWishes, userId)?.let { memory ->
+                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                    WishRevisitCard(memory) { selected = memory; viewModel.openWishComments(memory.id) }
+                }
+            }
             when (val listings = state.listings) {
                 UiState.Loading -> item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                     MarketEmptyState(
@@ -499,6 +504,14 @@ fun MarketScreen(
                     )
                 }
                 UiState.Empty -> item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                    if (state.listingsHasSynced && !state.listingsRefreshing && state.listingsSyncError == null) {
+                        EmptyRemote(
+                            title = if (state.listingsScope == CommunityFeedScope.MINE) "给自己留一个心愿" else "还没有公开的心愿",
+                            detail = if (state.listingsScope == CommunityFeedScope.MINE) "你记下的心愿和实现后的留念，都会在这里。" else "审核通过的公开心愿，会在这里相遇。",
+                            action = "记下心愿",
+                            mood = PageMood.COMMERCE,
+                        ) { composing = true }
+                    } else {
                     MarketEmptyState(
                         refreshing = state.listingsRefreshing,
                         hasSynced = state.listingsHasSynced,
@@ -506,9 +519,10 @@ fun MarketScreen(
                         onPublish = { composing = true },
                         onRetry = viewModel::refreshListings,
                     )
+                    }
                 }
                 is UiState.Error -> item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) { RemoteError(listings.message, signedIn, onLogin, viewModel::refreshListings, PageMood.COMMERCE) }
-                is UiState.Data -> items(listings.value, key = { it.id }) { listing -> ListingCardView(listing) { selected = listing } }
+                is UiState.Data -> items(listings.value, key = { it.id }, span = { androidx.compose.foundation.lazy.grid.GridItemSpan(if (it.mediaUrl.isBlank()) maxLineSpan else 1) }) { listing -> ListingCardView(listing) { selected = listing; viewModel.openWishComments(listing.id) } }
                 is UiState.Offline -> {
                     item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                         SpectraStatePane(
@@ -520,31 +534,57 @@ fun MarketScreen(
                             onAction = viewModel::refreshListings,
                         )
                     }
-                    items(listings.value, key = { it.id }) { listing -> ListingCardView(listing) { selected = listing } }
+                    items(listings.value, key = { it.id }, span = { androidx.compose.foundation.lazy.grid.GridItemSpan(if (it.mediaUrl.isBlank()) maxLineSpan else 1) }) { listing -> ListingCardView(listing) { selected = listing; viewModel.openWishComments(listing.id) } }
                 }
             }
             }
-            FloatingActionButton(
+            GlassPanel(
                 onClick = { if (signedIn) composing = true else onLogin() },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(end = layout.pageHorizontalPadding, bottom = pageBottom + layout.compactGap),
-                shape = CircleShape,
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-            ) { Icon(Icons.Rounded.Sell, "贴一张心愿") }
+                radius = 32,
+                emphasized = true,
+                opticalPriority = 2,
+            ) {
+                Row(Modifier.padding(horizontal = 20.dp).heightIn(min = 56.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Rounded.Add, null)
+                    Text("记下心愿", style = MaterialTheme.typography.labelLarge)
+                }
+            }
         }
     }
     if (composing) ListingComposer(
         busy = state.operationBusy,
         onClose = { composing = false },
-        onPublish = { title, description, cents, location, image -> viewModel.publishListing(userId, title, description, cents, location, image) { composing = false } },
+        error = state.operationError,
+        onPublish = { title, description, cents, location, image, isPublic, _, date -> viewModel.publishListing(userId, title, description, cents, location, image, isPublic, date) { composing = false } },
     )
+    editing?.let { wish -> ListingComposer(
+        busy = state.operationBusy, initial = wish, error = state.operationError, onClose = { editing = null },
+        onPublish = { title, description, cents, location, image, isPublic, removeImage, date ->
+            viewModel.updateListing(wish, title, description, cents, location, image, removeImage, date, isPublic) { editing = null }
+        },
+    ) }
+    managing?.let { wish -> OwnedContentDialog(
+        title = "管理心愿", busy = state.operationBusy, error = state.operationError, onClose = { managing = null },
+        onEdit = { managing = null; selected = null; editing = wish; viewModel.clearOperationError() },
+        onDelete = { viewModel.deleteListing(wish.id) { managing = null; selected = null } },
+    ) }
+    completing?.let { wish -> WishCompletionDialog(wish, state.operationBusy, state.operationError,
+        onClose = { completing = null }, onSave = { note, image -> viewModel.completeWish(wish, note, image) { completing = null } }) }
     selected?.let { listing ->
         ListingDetails(
-            listing = listing,
+            listing = visibleWishes.firstOrNull { it.id == listing.id } ?: listing,
             ownListing = listing.sellerId == userId,
-            onClose = { selected = null },
+            onClose = { selected = null; viewModel.closeWishComments() },
+            comments = state.wishComments,
+            busy = state.operationBusy, error = state.operationError,
+            onRetry = { viewModel.openWishComments(listing.id) },
+            onComment = { body, success -> viewModel.publishWishComment(listing.id, body, success) },
+            onManage = { managing = visibleWishes.firstOrNull { it.id == listing.id } ?: listing; viewModel.clearOperationError() },
+            onComplete = { completing = visibleWishes.firstOrNull { it.id == listing.id } ?: listing; selected = null; viewModel.clearOperationError() },
             onFavorite = { viewModel.toggleFavorite(listing.id) },
             onContact = {
                 viewModel.openConversation(listing.sellerId, listing.id) { conversationId ->
@@ -557,84 +597,62 @@ fun MarketScreen(
 }
 
 @Composable
-private fun ListingCardView(listing: MarketplaceListing, onClick: () -> Unit) {
-    SpectraSurface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .defaultMinSize(minHeight = 48.dp)
-            .clickable(role = Role.Button, onClick = onClick),
-        mood = PageMood.COMMERCE,
-        contentPadding = PaddingValues(0.dp),
-    ) {
-        Column {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .background(Brush.linearGradient(listOf(SpectraColors.Warm.copy(.2f), SpectraColors.Rose.copy(.1f)))),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (listing.mediaUrl.isNotBlank()) {
-                    AsyncImage(
-                        model = listing.mediaUrl,
-                        contentDescription = "心愿图片",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop,
-                    )
-                } else {
-                    BrandMark(Modifier.size(64.dp))
-                }
-                if (listing.moderationStatus.isNotBlank() && listing.moderationStatus != "approved") {
-                    SpectraStatus(
-                        text = moderationText(listing.moderationStatus),
-                        modifier = Modifier.align(Alignment.TopStart).padding(10.dp),
-                        tone = SpectraStatusTone.WARNING,
-                    )
-                } else if (listing.status != "active") {
-                    SpectraStatus(
-                        text = statusText(listing.status),
-                        modifier = Modifier.align(Alignment.TopStart).padding(10.dp),
-                        tone = SpectraStatusTone.WARNING,
-                    )
-                }
-            }
-            Column(Modifier.padding(12.dp)) {
-                Text(listing.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(6.dp))
-                Text("¥${"%.2f".format(listing.priceCents / 100.0)}", fontFamily = Tomorrow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleLarge)
-                Text("由 ${listing.seller} 留下", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.55f), maxLines = 1)
-            }
+internal fun ListingCardView(listing: MarketplaceListing, onClick: () -> Unit) {
+    val hasImage = listing.mediaUrl.isNotBlank()
+    GlassPanel(Modifier.fillMaxWidth().then(if (hasImage) Modifier.aspectRatio(1f) else Modifier), onClick = onClick) {
+        if (hasImage) {
+            AsyncImage(listing.mediaUrl, "心愿图片", Modifier.matchParentSize().clip(RoundedCornerShape(24.dp)), contentScale = ContentScale.Crop)
+            Box(Modifier.matchParentSize().clip(RoundedCornerShape(24.dp)).background(Brush.verticalGradient(listOf(Color.Transparent, MaterialTheme.colorScheme.surface.copy(.96f)))))
+        }
+        Column(Modifier.then(if (hasImage) Modifier.fillMaxSize() else Modifier.fillMaxWidth()).padding(if (hasImage) 12.dp else 18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (hasImage) Spacer(Modifier.weight(1f))
+            Text(listing.title, maxLines = if (hasImage) 2 else 1, overflow = TextOverflow.Ellipsis,
+                style = if (hasImage) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge)
+            if (!hasImage && listing.description.isNotBlank()) Text(listing.description, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.76f))
+            if (listing.completedAt.isNotBlank()) Text("已实现 · 把这一刻留下", style = MaterialTheme.typography.labelMedium)
+            else if (!hasImage) wishDateMessage(listing.targetDate)?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary) }
+            Text(wishRecordedTime(listing.createdAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(.6f))
         }
     }
 }
 
 @Composable
-private fun PostComposer(busy: Boolean, onClose: () -> Unit, onPublish: (String, String, Boolean, UploadImage?) -> Unit) {
-    var body by rememberSaveable { mutableStateOf("") }
-    var topic by rememberSaveable { mutableStateOf("") }
-    var anonymous by rememberSaveable { mutableStateOf(false) }
+internal fun PostComposer(busy: Boolean, onClose: () -> Unit, onPublish: (String, String, Boolean, UploadImage?, Boolean, Boolean) -> Unit, initial: CommunityPost? = null, error: String? = null) {
+    var body by rememberSaveable(initial?.id) { mutableStateOf(initial?.body.orEmpty()) }
+    var topic by rememberSaveable(initial?.id) { mutableStateOf(initial?.topic.orEmpty()) }
+    var anonymous by rememberSaveable(initial?.id) { mutableStateOf(initial?.anonymous ?: false) }
+    var isPublic by rememberSaveable(initial?.id) { mutableStateOf(initial?.isPublic ?: false) }
+    var removeImage by rememberSaveable(initial?.id) { mutableStateOf(false) }
+    var preparing by remember { mutableStateOf(false) }
     var imageUri by remember { mutableStateOf<Uri?>(null) }
     var mediaError by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> imageUri = uri; mediaError = null }
     ComposerDialog(
-        title = "写进树洞",
-        subtitle = "一句真话就够了。当前编辑期间，内容只作为本机草稿存在。",
+        title = if (initial == null) "写进树洞" else "修改树洞",
+        subtitle = "一句真话就够了。完成后点击保存，未保存的修改不会提交。",
+        editing = initial != null,
         progress = "${body.length} / 5000",
-        primaryText = if (busy) "正在写入" else "放进树洞",
-        primaryEnabled = body.isNotBlank() && !busy,
-        onClose = onClose,
+        primaryText = if (busy || preparing) "正在保存" else "保存",
+        primaryEnabled = body.isNotBlank() && !busy && !preparing,
+        onClose = { if (!busy && !preparing) onClose() },
         mood = PageMood.SOCIAL,
         onPrimary = {
+            preparing = true
             scope.launch {
+                try {
                 val image = imageUri?.let { uri -> runCatching { readUploadImage(context, uri) }.getOrElse { mediaError = it.message ?: "图片无法读取。"; return@launch } }
-                onPublish(body, topic, anonymous, image)
+                onPublish(body, topic, anonymous, image, isPublic, removeImage)
+                } finally { preparing = false }
             }
         },
     ) {
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        VisibilityChoice(isPublic, { isPublic = it }, enabled = !busy && !preparing)
         ComposerSection("01", "此刻想说的", "先把句子写完，排版和话题可以稍后再想。", PageMood.SOCIAL) {
-            OutlinedTextField(
+            SpectraTextField(
                 value = body,
                 onValueChange = { body = it.take(5000) },
                 modifier = Modifier.fillMaxWidth().heightIn(min = 190.dp),
@@ -643,7 +661,7 @@ private fun PostComposer(busy: Boolean, onClose: () -> Unit, onPublish: (String,
             )
         }
         ComposerSection("02", "给它一个线索", "话题可选，日后回看时更容易找到。", PageMood.SOCIAL) {
-            OutlinedTextField(
+            SpectraTextField(
                 value = topic,
                 onValueChange = { topic = it.take(40) },
                 modifier = Modifier.fillMaxWidth(),
@@ -663,6 +681,9 @@ private fun PostComposer(busy: Boolean, onClose: () -> Unit, onPublish: (String,
             )
         }
         ComposerSection("04", "加一张画面", "不加图也可以发布。", PageMood.SOCIAL) {
+            if (imageUri == null && !removeImage && initial?.mediaUrl?.isNotBlank() == true) {
+                AsyncImage(initial.mediaUrl, "原来的树洞图片", Modifier.fillMaxWidth().height(140.dp), contentScale = ContentScale.Crop)
+            }
             MediaPickerSlot(
                 uri = imageUri,
                 emptyLabel = "从相册选一张图",
@@ -671,47 +692,61 @@ private fun PostComposer(busy: Boolean, onClose: () -> Unit, onPublish: (String,
                 onClick = { picker.launch("image/*") },
             )
             mediaError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            if (imageUri != null || (!removeImage && initial?.mediaPaths?.isNotEmpty() == true)) TextButton(onClick = { imageUri = null; removeImage = true }) { Text("移除图片") }
         }
-        Text("发布后会进入审核流程；重复点击不会创建多份内容。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.58f))
     }
 }
 
 @Composable
-private fun ListingComposer(busy: Boolean, onClose: () -> Unit, onPublish: (String, String, Int, String, UploadImage?) -> Unit) {
-    var title by rememberSaveable { mutableStateOf("") }
-    var description by rememberSaveable { mutableStateOf("") }
-    var price by rememberSaveable { mutableStateOf("") }
-    var location by rememberSaveable { mutableStateOf("") }
+internal fun ListingComposer(busy: Boolean, onClose: () -> Unit, onPublish: (String, String, Int?, String, UploadImage?, Boolean, Boolean, String) -> Unit, initial: MarketplaceListing? = null, error: String? = null) {
+    var title by rememberSaveable(initial?.id) { mutableStateOf(initial?.title.orEmpty()) }
+    var description by rememberSaveable(initial?.id) { mutableStateOf(initial?.description.orEmpty()) }
+    var price by rememberSaveable(initial?.id) { mutableStateOf(initial?.priceCents?.toBigDecimal()?.movePointLeft(2)?.toPlainString().orEmpty()) }
+    var location by rememberSaveable(initial?.id) { mutableStateOf(initial?.location.orEmpty()) }
+    var isPublic by rememberSaveable(initial?.id) { mutableStateOf(initial?.isPublic ?: false) }
+    var removeImage by rememberSaveable(initial?.id) { mutableStateOf(false) }
+    var targetDate by rememberSaveable(initial?.id) { mutableStateOf(initial?.targetDate.orEmpty()) }
+    var preparing by remember { mutableStateOf(false) }
     var imageUri by remember { mutableStateOf<Uri?>(null) }
     var mediaError by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> imageUri = uri; mediaError = null }
-    val cents = price.toBigDecimalOrNull()?.movePointRight(2)?.toInt()
+    val cents = wishPriceCents(price)
     ComposerDialog(
-        title = "贴一张心愿",
-        subtitle = "把东西、价格和碰面方式说清楚，一张心愿卡就完整了。",
-        progress = if (title.isBlank()) "草稿" else "已填 ${listOf(title, price, location).count { it.isNotBlank() }} / 3",
-        primaryText = if (busy) "正在写入" else "贴上心愿墙",
-        primaryEnabled = title.isNotBlank() && cents != null && cents >= 0 && !busy,
-        onClose = onClose,
+        title = if (initial == null) "贴一张心愿" else "修改心愿",
+        subtitle = "想做的事、想遇见的人，都可以成为心愿。价格和公开分享由你决定。",
+        editing = initial != null,
+        progress = if (title.isBlank()) "草稿" else "可以保存",
+        primaryText = if (busy || preparing) "正在保存" else "保存",
+        primaryEnabled = title.isNotBlank() && wishPriceValid(price) && !busy && !preparing,
+        onClose = { if (!busy && !preparing) onClose() },
         mood = PageMood.COMMERCE,
         onPrimary = {
+            preparing = true
             scope.launch {
+                try {
                 val image = imageUri?.let { uri -> runCatching { readUploadImage(context, uri) }.getOrElse { mediaError = it.message ?: "图片无法读取。"; return@launch } }
-                onPublish(title, description, cents ?: 0, location, image)
+                onPublish(title, description, cents, location, image, isPublic, removeImage, targetDate)
+                } finally { preparing = false }
             }
         },
     ) {
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        VisibilityChoice(isPublic, { isPublic = it }, enabled = !busy && !preparing)
+        WishDateChoice(targetDate, { targetDate = it }, enabled = !busy && !preparing)
         ComposerSection("01", "这是什么", "先给心愿一个一眼能懂的名字。", PageMood.COMMERCE) {
-            OutlinedTextField(title, { title = it.take(160) }, Modifier.fillMaxWidth(), label = { Text("心愿标题") }, singleLine = true, shape = RoundedCornerShape(18.dp))
-            OutlinedTextField(description, { description = it.take(2000) }, Modifier.fillMaxWidth().heightIn(min = 132.dp), label = { Text("细节（可选）") }, placeholder = { Text("状态、成色、期待的交换方式…") }, shape = RoundedCornerShape(18.dp))
+            SpectraTextField(title, { title = it.take(160) }, Modifier.fillMaxWidth(), label = { Text("心愿标题") }, singleLine = true, shape = RoundedCornerShape(18.dp))
+            SpectraTextField(description, { description = it.take(2000) }, Modifier.fillMaxWidth().heightIn(min = 132.dp), label = { Text("细节（可选）") }, placeholder = { Text("为什么想实现它、期待怎样的回应…") }, shape = RoundedCornerShape(18.dp))
         }
-        ComposerSection("02", "期待的条件", "价格是必填项，碰面地点可以稍后再补充。", PageMood.COMMERCE) {
-            OutlinedTextField(price, { price = it.filter { char -> char.isDigit() || char == '.' }.take(10) }, Modifier.fillMaxWidth(), label = { Text("期待价格（元）") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, shape = RoundedCornerShape(18.dp), isError = price.isNotBlank() && cents == null)
-            OutlinedTextField(location, { location = it.take(80) }, Modifier.fillMaxWidth(), label = { Text("碰面地点（可选）") }, singleLine = true, shape = RoundedCornerShape(18.dp))
+        ComposerSection("02", "期待的条件", "不涉及金钱就留空；填写 0 元表示明确免费。地点也可留空。", PageMood.COMMERCE) {
+            SpectraTextField(price, { price = it.filter { char -> char.isDigit() || char == '.' }.take(10) }, Modifier.fillMaxWidth(), label = { Text("期待价格（元，可选）") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, shape = RoundedCornerShape(18.dp), isError = !wishPriceValid(price), supportingText = { Text(if (wishPriceValid(price)) "可以留空" else "请输入有效金额，最多两位小数") })
+            SpectraTextField(location, { location = it.take(80) }, Modifier.fillMaxWidth(), label = { Text("碰面地点（可选）") }, singleLine = true, shape = RoundedCornerShape(18.dp))
         }
         ComposerSection("03", "让它被看见", "清楚的图片会让回应更准确。", PageMood.COMMERCE) {
+            if (imageUri == null && !removeImage && initial?.mediaUrl?.isNotBlank() == true) {
+                AsyncImage(initial.mediaUrl, "原来的心愿图片", Modifier.fillMaxWidth().height(140.dp), contentScale = ContentScale.Crop)
+            }
             MediaPickerSlot(
                 uri = imageUri,
                 emptyLabel = "选一张代表它的图",
@@ -720,8 +755,30 @@ private fun ListingComposer(busy: Boolean, onClose: () -> Unit, onPublish: (Stri
                 onClick = { picker.launch("image/*") },
             )
             mediaError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            if (imageUri != null || (!removeImage && initial?.mediaPaths?.isNotEmpty() == true)) TextButton(onClick = { imageUri = null; removeImage = true }) { Text("移除图片") }
         }
-        Text("心愿卡会先进入审核；审核通过前只有你和管理员可见。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.58f))
+    }
+}
+
+@Composable
+internal fun VisibilityChoice(isPublic: Boolean, onChange: (Boolean) -> Unit, enabled: Boolean = true) {
+    SpectraSurface(modifier = Modifier.fillMaxWidth(), emphasized = true) {
+        Row(
+            Modifier.fillMaxWidth().defaultMinSize(minHeight = 64.dp)
+                .toggleable(value = isPublic, enabled = enabled, role = Role.Switch, onValueChange = onChange),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("分享给其他人", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    if (isPublic) "审核通过后，其他人可以看到" else "想让别人看见时，再打开它",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(.68f),
+                )
+            }
+            Switch(checked = isPublic, onCheckedChange = null, enabled = enabled)
+        }
     }
 }
 
@@ -730,6 +787,7 @@ private fun ComposerDialog(
     title: String,
     subtitle: String,
     progress: String,
+    editing: Boolean,
     primaryText: String,
     primaryEnabled: Boolean,
     onClose: () -> Unit,
@@ -742,19 +800,19 @@ private fun ComposerDialog(
             Modifier
                 .fillMaxSize(),
         ) {
-            SpectraPageScaffold(mood = mood) {
-                Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
+            Box(Modifier.fillMaxSize()) {
+                Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    SpectraIconAction(icon = Icons.AutoMirrored.Rounded.ArrowBack, label = "收起草稿", onClick = onClose)
+                    SpectraIconAction(icon = Icons.AutoMirrored.Rounded.ArrowBack, label = "返回", onClick = onClose)
                     Column(Modifier.weight(1f)) {
                         Text(title, style = MaterialTheme.typography.headlineMedium)
-                        Text("未发布 · 本机草稿", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(.52f))
+                        Text(if (editing) "修改后保存生效" else "尚未保存", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(.52f))
                     }
-                    SpectraStatus(progress, tone = SpectraStatusTone.INFO)
+                    Text(progress, style = MaterialTheme.typography.labelSmall)
                 }
                 Column(
                     Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 10.dp),
@@ -770,7 +828,7 @@ private fun ComposerDialog(
                         emphasized = true,
                         contentPadding = PaddingValues(10.dp),
                     ) {
-                        SpectraPrimaryButton(primaryText, onPrimary, Modifier.fillMaxWidth(), enabled = primaryEnabled)
+                        SpectraPrimaryButton(primaryText, onPrimary, Modifier.fillMaxWidth().heightIn(min = 52.dp), enabled = primaryEnabled)
                     }
                 }
             }
@@ -827,65 +885,6 @@ private fun MediaPickerSlot(
                     Text("JPG · PNG · WEBP", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(.46f))
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun ListingDetails(
-    listing: MarketplaceListing,
-    ownListing: Boolean,
-    onClose: () -> Unit,
-    onFavorite: () -> Unit,
-    onContact: () -> Unit,
-) {
-    FullScreenDialog(listing.title, onClose, PageMood.COMMERCE) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .clip(RoundedCornerShape(24.dp))
-                .background(Brush.linearGradient(listOf(SpectraColors.Warm.copy(.22f), SpectraColors.Rose.copy(.1f)))),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (listing.mediaUrl.isNotBlank()) {
-                AsyncImage(
-                    model = listing.mediaUrl,
-                    contentDescription = "心愿图片",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                )
-            } else {
-                BrandMark(Modifier.size(96.dp))
-            }
-        }
-        Text("¥${"%.2f".format(listing.priceCents / 100.0)}", fontFamily = Tomorrow, style = MaterialTheme.typography.headlineLarge)
-        Text(listing.description.ifBlank { "留下这张心愿卡的人暂未填写更多细节。" }, style = MaterialTheme.typography.bodyLarge)
-        SpectraStatus(
-            text = listOf(
-                listing.seller,
-                listing.location,
-                statusText(listing.status),
-                listing.moderationStatus.takeIf { it.isNotBlank() && it != "approved" }?.let(::moderationText).orEmpty(),
-            ).filter { it.isNotBlank() }.joinToString(" · "),
-            tone = if (listing.status == "active") SpectraStatusTone.SUCCESS else SpectraStatusTone.WARNING,
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            SpectraAction(
-                text = "收藏",
-                onClick = onFavorite,
-                modifier = Modifier.weight(1f),
-                mood = PageMood.COMMERCE,
-                icon = Icons.Rounded.BookmarkBorder,
-            )
-            SpectraAction(
-                text = if (ownListing) "这是你的心愿" else "联系发布者",
-                onClick = if (ownListing) ({}) else onContact,
-                modifier = Modifier.weight(1f),
-                enabled = !ownListing,
-                mood = PageMood.COMMERCE,
-                icon = Icons.Rounded.ChatBubbleOutline,
-            )
         }
     }
 }
@@ -1085,10 +1084,9 @@ private fun ErrorBar(message: String, mood: PageMood, onDismiss: () -> Unit) {
 }
 
 private fun remoteTime(value: String): String = value.take(16).replace('T', ' ').ifBlank { "刚刚" }
-private fun statusText(value: String): String = when (value) { "active" -> "在售"; "reserved" -> "已预订"; "sold" -> "已售"; "withdrawn" -> "已下架"; "removed" -> "已移除"; else -> value }
 private fun moderationText(value: String): String = when (value) { "pending" -> "待审核"; "approved" -> "已通过"; "rejected" -> "未通过"; else -> value }
 
-private suspend fun readUploadImage(context: Context, uri: Uri): UploadImage = withContext(Dispatchers.IO) {
+internal suspend fun readUploadImage(context: Context, uri: Uri): UploadImage = withContext(Dispatchers.IO) {
     val contentType = context.contentResolver.getType(uri).orEmpty().lowercase()
     require(contentType in setOf("image/jpeg", "image/png", "image/webp")) { "只支持 JPEG、PNG 或 WebP 图片。" }
     val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("图片无法读取。")
