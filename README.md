@@ -60,7 +60,7 @@
 
 ### 下载与开始
 
-1. 前往 [Releases 下载 APK](https://github.com/liburce0412-alt/Caesar-Infinity/releases)，选择适合设备的发布条目，核对该条目的 SHA-256 和签名说明。当前版本基线与变更可查看 [v2.0.1 发布说明](docs/releases/v2.0.1.md)。
+1. 前往 [Releases 下载 APK](https://github.com/liburce0412-alt/Caesar-Infinity-Personal-AI-Assistant/releases)，选择适合设备的发布条目，核对该条目的 SHA-256 和签名说明。当前版本基线与变更可查看 [v2.0.1 发布说明](docs/releases/v2.0.1.md)。
 2. 如需注册账号，添加微信 **`jokerB0906L`** 获取内测邀请码，在注册页填写邮箱、密码、确认密码与邀请码。已有账号可直接登录；本地能力无需登录，树洞等账户功能需要登录。
 3. 在「我的 → AI 运行方式」选择本地模型并完成下载，或配置个人云端 Key 和可用模型。仓库中的默认 Codex 地址属于私人网络配置，体验者需自行配置可访问的兼容服务。
 4. 按上面的[第一次体验步骤](#第一次可以这样用)完成一次数据同步和对话；暂不接入健康数据时，可以先尝试普通对话。
@@ -69,7 +69,7 @@
 
 ### 帮助改进下一版
 
-欢迎通过 [Issues](https://github.com/liburce0412-alt/Caesar-Infinity/issues) 或内测联系渠道反馈：你想完成什么、卡在哪一步、手机型号与系统版本、App 版本，以及最终有没有得到有用的结果。再次使用后，也欢迎说说哪个功能让你愿意回来。
+欢迎通过 [Issues](https://github.com/liburce0412-alt/Caesar-Infinity-Personal-AI-Assistant/issues) 或内测联系渠道反馈：你想完成什么、卡在哪一步、手机型号与系统版本、App 版本，以及最终有没有得到有用的结果。再次使用后，也欢迎说说哪个功能让你愿意回来。
 
 公开反馈请遮住 API Key、小米账户凭据、邀请码与个人健康信息；无需上传原始健康记录。
 
