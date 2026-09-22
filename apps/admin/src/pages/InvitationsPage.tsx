@@ -1,16 +1,27 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { api, backend, currentAdmin } from '../lib/backend'
+import { api, backend, currentAdmin, inviteSchema } from '../lib/backend'
 import { Modal } from '../components/Modal'
 import { Symbol } from '../components/BrandMark'
 
-type Invite={id:string;code_hint:string;note:string;expires_at:string;status:string;used_email?:string;used_at?:string}
+import { useDebouncedValue } from '../lib/useDebouncedValue'
+
+type Invite={id:string;code_hint:string;note:string;expires_at:string;status:string;used_email?:string|null;used_at?:string|null}
 const labels:Record<string,string>={available:'可使用',used:'已使用',expired:'已过期',revoked:'已停用'}
 export function InvitationsPage(){
  const cache=useQueryClient(),[page,setPage]=useState(0),[status,setStatus]=useState(''),[search,setSearch]=useState(''),[create,setCreate]=useState(false),[count,setCount]=useState(5),[days,setDays]=useState(30),[note,setNote]=useState(''),[revoke,setRevoke]=useState<Invite|null>(null),[codes,setCodes]=useState<{code:string;expires_at:string;note:string}[]>([]),[copied,setCopied]=useState('')
+ const debouncedSearch=useDebouncedValue(search)
  const who=useQuery({queryKey:['admin-me'],queryFn:currentAdmin}),allowed=['admin','super_admin'].includes(who.data?.role||'')
- const query=useQuery({queryKey:['admin-invites',page,status,search],enabled:allowed,queryFn:()=>backend?api.get('/admin/records?'+new URLSearchParams({kind:'invites',page:String(page),status,search})):{rows:[],total:0}})
- const mutation=useMutation({mutationFn:async(action:'create'|'revoke')=>action==='create'?api.rpc('admin_create_invitations',{count,days,note}):api.rpc('admin_revoke_invitation',{target_invitation:revoke!.id}),onSuccess:async(result,action)=>{if(action==='create'){setCodes(result);setCreate(false);setCopied('')}else setRevoke(null);await cache.invalidateQueries({queryKey:['admin-invites']});await cache.invalidateQueries({queryKey:['admin-overview']})}})
+ const query=useQuery({queryKey:['admin-invites',page,status,debouncedSearch],enabled:allowed&&search===debouncedSearch,queryFn:async({signal})=>{
+   if(!backend)return {rows:[],total:0}
+   const result=await api.rpc('admin_records',{kind:'invites',page,status,search:debouncedSearch,ascending:false},signal)
+   return {rows:result.rows.map(row=>inviteSchema.parse(row)),total:result.total}
+ }})
+ const mutation=useMutation({mutationFn:async(action:'create'|'revoke')=>{
+   if(action==='create')return api.rpc('admin_create_invitations',{count,days,note})
+   await api.rpc('admin_revoke_invitation',{target_invitation:revoke!.id})
+   return []
+ },onSuccess:async(result,action)=>{if(action==='create'){setCodes(result);setCreate(false);setCopied('')}else setRevoke(null);await cache.invalidateQueries({queryKey:['admin-invites']});await cache.invalidateQueries({queryKey:['admin-overview']})}})
  const rows:Invite[]=query.data?.rows||[],total=query.data?.total||0
  return <>
   <div className="page-header"><div><div className="eyebrow">INVITATION / ACCESS</div><h1>邀请码</h1><p className="muted">每个邀请码仅能注册一个账号，可设置有效期并随时停用。</p></div><button className="pill-button primary" disabled={!backend||!allowed} onClick={()=>{mutation.reset();setCreate(true)}}><Symbol>add</Symbol>生成邀请码</button></div>

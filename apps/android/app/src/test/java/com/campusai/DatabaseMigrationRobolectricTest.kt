@@ -23,6 +23,22 @@ class DatabaseMigrationRobolectricTest {
     )
 
     @Test
+    fun `v8 to v9 preserves courses and isolates same hashes by account`() {
+        val name = "course-owner-migration"
+        helper.createDatabase(name, 8).apply {
+            execSQL("INSERT INTO course_schedules(name,weekday,startMinute,endMinute,location,teacher,weeks,sourceHash,userId,clientId,version,syncState,updatedAt) VALUES('Math',1,480,540,'','','','hash','alice','a',1,'synced',1)")
+            close()
+        }
+        helper.runMigrationsAndValidate(name, 9, true, CampusDatabase.MIGRATION_8_9).use { db ->
+            db.execSQL("INSERT INTO course_schedules(name,weekday,startMinute,endMinute,location,teacher,weeks,sourceHash,userId,clientId,version,syncState,updatedAt) VALUES('Math',1,480,540,'','','','hash','bob','b',1,'pending',1)")
+            db.query("SELECT COUNT(DISTINCT userId) FROM course_schedules WHERE sourceHash='hash'").use {
+                it.moveToFirst()
+                assertEquals(2, it.getInt(0))
+            }
+        }
+    }
+
+    @Test
     fun `v3 through v6 preserves user rows and creates agent governance tables`() {
         val databaseName = "caesar-robolectric-migration-3-6"
         helper.createDatabase(databaseName, 3).apply {

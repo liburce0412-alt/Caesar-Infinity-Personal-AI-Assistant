@@ -879,14 +879,7 @@ private fun buildAchievements(records: List<TimeRecord>, remoteStreak: Int): Lis
     )
 }
 
-private fun currentStreak(records: List<TimeRecord>): Int {
-    val dates = records.map { Instant.ofEpochMilli(it.startTime).atZone(ZoneId.systemDefault()).toLocalDate() }.toSet()
-    var day = java.time.LocalDate.now()
-    if (day !in dates) day = day.minusDays(1)
-    var count = 0
-    while (day in dates) { count++; day = day.minusDays(1) }
-    return count
-}
+private fun currentStreak(records: List<TimeRecord>): Int = com.campusai.core.model.TimeRecordCalendar.streak(records)
 
 @Composable
 private fun AchievementCard(item: AchievementUi, modifier: Modifier = Modifier.width(150.dp)) {

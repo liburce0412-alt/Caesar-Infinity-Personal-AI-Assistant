@@ -22,6 +22,8 @@ import java.time.OffsetDateTime
 import java.util.concurrent.TimeUnit
 
 class CampusSyncWorker(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
+    private var sessionToken: String = ""
+
     override suspend fun doWork(): Result {
         if (!SupabaseClient.isConfigured()) return Result.success()
         val auth = AuthRepository(applicationContext)
@@ -30,8 +32,11 @@ class CampusSyncWorker(appContext: Context, params: WorkerParameters) : Coroutin
         val userId = auth.state.value.userId
         if (userId.isBlank()) return Result.success()
 
+        sessionToken = SupabaseClient.userJwt
         val dao = CampusDatabase.getDatabase(applicationContext).campusDao()
         return runCatching {
+            dao.claimGuestTimeRecords(userId)
+            dao.claimGuestCourses(userId)
             val pushSucceeded = pushTimeEntries(dao, userId) and pushCourses(dao, userId)
             pullTimeEntries(dao, userId)
             pullCourses(dao, userId)
@@ -47,16 +52,28 @@ class CampusSyncWorker(appContext: Context, params: WorkerParameters) : Coroutin
         dao.getPendingTimeRecords(userId).forEach { local ->
             runCatching {
                 if (local.deletedAt != null) {
-                    if (local.remoteId == null) dao.purgeTimeRecord(local.id)
+                    if (local.remoteId == null) {
+                        // A previous upload may have committed even if its response was lost.
+                        // Check the immutable client ID before discarding its local deletion.
+                        val remote = findRemote("time_entries", userId, local.clientId)
+                        if (remote == null) complete = dao.purgeUnsentTime(local) && complete
+                        else {
+                            val deleted = !remote.isNull("deleted_at")
+                            complete = dao.acknowledgeTime(local, local.copy(remoteId = remote.getString("id"),
+                                clientId = remote.getString("client_id"), version = remote.getInt("version") + if (deleted) 0 else 1,
+                                syncState = if (deleted) "synced" else "pending")) && complete
+                            if (!deleted) complete = false
+                        }
+                    }
                     else {
-                        val response = SupabaseClient.rpc(
+                        val response = syncRpc(
                             "soft_delete_time_entry",
                             JSONObject().put("target_entry", local.remoteId).put("expected_version", (local.version - 1).coerceAtLeast(1)),
                         ).getOrThrow()
-                        dao.updateTimeRecord(local.copy(version = response.optString("value").toIntOrNull() ?: local.version, syncState = "synced"))
+                        complete = dao.acknowledgeTime(local, local.copy(version = response.optString("value").toIntOrNull() ?: local.version, syncState = "synced")) && complete
                     }
                 } else {
-                    val response = SupabaseClient.rpc(
+                    val response = syncRpc(
                         "sync_time_entry",
                         JSONObject()
                             .put("client_entry", local.clientId)
@@ -69,20 +86,20 @@ class CampusSyncWorker(appContext: Context, params: WorkerParameters) : Coroutin
                             .put("client_updated_at", Instant.ofEpochMilli(local.updatedAt).toString()),
                     ).getOrThrow()
                     val remote = response.getJSONObject("entry")
-                    dao.updateTimeRecord(
-                        local.copy(
-                            remoteId = remote.getString("id"),
-                            clientId = remote.getString("client_id"),
-                            version = remote.getInt("version"),
-                            userId = userId,
-                            syncState = if (response.optBoolean("conflict")) "conflict" else "synced",
+                    if (response.optBoolean("conflict")) {
+                        dao.applyRemoteTime(remoteTimeEntity(remote, userId), local)
+                        complete = false // A rescued local copy needs a subsequent push.
+                    } else {
+                        complete = dao.acknowledgeTime(local, local.copy(
+                            remoteId = remote.getString("id"), clientId = remote.getString("client_id"),
+                            version = remote.getInt("version"), syncState = "synced",
                             updatedAt = remoteTime(remote, "updated_at"),
-                        ),
-                    )
+                        )) && complete
+                    }
                 }
             }.onFailure {
                 complete = false
-                dao.updateTimeRecord(local.copy(syncState = "failed"))
+                dao.failTime(local)
             }
         }
         return complete
@@ -93,16 +110,28 @@ class CampusSyncWorker(appContext: Context, params: WorkerParameters) : Coroutin
         dao.getPendingCourseSchedules(userId).forEach { local ->
             runCatching {
                 if (local.deletedAt != null) {
-                    if (local.remoteId == null) dao.purgeCourseSchedule(local.id)
+                    if (local.remoteId == null) {
+                        // A previous upload may have committed even if its response was lost.
+                        // Check the immutable client ID before discarding its local deletion.
+                        val remote = findRemote("course_schedules", userId, local.clientId, local.sourceHash)
+                        if (remote == null) complete = dao.purgeUnsentCourse(local) && complete
+                        else {
+                            val deleted = !remote.isNull("deleted_at")
+                            complete = dao.acknowledgeCourse(local, local.copy(remoteId = remote.getString("id"),
+                                clientId = remote.getString("client_id"), version = remote.getInt("version") + if (deleted) 0 else 1,
+                                syncState = if (deleted) "synced" else "pending")) && complete
+                            if (!deleted) complete = false
+                        }
+                    }
                     else {
-                        val response = SupabaseClient.rpc(
+                        val response = syncRpc(
                             "delete_course_schedule",
                             JSONObject().put("target_course", local.remoteId).put("expected_version", (local.version - 1).coerceAtLeast(1)),
                         ).getOrThrow()
-                        dao.updateCourseSchedule(local.copy(version = response.optString("value").toIntOrNull() ?: local.version, syncState = "synced"))
+                        complete = dao.acknowledgeCourse(local, local.copy(version = response.optString("value").toIntOrNull() ?: local.version, syncState = "synced")) && complete
                     }
                 } else {
-                    val response = SupabaseClient.rpc(
+                    val response = syncRpc(
                         "sync_course_schedule",
                         JSONObject()
                             .put("client_course", local.clientId)
@@ -118,71 +147,57 @@ class CampusSyncWorker(appContext: Context, params: WorkerParameters) : Coroutin
                             .put("client_updated_at", Instant.ofEpochMilli(local.updatedAt).toString()),
                     ).getOrThrow()
                     val remote = response.getJSONObject("entry")
-                    dao.updateCourseSchedule(
-                        local.copy(
-                            remoteId = remote.getString("id"),
-                            clientId = remote.getString("client_id"),
-                            version = remote.getInt("version"),
-                            userId = userId,
-                            syncState = if (response.optBoolean("conflict")) "conflict" else "synced",
+                    if (response.optBoolean("conflict")) {
+                        dao.applyRemoteCourse(remoteCourseEntity(remote, userId), local)
+                        complete = false // A rescued local copy needs a subsequent push.
+                    } else {
+                        complete = dao.acknowledgeCourse(local, local.copy(
+                            remoteId = remote.getString("id"), clientId = remote.getString("client_id"),
+                            version = remote.getInt("version"), syncState = "synced",
                             updatedAt = remoteTime(remote, "updated_at"),
-                        ),
-                    )
+                        )) && complete
+                    }
                 }
             }.onFailure {
                 complete = false
-                dao.updateCourseSchedule(local.copy(syncState = "failed"))
+                dao.failCourse(local)
             }
         }
         return complete
     }
 
-    private suspend fun pullTimeEntries(dao: CampusDao, userId: String) {
-        val rows = SupabaseClient.restGet(
-            "time_entries",
-            mapOf(
-                "select" to "id,user_id,client_id,title,category,description,starts_at,ends_at,version,updated_at,deleted_at",
-                "user_id" to "eq.$userId",
-                "order" to "updated_at.asc",
-                "limit" to "1000",
-            ),
-        ).getOrThrow()
-        repeat(rows.length()) { index ->
-            val remote = rows.getJSONObject(index)
-            val clientId = remote.getString("client_id")
-            val existing = dao.getTimeRecordByClientId(clientId)
-            if (!remote.isNull("deleted_at")) {
-                if (existing?.syncState == "synced" && existing.deletedAt == null) dao.purgeTimeRecord(existing.id)
-            } else if (existing == null) {
-                dao.insertTimeRecord(remoteTimeEntity(remote, userId))
-            } else if (existing.syncState == "synced") {
-                dao.updateTimeRecord(remoteTimeEntity(remote, userId).copy(id = existing.id))
-            }
+    private suspend fun findRemote(table: String, userId: String, clientId: String, sourceHash: String? = null): JSONObject? {
+        suspend fun find(field: String, value: String): JSONObject? {
+            val rows = SupabaseClient.restGet(table, mapOf("select" to "id,client_id,version,deleted_at",
+                "user_id" to "eq.$userId", field to "eq.$value", "limit" to "1"), sessionToken = sessionToken).getOrThrow()
+            check(sessionToken == SupabaseClient.userJwt) { "登录状态已变化" }
+            return rows.optJSONObject(0)
         }
+        return find("client_id", clientId) ?: sourceHash?.let { find("source_hash", it) }
     }
 
-    private suspend fun pullCourses(dao: CampusDao, userId: String) {
-        val rows = SupabaseClient.restGet(
-            "course_schedules",
-            mapOf(
-                "select" to "id,user_id,client_id,name,weekday,start_minute,end_minute,location,teacher,weeks,source_hash,version,updated_at,deleted_at",
-                "user_id" to "eq.$userId",
-                "order" to "updated_at.asc",
-                "limit" to "1000",
-            ),
-        ).getOrThrow()
-        repeat(rows.length()) { index ->
-            val remote = rows.getJSONObject(index)
-            val clientId = remote.getString("client_id")
-            val existing = dao.getCourseByClientId(clientId) ?: dao.getCourseBySourceHash(remote.getString("source_hash"))
-            if (!remote.isNull("deleted_at")) {
-                if (existing?.syncState == "synced" && existing.deletedAt == null) dao.purgeCourseSchedule(existing.id)
-            } else if (existing == null) {
-                dao.insertCourseSchedules(listOf(remoteCourseEntity(remote, userId)))
-            } else if (existing.syncState == "synced") {
-                dao.updateCourseSchedule(remoteCourseEntity(remote, userId).copy(id = existing.id))
-            }
-        }
+    private suspend fun syncRpc(name: String, payload: JSONObject): kotlin.Result<JSONObject> {
+        check(sessionToken == SupabaseClient.userJwt) { "登录状态已变化" }
+        val result = SupabaseClient.rpc(name, payload, sessionToken)
+        check(sessionToken == SupabaseClient.userJwt) { "登录状态已变化" }
+        return result
+    }
+
+    private suspend fun pullTimeEntries(dao: CampusDao, userId: String) = pullPages("time_entries", userId) {
+        dao.applyRemoteTime(remoteTimeEntity(it, userId))
+    }
+
+    private suspend fun pullCourses(dao: CampusDao, userId: String) = pullPages("course_schedules", userId) {
+        dao.applyRemoteCourse(remoteCourseEntity(it, userId))
+    }
+
+    private suspend fun pullPages(table: String, userId: String, apply: suspend (JSONObject) -> Unit) {
+        walkSyncPages(fetch = { cursor ->
+            check(sessionToken == SupabaseClient.userJwt) { "登录状态已变化" }
+            val rows = SupabaseClient.restGet(table, syncPageParameters(userId, cursor), sessionToken = sessionToken).getOrThrow()
+            check(sessionToken == SupabaseClient.userJwt) { "登录状态已变化" }
+            List(rows.length()) { rows.getJSONObject(it) }
+        }, apply = apply)
     }
 
     private fun remoteTimeEntity(item: JSONObject, userId: String) = TimeRecordEntity(
@@ -198,6 +213,7 @@ class CampusSyncWorker(appContext: Context, params: WorkerParameters) : Coroutin
         version = item.getInt("version"),
         syncState = "synced",
         updatedAt = remoteTime(item, "updated_at"),
+        deletedAt = if (item.isNull("deleted_at")) null else remoteTime(item, "deleted_at"),
     )
 
     private fun remoteCourseEntity(item: JSONObject, userId: String) = CourseScheduleEntity(
@@ -215,6 +231,7 @@ class CampusSyncWorker(appContext: Context, params: WorkerParameters) : Coroutin
         version = item.getInt("version"),
         syncState = "synced",
         updatedAt = remoteTime(item, "updated_at"),
+        deletedAt = if (item.isNull("deleted_at")) null else remoteTime(item, "deleted_at"),
     )
 
     private fun remoteTime(item: JSONObject, key: String): Long = OffsetDateTime.parse(item.getString(key)).toInstant().toEpochMilli()

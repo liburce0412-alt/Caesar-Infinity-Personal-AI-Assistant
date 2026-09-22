@@ -40,7 +40,7 @@ object CampusAiTaskFactory {
             CampusAiTask.WEEK_SUMMARY -> "只使用 analysisStatements 写本周分析，然后把 suggestedActionPlan 作为下一步启动计划逐项复述。不得加入 statements 之外的原因、成绩或效率判断；对象、时长、休息和剩余差距必须照用计划字段。"
             CampusAiTask.MONTH_SUMMARY -> "只使用 analysisStatements 写本月分析，然后把 suggestedActionPlan 作为下一步启动计划逐项复述。不得加入 statements 之外的原因、成绩或效率判断；对象、时长、休息和剩余差距必须照用计划字段。"
             CampusAiTask.STRUCTURED_ADVICE -> "只使用 analysisStatements 说明依据，再逐项复述 suggestedActionPlan。不得增加 statements 或计划之外的判断、对象或数字。"
-            CampusAiTask.SCHEDULE_CLEANUP -> "整理课程表字段并指出已计算出的时间冲突；缺失字段标记待确认，不得猜测。"
+            CampusAiTask.SCHEDULE_CLEANUP -> "整理课程表字段并指出时间重叠；周次、授课日期和排除日期未核实时只能标记待确认，不能断言实际上课冲突。"
             CampusAiTask.TIME_PARSE -> "把自然语言记录整理成标题、分类、开始时间、结束时间和时长；只使用解析器已确定的字段，未知项标记待确认。"
         }
         val context = JSONObject().put("task", task.name.lowercase())
@@ -76,13 +76,13 @@ object CampusAiTaskFactory {
         }
         val start = startDate.atStartOfDay(zone).toInstant().toEpochMilli()
         val end = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
-        val selected = records.filter { it.startTime in start until end }
+        val selected = com.campusai.core.model.TimeRecordCalendar.inRange(records, when (range) { LearningRange.TODAY -> "日"; LearningRange.WEEK -> "周"; LearningRange.MONTH -> "月" }, Instant.ofEpochMilli(nowMillis), zone)
         val total = selected.sumOf(TimeRecord::durationMinutes)
         val days = generateSequence(startDate) { it.plusDays(1) }.takeWhile { !it.isAfter(today) }.toList()
         val perDay = days.map { day ->
             val dayStart = day.atStartOfDay(zone).toInstant().toEpochMilli()
             val dayEnd = day.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
-            day to selected.filter { it.startTime in dayStart until dayEnd }.sumOf(TimeRecord::durationMinutes)
+            day to selected.filter { it.durationMinutes > 0 && it.endTime > it.startTime && it.endTime in dayStart until dayEnd }.sumOf(TimeRecord::durationMinutes)
         }
         val daily = JSONArray(perDay.map { (day, minutes) ->
             JSONObject().put("date", day.toString()).put("minutes", minutes)
@@ -99,10 +99,10 @@ object CampusAiTaskFactory {
         val target = when (range) { LearningRange.TODAY -> 240L; LearningRange.WEEK -> 1_680L; LearningRange.MONTH -> 7_200L }
         val goalRateBasisPoints = if (target == 0L) 0L else total * 10_000L / target
         val activeDays = perDay.count { (_, minutes) -> minutes > 0L }
-        val currentStreakDays = perDay.asReversed().takeWhile { (_, minutes) -> minutes > 0L }.size
+        val currentStreakDays = com.campusai.core.model.TimeRecordCalendar.streak(records, Instant.ofEpochMilli(nowMillis), zone)
         val peak = perDay.maxByOrNull { (_, minutes) -> minutes }?.takeIf { (_, minutes) -> minutes > 0L }
         val trend = computeTrend(perDay.map { (_, minutes) -> minutes })
-        val recentRecords = selected.sortedByDescending(TimeRecord::startTime).take(6)
+        val recentRecords = selected.sortedWith(compareByDescending<TimeRecord> { it.endTime }.thenByDescending { it.startTime }).take(6)
         val subjectNames = recentRecords.map(TimeRecord::title).filter(String::isNotBlank).distinct()
         val allowedActionSubjects = JSONArray(subjectNames)
         val recentEntries = JSONArray(recentRecords.map { record ->
@@ -110,7 +110,7 @@ object CampusAiTaskFactory {
                 .put("title", record.title.take(80))
                 .put("category", record.category.take(40))
                 .put("durationMinutes", record.durationMinutes)
-                .put("date", Instant.ofEpochMilli(record.startTime).atZone(zone).toLocalDate().toString())
+                .put("date", Instant.ofEpochMilli(record.endTime).atZone(zone).toLocalDate().toString())
         })
         val remainingTarget = (target - total).coerceAtLeast(0L)
         val fallbackSubject = when (range) {
@@ -221,12 +221,10 @@ object CampusAiTaskFactory {
             .put("startMinute", course.startMinute).put("endMinute", course.endMinute)
             .put("location", course.location).put("teacher", course.teacher).put("weeks", course.weeks)
         })
-        val conflicts = JSONArray()
-        courses.forEachIndexed { index, first -> courses.drop(index + 1).forEach { second ->
-            if (first.weekday == second.weekday && first.startMinute < second.endMinute && second.startMinute < first.endMinute) {
-                conflicts.put(JSONObject().put("first", first.name).put("second", second.name).put("weekday", first.weekday))
-            }
-        } }
+        val conflicts = JSONArray(com.campusai.features.schedule.potentialCourseOverlaps(courses).map { (first, second) ->
+            JSONObject().put("first", first.name).put("second", second.name).put("weekday", first.weekday)
+                .put("requiresDateReview", true).put("basis", "time_overlap_only")
+        })
         return JSONObject().put("courses", rows).put("computedConflicts", conflicts)
     }
 

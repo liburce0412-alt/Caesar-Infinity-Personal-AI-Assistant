@@ -21,7 +21,6 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.util.Calendar
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -139,107 +138,28 @@ class TimeViewModel(private val dao: CampusDao, private val appContext: Context,
         }
     }
 
+    fun deleteCourse(id: Int) {
+        viewModelScope.launch {
+            dao.softDeleteCourseSchedule(id)
+            CampusSyncScheduler.enqueue(appContext)
+        }
+    }
+
     fun importCourses(courses: List<CourseSchedule>, onComplete: (inserted: Int, duplicates: Int) -> Unit) {
         viewModelScope.launch {
             val owner = activeUser.value
-            val results = dao.insertCourseSchedules(courses.map { CourseScheduleEntity.fromDomain(it, owner) })
+            val results = dao.importCourseSchedules(courses.map { CourseScheduleEntity.fromDomain(it, owner) })
             val inserted = results.count { it != -1L }
             if (inserted > 0) CampusSyncScheduler.enqueue(appContext)
             onComplete(inserted, results.size - inserted)
         }
     }
 
-    // Helper functions for stats
-    fun getStatsToday(records: List<TimeRecord>): Long {
-        val todayStart = getStartOfToday()
-        return records.filter { it.startTime >= todayStart }.sumOf { it.durationMinutes }
-    }
+    fun getStatsToday(records: List<TimeRecord>): Long = com.campusai.core.model.TimeRecordCalendar.inRange(records, "日").sumOf { it.durationMinutes }
+    fun getStatsThisWeek(records: List<TimeRecord>): Long = com.campusai.core.model.TimeRecordCalendar.inRange(records, "周").sumOf { it.durationMinutes }
+    fun getStatsThisMonth(records: List<TimeRecord>): Long = com.campusai.core.model.TimeRecordCalendar.inRange(records, "月").sumOf { it.durationMinutes }
+    fun getStreakDays(records: List<TimeRecord>): Int = com.campusai.core.model.TimeRecordCalendar.streak(records)
 
-    fun getStatsThisWeek(records: List<TimeRecord>): Long {
-        val weekStart = getStartOfWeek()
-        return records.filter { it.startTime >= weekStart }.sumOf { it.durationMinutes }
-    }
-
-    fun getStatsThisMonth(records: List<TimeRecord>): Long {
-        val monthStart = getStartOfMonth()
-        return records.filter { it.startTime >= monthStart }.sumOf { it.durationMinutes }
-    }
-
-    fun getStreakDays(records: List<TimeRecord>): Int {
-        if (records.isEmpty()) return 0
-        val uniqueDays = records.map {
-            val cal = Calendar.getInstance()
-            cal.timeInMillis = it.startTime
-            cal.set(Calendar.HOUR_OF_DAY, 0)
-            cal.set(Calendar.MINUTE, 0)
-            cal.set(Calendar.SECOND, 0)
-            cal.set(Calendar.MILLISECOND, 0)
-            cal.timeInMillis
-        }.distinct().sortedDescending()
-
-        if (uniqueDays.isEmpty()) return 0
-
-        var streak = 0
-        var currentDayCal = Calendar.getInstance()
-        currentDayCal.set(Calendar.HOUR_OF_DAY, 0)
-        currentDayCal.set(Calendar.MINUTE, 0)
-        currentDayCal.set(Calendar.SECOND, 0)
-        currentDayCal.set(Calendar.MILLISECOND, 0)
-        var checkTimestamp = currentDayCal.timeInMillis
-
-        // If today or yesterday is present, start checking streak
-        val hasToday = uniqueDays.contains(checkTimestamp)
-        val hasYesterday = uniqueDays.contains(checkTimestamp - 86400000L)
-
-        if (!hasToday && !hasYesterday) return 0
-
-        if (hasToday) {
-            streak++
-            var prevDay = checkTimestamp - 86400000L
-            while (uniqueDays.contains(prevDay)) {
-                streak++
-                prevDay -= 86400000L
-            }
-        } else {
-            // Yesterday is the start
-            streak++
-            var prevDay = checkTimestamp - 2 * 86400000L
-            while (uniqueDays.contains(prevDay)) {
-                streak++
-                prevDay -= 86400000L
-            }
-        }
-        return streak
-    }
-
-    private fun getStartOfToday(): Long {
-        val cal = Calendar.getInstance()
-        cal.set(Calendar.HOUR_OF_DAY, 0)
-        cal.set(Calendar.MINUTE, 0)
-        cal.set(Calendar.SECOND, 0)
-        cal.set(Calendar.MILLISECOND, 0)
-        return cal.timeInMillis
-    }
-
-    private fun getStartOfWeek(): Long {
-        val cal = Calendar.getInstance()
-        cal.set(Calendar.HOUR_OF_DAY, 0)
-        cal.set(Calendar.MINUTE, 0)
-        cal.set(Calendar.SECOND, 0)
-        cal.set(Calendar.MILLISECOND, 0)
-        cal.set(Calendar.DAY_OF_WEEK, cal.firstDayOfWeek)
-        return cal.timeInMillis
-    }
-
-    private fun getStartOfMonth(): Long {
-        val cal = Calendar.getInstance()
-        cal.set(Calendar.HOUR_OF_DAY, 0)
-        cal.set(Calendar.MINUTE, 0)
-        cal.set(Calendar.SECOND, 0)
-        cal.set(Calendar.MILLISECOND, 0)
-        cal.set(Calendar.DAY_OF_MONTH, 1)
-        return cal.timeInMillis
-    }
 }
 
 private fun TimeRecord.dailyGoalSnapshot(zoneId: ZoneId = ZoneId.systemDefault()): DailyGoalSnapshotEntity? {

@@ -103,7 +103,7 @@ fun allowedOrderTransitions(status: String, isBuyer: Boolean): List<String> = wh
     else -> emptyList()
 }
 
-class CampusRepository {
+open class CampusRepository {
     suspend fun loadAnnouncements(): Result<List<CampusAnnouncement>> = friendly(
         SupabaseClient.restGet(
             table = "announcements",
@@ -191,14 +191,32 @@ class CampusRepository {
         JSONObject().put("target_post", postId),
     ).map { it.optString("value").toBooleanStrictOrNull() ?: false }
 
+    private suspend fun loadCommentPages(table: String, parameters: Map<String, String>): Result<JSONArray> = runCatching {
+        val result = JSONArray()
+        val token = SupabaseClient.userJwt
+        var cursor: Pair<String, String>? = null
+        while (true) {
+            val query = parameters.toMutableMap()
+            cursor?.let { (time, id) -> query["or"] = "(created_at.gt.$time,and(created_at.eq.$time,id.gt.$id))" }
+            val page = SupabaseClient.restGet(table, query, sessionToken = token).getOrThrow()
+            if (page.length() == 0) break
+            repeat(page.length()) { result.put(page.getJSONObject(it)) }
+            val last = page.getJSONObject(page.length() - 1)
+            val next = last.getString("created_at") to last.getString("id")
+            check(next != cursor) { "评论分页未前进" }
+            cursor = next
+        }
+        result
+    }
+
     suspend fun loadComments(postId: String): Result<List<CommunityComment>> = friendly(
-        SupabaseClient.restGet(
+        loadCommentPages(
             table = "comments",
             parameters = mapOf(
                 "select" to "id,post_id,author_id,body,moderation_status,created_at,author:profiles!comments_author_id_fkey(display_name)",
                 "post_id" to "eq.$postId",
                 "deleted_at" to "is.null",
-                "order" to "created_at.asc",
+                "order" to "created_at.asc,id.asc",
                 "limit" to "200",
             ),
         ).map { rows -> List(rows.length()) { index -> parseComment(rows.getJSONObject(index)) } },
@@ -347,9 +365,9 @@ class CampusRepository {
     )
 
     suspend fun loadWishComments(listingId: String): Result<List<CommunityComment>> = friendly(
-        SupabaseClient.restGet("listing_comments", mapOf(
+        loadCommentPages("listing_comments", mapOf(
             "select" to "id,listing_id,author_id,body,moderation_status,created_at,author:profiles!listing_comments_author_id_fkey(display_name)",
-            "listing_id" to "eq.$listingId", "deleted_at" to "is.null", "order" to "created_at.asc", "limit" to "200",
+            "listing_id" to "eq.$listingId", "deleted_at" to "is.null", "order" to "created_at.asc,id.asc", "limit" to "200",
         )).map { rows -> List(rows.length()) { index -> parseComment(rows.getJSONObject(index)) } },
     )
 
@@ -374,7 +392,7 @@ class CampusRepository {
         },
     )
 
-    suspend fun loadConversations(): Result<List<ConversationSummary>> = friendly(
+    open suspend fun loadConversations(): Result<List<ConversationSummary>> = friendly(
         SupabaseClient.rpcArray("list_conversation_summaries").map { rows ->
             List(rows.length()) { index ->
                 rows.getJSONObject(index).let { item ->
@@ -393,20 +411,12 @@ class CampusRepository {
         },
     )
 
-    suspend fun loadMessages(conversationId: String): Result<List<CampusMessage>> = friendly(
-        SupabaseClient.restGet(
-            table = "messages",
-            parameters = mapOf(
-                "select" to "id,conversation_id,sender_id,body,created_at",
-                "conversation_id" to "eq.$conversationId",
-                "deleted_at" to "is.null",
-                "order" to "created_at.asc",
-                "limit" to "200",
-            ),
-        ).map { rows -> List(rows.length()) { index -> parseMessage(rows.getJSONObject(index)) } },
+    open suspend fun loadMessages(conversationId: String, before: CampusMessage? = null): Result<List<CampusMessage>> = friendly(
+        SupabaseClient.restGet("messages", messagePageParameters(conversationId, before))
+            .map { rows -> List(rows.length()) { index -> parseMessage(rows.getJSONObject(index)) }.reversed() },
     )
 
-    suspend fun sendMessage(conversationId: String, body: String): Result<CampusMessage> = friendly(
+    open suspend fun sendMessage(conversationId: String, body: String): Result<CampusMessage> = friendly(
         SupabaseClient.rpc(
             "send_message",
             JSONObject()
@@ -416,8 +426,8 @@ class CampusRepository {
         ).map(::parseMessage),
     )
 
-    suspend fun markConversationRead(conversationId: String): Result<Unit> = friendly(
-        SupabaseClient.rpc("mark_conversation_read", JSONObject().put("target_conversation", conversationId)).map { Unit },
+    open suspend fun markConversationRead(conversationId: String, messageId: String): Result<Unit> = friendly(
+        SupabaseClient.rpc("mark_conversation_read_through", JSONObject().put("target_conversation", conversationId).put("last_message", messageId)).map { Unit },
     )
 
     suspend fun loadOrders(): Result<List<MarketplaceOrder>> = friendly(

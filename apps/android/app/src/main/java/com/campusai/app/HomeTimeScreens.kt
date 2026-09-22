@@ -1,5 +1,8 @@
 package com.campusai.app
 
+
+import com.campusai.core.model.TimeRecordCalendar
+
 import android.content.Intent
 import android.media.AudioManager
 import android.media.ToneGenerator
@@ -36,6 +39,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material3.FilterChip
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Bolt
@@ -160,8 +164,7 @@ fun HomeScreen(
     val healthPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         onRefreshHealth()
     }
-    val todayStart = remember { startOfToday() }
-    val todayRecords = records.filter { it.startTime >= todayStart }
+    val todayRecords = TimeRecordCalendar.inRange(records, "日")
     val totalMinutes = todayRecords.sumOf { it.durationMinutes }
     val goalMinutes = 240L
     val streak = remember(records) { calculateStreak(records) }
@@ -1045,11 +1048,8 @@ fun TimeScreen(
             importing = false
         }
     }
-    val filtered = when (range) {
-        "周" -> records.filter { it.startTime >= System.currentTimeMillis() - 7 * 86_400_000L }
-        "月" -> records.filter { it.startTime >= System.currentTimeMillis() - 31 * 86_400_000L }
-        else -> records.filter { it.startTime >= startOfToday() }
-    }
+    val currentDay = java.time.LocalDate.now()
+    val filtered = remember(records, range, currentDay) { TimeRecordCalendar.inRange(records, range) }
     var deleted by remember { mutableStateOf<TimeRecord?>(null) }
     LaunchedEffect(deleted) {
         val record = deleted ?: return@LaunchedEffect
@@ -1110,25 +1110,7 @@ fun TimeScreen(
             }
             if (courses.isNotEmpty()) {
                 item {
-                    val today = ((java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_WEEK) + 5) % 7) + 1
-                    val todayCourses = courses.filter { it.weekday == today }
-                    SpectraSurface(
-                        modifier = Modifier.fillMaxWidth(),
-                        mood = PageMood.FOCUS,
-                        contentPadding = PaddingValues(0.dp),
-                    ) {
-                        Column(Modifier.padding(16.dp)) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("今日课程", style = MaterialTheme.typography.titleLarge); Text("${todayCourses.size} 节", style = MaterialTheme.typography.labelMedium) }
-                            Spacer(Modifier.height(8.dp))
-                            if (todayCourses.isEmpty()) Text("今天没有已导入的课程。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.58f))
-                            todayCourses.forEach { course ->
-                                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text("%02d:%02d".format(course.startMinute/60,course.startMinute%60), style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(58.dp))
-                                    Column { Text(course.name, style = MaterialTheme.typography.titleMedium); if(course.location.isNotBlank()) Text(course.location, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.56f)) }
-                                }
-                            }
-                        }
-                    }
+                    CourseTimetable(courses = courses, onRemove = { viewModel.deleteCourse(it.id) }, onImport = { showImport = true })
                 }
             } else {
                 item {
@@ -1168,18 +1150,11 @@ fun TimeScreen(
                     )
                 }
             } else {
-                item {
-                    SpectraSurface(
-                        modifier = Modifier.fillMaxWidth(),
-                        mood = PageMood.FOCUS,
-                        contentPadding = PaddingValues(0.dp),
-                    ) {
-                        Column {
-                            filtered.forEachIndexed { index, record ->
-                                TimelineRow(record, onEdit = { editing = record }, onDelete = { viewModel.deleteTimeRecord(record.id); deleted = record })
-                                if (index < filtered.lastIndex) HorizontalDivider(Modifier.padding(start = 62.dp), color = SpectraColors.Silver.copy(.65f))
-                            }
-                        }
+                items(filtered, key = { "time-${it.id}" }) { record ->
+                    SpectraSurface(modifier = Modifier.fillMaxWidth(), mood = PageMood.FOCUS,
+                        contentPadding = PaddingValues(0.dp)) {
+                        TimelineRow(record, onEdit = { editing = record },
+                            onDelete = { viewModel.deleteTimeRecord(record.id); deleted = record })
                     }
                 }
             }
@@ -1232,60 +1207,6 @@ fun TimeScreen(
             importDrafts = null
         },
     ) }
-}
-
-@Composable
-private fun ImportScheduleSourceDialog(onDismiss:()->Unit,onImage:()->Unit,onIcs:()->Unit,onManual:()->Unit) {
-    SpectraDialog(onDismissRequest=onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement=Arrangement.spacedBy(10.dp)){
-            Text("导入课程表", style = MaterialTheme.typography.titleLarge)
-            Text("最省事的方式是截取一张完整课程表。识别结果会先进入可编辑预览。", style=MaterialTheme.typography.bodyMedium)
-            SpectraPrimaryButton("选择课程表截图",onImage,Modifier.fillMaxWidth(),icon=Icons.Rounded.ImageSearch)
-            TextButton(onClick=onIcs,Modifier.fillMaxWidth()){Text("从 .ics 日历文件导入")}
-            TextButton(onClick=onManual,Modifier.fillMaxWidth()){Text("手动添加课程")}
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick=onDismiss){Text("取消")}
-            }
-        }
-    }
-}
-
-@Composable
-private fun SchedulePreviewDialog(initial:List<CourseDraft>,onDismiss:()->Unit,onConfirm:(List<CourseDraft>)->Unit) {
-    var drafts by remember(initial){mutableStateOf(initial)}
-    SpectraDialog(onDismissRequest=onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("确认课程（${drafts.size}）", style = MaterialTheme.typography.titleLarge)
-            LazyColumn(Modifier.fillMaxWidth().height(420.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
-            item{Text("识别可能会把教室当作课程名。请在保存前快速检查；重复课程会自动跳过。",style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurface.copy(.62f))}
-            items(drafts.size){index-> val item=drafts[index]; var startText by remember(index,item.startMinute){mutableStateOf(formatClock(item.startMinute))}; var endText by remember(index,item.endMinute){mutableStateOf(formatClock(item.endMinute))}; GlassPanel(Modifier.fillMaxWidth(),radius=16){Column(Modifier.padding(12.dp)){
-                SpectraTextField(item.name,{value->drafts=drafts.toMutableList().also{it[index]=item.copy(name=value)}},label={Text("课程名")},singleLine=true,shape=RoundedCornerShape(12.dp))
-                Spacer(Modifier.height(8.dp))
-                SpectraTextField(item.location,{value->drafts=drafts.toMutableList().also{it[index]=item.copy(location=value)}},label={Text("教室（可选）")},singleLine=true,shape=RoundedCornerShape(12.dp))
-                Spacer(Modifier.height(8.dp))
-                com.campusai.core.designsystem.CaesarSlidingSelector(
-                    options = (1..7).map { day -> "周${"一二三四五六日"[day - 1]}" },
-                    selectedIndex = (item.weekday - 1).coerceIn(0, 6),
-                    onSelected = { selectedDay ->
-                        drafts = drafts.toMutableList().also { it[index] = item.copy(weekday = selectedDay + 1) }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                    SpectraTextField(startText,{value->startText=value;parseClockOrNull(value)?.let{minute->drafts=drafts.toMutableList().also{it[index]=item.copy(startMinute=minute)}}},label={Text("开始 HH:mm")},singleLine=true,shape=RoundedCornerShape(12.dp),modifier=Modifier.weight(1f),isError=parseClockOrNull(startText)==null)
-                    SpectraTextField(endText,{value->endText=value;parseClockOrNull(value)?.let{minute->drafts=drafts.toMutableList().also{it[index]=item.copy(endMinute=minute)}}},label={Text("结束 HH:mm")},singleLine=true,shape=RoundedCornerShape(12.dp),modifier=Modifier.weight(1f),isError=parseClockOrNull(endText)==null)
-                }
-                if(item.endMinute<=item.startMinute) Text("结束时间必须晚于开始时间。",color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodyMedium)
-                TextButton(onClick={drafts=drafts.filterIndexed{i,_->i!=index}}){Text("移除这条")}
-            }}}
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick=onDismiss){Text("取消")}
-                TextButton(enabled=drafts.any{it.name.isNotBlank()}&&drafts.all{it.endMinute>it.startMinute},onClick={onConfirm(drafts.filter{it.name.isNotBlank()})}){Text("确认导入")}
-            }
-        }
-    }
 }
 
 @Composable
@@ -1506,28 +1427,10 @@ private fun formatDuration(minutes: Long): String = when {
     else -> "${minutes}m"
 }
 
-private fun formatClock(minutes: Int) = "%02d:%02d".format(minutes / 60, minutes % 60)
-
-private fun parseClockOrNull(value: String): Int? {
-    val match = Regex("^(\\d{1,2}):([0-5]\\d)$").matchEntire(value.trim()) ?: return null
-    val hour = match.groupValues[1].toIntOrNull()?.takeIf { it in 0..23 } ?: return null
-    return hour * 60 + match.groupValues[2].toInt()
-}
-
-private fun startOfToday(): Long = java.util.Calendar.getInstance().apply {
-    set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
-}.timeInMillis
-
 private fun timeGreeting(): String = when (java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)) {
     in 5..11 -> "早上好"
     in 12..17 -> "下午好"
     else -> "晚上好"
 }
 
-private fun calculateStreak(records: List<TimeRecord>): Int {
-    if (records.isEmpty()) return 0
-    val days = records.map { java.util.Calendar.getInstance().apply { timeInMillis = it.startTime; set(java.util.Calendar.HOUR_OF_DAY,0); set(java.util.Calendar.MINUTE,0); set(java.util.Calendar.SECOND,0); set(java.util.Calendar.MILLISECOND,0) }.timeInMillis }.toSet()
-    var cursor = startOfToday(); if (cursor !in days) cursor -= 86_400_000L
-    var streak = 0; while (cursor in days) { streak++; cursor -= 86_400_000L }
-    return streak
-}
+private fun calculateStreak(records: List<TimeRecord>): Int = TimeRecordCalendar.streak(records)

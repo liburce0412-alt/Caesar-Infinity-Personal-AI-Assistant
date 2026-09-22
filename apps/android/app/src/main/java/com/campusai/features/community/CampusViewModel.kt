@@ -27,6 +27,8 @@ data class CampusRemoteState(
     val conversations: UiState<List<ConversationSummary>> = UiState.Loading,
     val messages: UiState<List<CampusMessage>> = UiState.Loading,
     val orders: UiState<List<MarketplaceOrder>> = UiState.Loading,
+    val hasEarlierMessages: Boolean = false,
+    val loadingEarlierMessages: Boolean = false,
     val activeConversationId: String? = null,
     val activePostId: String? = null,
     val activeWishId: String? = null,
@@ -44,6 +46,8 @@ class CampusViewModel(private val repository: CampusRepository = CampusRepositor
     private val sessionScope = CoroutineScope(viewModelScope.coroutineContext + sessionJob)
     private var postCommentsJob: Job? = null
     private var messagesJob: Job? = null
+    private var earlierMessagesJob: Job? = null
+    private var fetchedMessageIds: Set<String> = emptySet()
     private var currentUserId: String = ""
     private val likingPostIds = mutableSetOf<String>()
     private var listingsJob: Job? = null
@@ -54,6 +58,7 @@ class CampusViewModel(private val repository: CampusRepository = CampusRepositor
         sessionJob.cancelChildren()
         likingPostIds.clear()
         _state.value = CampusRemoteState()
+        fetchedMessageIds = emptySet()
         listingsJob?.cancel()
         listingsJob = null
         wishCommentsJob?.cancel()
@@ -277,20 +282,57 @@ class CampusViewModel(private val repository: CampusRepository = CampusRepositor
 
     fun openMessageThread(conversationId: String): Job {
         messagesJob?.cancel()
+        earlierMessagesJob?.cancel()
         return sessionScope.launch {
-        _state.value = _state.value.copy(activeConversationId = conversationId, messages = UiState.Loading)
-        _state.value = _state.value.copy(messages = repository.loadMessages(conversationId).fold(
-            onSuccess = { if (it.isEmpty()) UiState.Empty else UiState.Data(it) },
-            onFailure = { UiState.Error(it.message ?: "消息读取失败。") },
-        ))
-        repository.markConversationRead(conversationId)
-        refreshConversations().join()
+            _state.update { it.copy(activeConversationId = conversationId, messages = UiState.Loading,
+                hasEarlierMessages = false, loadingEarlierMessages = false) }
+            fetchedMessageIds = emptySet()
+            val result = repository.loadMessages(conversationId)
+            if (!isActive || _state.value.activeConversationId != conversationId) return@launch
+            fetchedMessageIds = result.getOrNull().orEmpty().map { it.id }.toSet()
+            _state.update { it.copy(messages = result.fold(
+                onSuccess = { rows -> if (rows.isEmpty()) UiState.Empty else UiState.Data(rows) },
+                onFailure = { error -> UiState.Error(error.message ?: "消息读取失败。") },
+            ), hasEarlierMessages = result.getOrNull()?.isNotEmpty() == true) }
         }.also { messagesJob = it }
+    }
+
+    fun loadEarlierMessages() {
+        val initial = _state.value
+        val conversationId = initial.activeConversationId ?: return
+        val before = (initial.messages as? UiState.Data)?.value?.firstOrNull() ?: return
+        if (initial.loadingEarlierMessages || !initial.hasEarlierMessages) return
+        earlierMessagesJob = sessionScope.launch {
+            _state.update { it.copy(loadingEarlierMessages = true) }
+            val result = repository.loadMessages(conversationId, before)
+            if (!isActive || _state.value.activeConversationId != conversationId) return@launch
+            fetchedMessageIds = fetchedMessageIds + result.getOrNull().orEmpty().map { it.id }
+            _state.update { state ->
+                val current = (state.messages as? UiState.Data)?.value.orEmpty()
+                result.fold(
+                    onSuccess = { older -> state.copy(messages = UiState.Data((older + current).distinctBy { it.id }),
+                        hasEarlierMessages = older.isNotEmpty(), loadingEarlierMessages = false) },
+                    onFailure = { error -> state.copy(loadingEarlierMessages = false,
+                        operationError = error.message ?: "更早消息读取失败，请重试。") },
+                )
+            }
+        }
+    }
+
+    // Called by the list only after a message is visible. Failed loads and sends do not
+    // acknowledge unseen incoming messages; the server enforces a monotonic watermark.
+    fun markMessageVisible(conversationId: String, messageId: String) = sessionScope.launch {
+        val current = _state.value
+        if (messageId !in fetchedMessageIds || current.activeConversationId != conversationId ||
+            (current.messages as? UiState.Data)?.value?.none { it.id == messageId } != false) return@launch
+        if (repository.markConversationRead(conversationId, messageId).isSuccess && isActive) refreshConversations()
     }
 
     fun closeMessageThread() {
         messagesJob?.cancel()
-        _state.value = _state.value.copy(activeConversationId = null, messages = UiState.Loading)
+        earlierMessagesJob?.cancel()
+        _state.update { it.copy(activeConversationId = null, messages = UiState.Loading,
+            hasEarlierMessages = false, loadingEarlierMessages = false) }
     }
 
     fun sendMessage(conversationId: String, body: String, onSuccess: () -> Unit = {}) = runOperation {
@@ -305,7 +347,6 @@ class CampusViewModel(private val repository: CampusRepository = CampusRepositor
                 state.copy(messages = UiState.Data((current + sent).distinctBy { it.id }))
             }
         }
-        repository.markConversationRead(conversationId)
         refreshConversations().join()
         onSuccess()
     }

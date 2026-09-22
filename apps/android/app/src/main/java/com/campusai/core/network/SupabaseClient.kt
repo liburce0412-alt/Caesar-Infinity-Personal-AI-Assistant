@@ -37,6 +37,7 @@ object SupabaseClient {
 
     val supabaseUrl: String get() = BuildConfig.SUPABASE_URL.trimEnd('/')
     val supabaseAnonKey: String get() = BuildConfig.SUPABASE_ANON_KEY
+    @Volatile
     var userJwt: String = ""
         private set
 
@@ -53,8 +54,9 @@ object SupabaseClient {
         table: String,
         parameters: Map<String, String>,
         callTimeoutSeconds: Long? = null,
+        sessionToken: String? = null,
     ): Result<JSONArray> = withContext(Dispatchers.IO) {
-        authenticatedRequest(callTimeoutSeconds) {
+        authenticatedRequest(callTimeoutSeconds, sessionToken) {
             val url = "$supabaseUrl/rest/v1/$table".toHttpUrl().newBuilder().apply {
                 parameters.forEach { (name, value) -> addQueryParameter(name, value) }
             }.build()
@@ -92,8 +94,8 @@ object SupabaseClient {
         }
     }
 
-    suspend fun rpc(name: String, payload: JSONObject): Result<JSONObject> = withContext(Dispatchers.IO) {
-        authenticatedRequest {
+    suspend fun rpc(name: String, payload: JSONObject, sessionToken: String? = null): Result<JSONObject> = withContext(Dispatchers.IO) {
+        authenticatedRequest(sessionToken = sessionToken) {
             Request.Builder()
                 .url("$supabaseUrl/rest/v1/rpc/$name")
                 .post(payload.toString().toRequestBody(jsonMediaType))
@@ -227,15 +229,18 @@ object SupabaseClient {
 
     private fun authenticatedRequest(
         callTimeoutSeconds: Long? = null,
+        sessionToken: String? = null,
         build: () -> Request,
     ): Result<String> {
         if (!isConfigured()) return Result.failure(IllegalStateException("Supabase 尚未配置。"))
-        if (userJwt.isBlank()) return Result.failure(IllegalStateException("请先登录，再读取你的同步数据。"))
+        val token = sessionToken ?: userJwt
+        if (sessionToken != null && sessionToken != userJwt) return Result.failure(IllegalStateException("登录状态已变化，请重新同步。"))
+        if (token.isBlank()) return Result.failure(IllegalStateException("请先登录，再读取你的同步数据。"))
         return runCatching {
             val unsigned = build()
             val request = unsigned.newBuilder()
                 .header("apikey", supabaseAnonKey)
-                .header("Authorization", "Bearer $userJwt")
+                .header("Authorization", "Bearer $token")
                 .header("Content-Type", unsigned.body?.contentType()?.toString() ?: "application/json")
                 .build()
             val call = client.newCall(request)

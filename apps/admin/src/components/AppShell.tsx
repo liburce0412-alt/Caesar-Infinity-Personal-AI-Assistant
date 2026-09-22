@@ -57,7 +57,7 @@ export function AppShell() {
       {group.items.map(([to,icon,label])=><Link key={to} to={to} onClick={()=>setMenuOpen(false)} activeOptions={{exact:to==='/'}} className="nav-link" activeProps={{className:'nav-link active'}}><Symbol>{icon}</Symbol><span>{label}</span><span className="nav-indicator"/></Link>)}
     </div>)}</nav>
     <div className="nav-spacer"/>
-    <div className="sidebar-footer"><div className="profile-line"><div className="avatar"><Symbol>person</Symbol></div><div className="profile-copy"><strong>{roles[who.data?.role]||'管理账号'}</strong><small title={who.data?.email}>{who.data?.email||'正在读取账号'}</small></div></div>
+    <div className="sidebar-footer"><div className="profile-line"><div className="avatar"><Symbol>person</Symbol></div><div className="profile-copy"><strong>{roles[who.data?.role ?? ""]||'管理账号'}</strong><small title={who.data?.email}>{who.data?.email||'正在读取账号'}</small></div></div>
       <button className="signout-button" onClick={()=>void signOut()}><Symbol>logout</Symbol>退出登录</button>
       {signOutError&&<p role="alert">{signOutError}</p>}
     </div>

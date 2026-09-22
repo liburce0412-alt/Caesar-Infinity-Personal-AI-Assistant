@@ -25,7 +25,7 @@ test('mobile navigation and content route work', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 720 })
   await page.goto('/')
   await page.getByRole('button', { name: '打开导航' }).click()
-  await page.getByRole('link', { name: /举报审核/ }).click()
+  await page.getByRole('navigation', { name: '管理台导航' }).getByRole('link', { name: '举报审核', exact: true }).click()
   await expect(page.getByRole('heading', { name: '举报审核' })).toBeVisible()
 })
 

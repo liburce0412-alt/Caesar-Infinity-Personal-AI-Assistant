@@ -1,16 +1,10 @@
-import { modelForMode, thinkingForMode, type Mode } from './protocol.ts'
+import { isChatRequest } from './request.ts'
+import { modelForMode, thinkingForMode } from './protocol.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-}
-
-type ChatMessage = { role: 'user' | 'assistant'; content: string }
-type RequestBody = {
-  mode: Mode
-  messages: ChatMessage[]
-  context?: { dateRange?: unknown; timeSummary?: unknown; goals?: unknown; locale?: string }
 }
 
 const encoder = new TextEncoder()
@@ -34,7 +28,7 @@ Deno.serve(async (request) => {
   if (!userResponse.ok) return jsonError(401, 'authentication_required', '登录已失效，请重新登录。')
   await userResponse.body?.cancel()
 
-  let body: RequestBody
+  let body: unknown
   try {
     const rawBody = await readBodyLimited(request, 262_144)
     body = JSON.parse(rawBody)
@@ -42,13 +36,7 @@ Deno.serve(async (request) => {
     if (error instanceof PayloadTooLarge) return jsonError(413, 'request_too_large', '请求内容过大，请缩短对话后重试。')
     return jsonError(400, 'invalid_json', '请求内容无法读取，请重试。')
   }
-  if (!body || typeof body !== 'object' || !['fast','deep'].includes(body.mode) || !Array.isArray(body.messages) || body.messages.length === 0 || body.messages.length > 60) {
-    return jsonError(400, 'invalid_request', '消息或模式不符合要求。')
-  }
-  if (body.messages.some(message => !['user','assistant'].includes(message.role) || typeof message.content !== 'string' || message.content.length > 20_000) || body.messages.reduce((total,message)=>total+message.content.length,0)>120_000) {
-    return jsonError(400, 'invalid_messages', '单条消息过长或角色无效。')
-  }
-  if (body.context != null && (typeof body.context !== 'object' || Array.isArray(body.context))) return jsonError(400, 'invalid_context', '上下文格式无效。')
+  if (!isChatRequest(body)) return jsonError(400, 'invalid_request', '消息、模式或上下文不符合要求。')
 
   const limit = body.mode === 'deep' ? 20 : 100
   const quota = await fetch(`${supabaseUrl}/rest/v1/rpc/claim_ai_request`, {

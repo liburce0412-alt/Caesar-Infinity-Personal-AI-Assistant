@@ -22,7 +22,7 @@ import java.util.UUID
 // Room Entities
 // ==========================================
 
-@Entity(tableName = "time_records", indices = [Index(value = ["clientId"], unique = true)])
+@Entity(tableName = "time_records", indices = [Index(value = ["userId", "clientId"], unique = true)])
 data class TimeRecordEntity(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val title: String,
@@ -153,7 +153,7 @@ data class UserMessageEntity(
     }
 }
 
-@Entity(tableName = "course_schedules", indices = [Index(value = ["sourceHash"], unique = true), Index(value = ["clientId"], unique = true)])
+@Entity(tableName = "course_schedules", indices = [Index(value = ["userId", "sourceHash"], unique = true), Index(value = ["userId", "clientId"], unique = true)])
 data class CourseScheduleEntity(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val name: String,
@@ -310,11 +310,11 @@ interface CampusDao {
     @Query("UPDATE time_records SET title = :title, category = :category, startTime = :startTime, endTime = :endTime, durationMinutes = :durationMinutes, remark = :remark, updatedAt = :updatedAt, version = version + 1, syncState = 'pending' WHERE id = :id AND deletedAt IS NULL")
     suspend fun editTimeRecord(id: Int, title: String, category: String, startTime: Long, endTime: Long, durationMinutes: Long, remark: String, updatedAt: Long = System.currentTimeMillis())
 
-    @Query("SELECT * FROM time_records WHERE syncState IN ('pending', 'failed') AND (userId = :activeUser OR userId = 'local_user') ORDER BY updatedAt")
+    @Query("SELECT * FROM time_records WHERE syncState IN ('pending', 'failed') AND userId = :activeUser ORDER BY updatedAt")
     suspend fun getPendingTimeRecords(activeUser: String): List<TimeRecordEntity>
 
-    @Query("SELECT * FROM time_records WHERE clientId = :clientId LIMIT 1")
-    suspend fun getTimeRecordByClientId(clientId: String): TimeRecordEntity?
+    @Query("SELECT * FROM time_records WHERE clientId = :clientId AND userId = :userId LIMIT 1")
+    suspend fun getTimeRecordByClientId(clientId: String, userId: String): TimeRecordEntity?
 
     @Update
     suspend fun updateTimeRecord(entity: TimeRecordEntity)
@@ -324,6 +324,142 @@ interface CampusDao {
 
     @Query("DELETE FROM time_records WHERE deletedAt IS NOT NULL AND deletedAt < :before AND syncState = 'synced'")
     suspend fun purgeOldTimeTombstones(before: Long)
+
+    // Claim guest rows once, before any network request. Same-hash account rows win;
+    // conflicting guest rows remain local and are never uploaded under another owner.
+    @Query("UPDATE OR IGNORE time_records SET userId = :userId WHERE userId = 'local_user'")
+    suspend fun claimGuestTimeRecords(userId: String)
+
+    @Query("UPDATE OR IGNORE course_schedules SET userId = :userId WHERE userId = 'local_user'")
+    suspend fun claimGuestCourses(userId: String)
+
+    @Query("SELECT * FROM time_records WHERE id = :id")
+    suspend fun timeRecordById(id: Int): TimeRecordEntity?
+
+    @Query("SELECT * FROM course_schedules WHERE id = :id")
+    suspend fun courseById(id: Int): CourseScheduleEntity?
+
+    @Transaction
+    suspend fun importCourseSchedules(entities: List<CourseScheduleEntity>): List<Long> = entities.map { incoming ->
+        val previous = getCourseBySourceHash(incoming.sourceHash, incoming.userId)
+        if (previous?.deletedAt != null) {
+            updateCourseSchedule(incoming.copy(id = previous.id, clientId = previous.clientId,
+                remoteId = previous.remoteId, version = previous.version + 1))
+            previous.id.toLong()
+        } else insertCourseSchedules(listOf(incoming)).single()
+    }
+
+    @Transaction
+    suspend fun acknowledgeTime(snapshot: TimeRecordEntity, acknowledged: TimeRecordEntity): Boolean {
+        val current = timeRecordById(snapshot.id) ?: return false
+        if (current.userId != snapshot.userId) return false
+        if (current == snapshot) {
+            updateTimeRecord(acknowledged)
+            return true
+        }
+        // A request completed after an edit/delete/undo. Retain every current payload field.
+        updateTimeRecord(current.copy(remoteId = acknowledged.remoteId, clientId = acknowledged.clientId,
+            version = maxOf(current.version, acknowledged.version + 1), syncState = "pending"))
+        return false
+    }
+
+    @Transaction
+    suspend fun failTime(snapshot: TimeRecordEntity) {
+        if (timeRecordById(snapshot.id) == snapshot) updateTimeRecord(snapshot.copy(syncState = "failed"))
+    }
+
+    @Transaction
+    suspend fun purgeUnsentTime(snapshot: TimeRecordEntity): Boolean {
+        if (timeRecordById(snapshot.id) != snapshot) return false
+        purgeTimeRecord(snapshot.id)
+        return true
+    }
+
+    @Transaction
+    suspend fun acknowledgeCourse(snapshot: CourseScheduleEntity, acknowledged: CourseScheduleEntity): Boolean {
+        val current = courseById(snapshot.id) ?: return false
+        if (current.userId != snapshot.userId) return false
+        if (current == snapshot) {
+            updateCourseSchedule(acknowledged)
+            return true
+        }
+        // A request completed after an edit/delete/undo. Retain every current payload field.
+        updateCourseSchedule(current.copy(remoteId = acknowledged.remoteId, clientId = acknowledged.clientId,
+            version = maxOf(current.version, acknowledged.version + 1), syncState = "pending"))
+        return false
+    }
+
+    @Transaction
+    suspend fun failCourse(snapshot: CourseScheduleEntity) {
+        if (courseById(snapshot.id) == snapshot) updateCourseSchedule(snapshot.copy(syncState = "failed"))
+    }
+
+    @Transaction
+    suspend fun purgeUnsentCourse(snapshot: CourseScheduleEntity): Boolean {
+        if (courseById(snapshot.id) != snapshot) return false
+        purgeCourseSchedule(snapshot.id)
+        return true
+    }
+
+    @Transaction
+    suspend fun applyRemoteTime(remote: TimeRecordEntity, conflictedSnapshot: TimeRecordEntity? = null) {
+        val current = conflictedSnapshot?.let { timeRecordById(it.id) }
+            ?: getTimeRecordByClientId(remote.clientId, remote.userId)
+        if (current != null && current.userId != remote.userId) return
+        if (current == null) {
+            insertTimeRecord(remote)
+        } else if (current.deletedAt != null && remote.deletedAt != null) {
+            updateTimeRecord(remote.copy(id = current.id))
+        } else if (conflictedSnapshot != null || current.syncState == "conflict" ||
+            (current.deletedAt != null && current.syncState == "failed" && remote.version >= current.version)) {
+            // Keep both: the canonical server row and a visible, independently syncable local copy.
+            // A local deletion has no payload to rescue; the newer server row wins.
+            if (current.deletedAt == null) {
+                val rescued = current.copy(id = 0, title = current.title.take(108) + "（同步冲突副本）",
+                    clientId = UUID.randomUUID().toString(), remoteId = null,
+                    version = 1, syncState = "pending", updatedAt = System.currentTimeMillis())
+                insertTimeRecord(rescued)
+            }
+            updateTimeRecord(remote.copy(id = current.id))
+        } else if (current.deletedAt != null && current.syncState == "failed") {
+            // Several offline edits may have advanced the local counter more than the
+            // server. Rebase a pending delete onto the version observed by this pull.
+            updateTimeRecord(current.copy(remoteId = remote.remoteId, clientId = remote.clientId,
+                version = remote.version + 1, syncState = "pending"))
+        } else if (current.syncState == "synced" && remote.version >= current.version) {
+            updateTimeRecord(remote.copy(id = current.id))
+        }
+    }
+
+    @Transaction
+    suspend fun applyRemoteCourse(remote: CourseScheduleEntity, conflictedSnapshot: CourseScheduleEntity? = null) {
+        val current = conflictedSnapshot?.let { courseById(it.id) }
+            ?: getCourseByClientId(remote.clientId, remote.userId) ?: getCourseBySourceHash(remote.sourceHash, remote.userId)
+        if (current != null && current.userId != remote.userId) return
+        if (current == null) {
+            insertCourseSchedules(listOf(remote))
+        } else if (current.deletedAt != null && remote.deletedAt != null) {
+            updateCourseSchedule(remote.copy(id = current.id))
+        } else if (conflictedSnapshot != null || current.syncState == "conflict" ||
+            (current.deletedAt != null && current.syncState == "failed" && remote.version >= current.version)) {
+            // Keep both: the canonical server row and a visible, independently syncable local copy.
+            // A local deletion has no payload to rescue; the newer server row wins.
+            if (current.deletedAt == null) {
+                val rescued = current.copy(id = 0, name = current.name.take(148) + "（同步冲突副本）", sourceHash = (UUID.randomUUID().toString() + UUID.randomUUID().toString()).replace("-", ""),
+                    clientId = UUID.randomUUID().toString(), remoteId = null,
+                    version = 1, syncState = "pending", updatedAt = System.currentTimeMillis())
+                insertCourseSchedules(listOf(rescued))
+            }
+            updateCourseSchedule(remote.copy(id = current.id))
+        } else if (current.deletedAt != null && current.syncState == "failed") {
+            // Several offline edits may have advanced the local counter more than the
+            // server. Rebase a pending delete onto the version observed by this pull.
+            updateCourseSchedule(current.copy(remoteId = remote.remoteId, clientId = remote.clientId,
+                version = remote.version + 1, syncState = "pending"))
+        } else if (current.syncState == "synced" && remote.version >= current.version) {
+            updateCourseSchedule(remote.copy(id = current.id))
+        }
+    }
 
     // Goods Market
     @Query("SELECT * FROM goods ORDER BY createdAt DESC")
@@ -386,14 +522,14 @@ interface CampusDao {
     @Query("UPDATE course_schedules SET deletedAt = :deletedAt, updatedAt = :deletedAt, version = version + 1, syncState = 'pending' WHERE id = :id AND deletedAt IS NULL")
     suspend fun softDeleteCourseSchedule(id: Int, deletedAt: Long = System.currentTimeMillis())
 
-    @Query("SELECT * FROM course_schedules WHERE syncState IN ('pending', 'failed') AND (userId = :activeUser OR userId = 'local_user') ORDER BY updatedAt")
+    @Query("SELECT * FROM course_schedules WHERE syncState IN ('pending', 'failed') AND userId = :activeUser ORDER BY updatedAt")
     suspend fun getPendingCourseSchedules(activeUser: String): List<CourseScheduleEntity>
 
-    @Query("SELECT * FROM course_schedules WHERE clientId = :clientId LIMIT 1")
-    suspend fun getCourseByClientId(clientId: String): CourseScheduleEntity?
+    @Query("SELECT * FROM course_schedules WHERE clientId = :clientId AND userId = :userId LIMIT 1")
+    suspend fun getCourseByClientId(clientId: String, userId: String): CourseScheduleEntity?
 
-    @Query("SELECT * FROM course_schedules WHERE sourceHash = :sourceHash LIMIT 1")
-    suspend fun getCourseBySourceHash(sourceHash: String): CourseScheduleEntity?
+    @Query("SELECT * FROM course_schedules WHERE sourceHash = :sourceHash AND userId = :userId LIMIT 1")
+    suspend fun getCourseBySourceHash(sourceHash: String, userId: String): CourseScheduleEntity?
 
     @Update
     suspend fun updateCourseSchedule(entity: CourseScheduleEntity)
@@ -515,7 +651,7 @@ interface CampusDao {
         HealthSummaryCacheEntity::class,
         DailyGoalSnapshotEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true
 )
 abstract class CampusDatabase : RoomDatabase() {
@@ -700,6 +836,17 @@ abstract class CampusDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP INDEX IF EXISTS index_course_schedules_sourceHash")
+                db.execSQL("DROP INDEX IF EXISTS index_course_schedules_clientId")
+                db.execSQL("DROP INDEX IF EXISTS index_time_records_clientId")
+                db.execSQL("CREATE UNIQUE INDEX index_course_schedules_userId_clientId ON course_schedules(userId, clientId)")
+                db.execSQL("CREATE UNIQUE INDEX index_time_records_userId_clientId ON time_records(userId, clientId)")
+                db.execSQL("CREATE UNIQUE INDEX index_course_schedules_userId_sourceHash ON course_schedules(userId, sourceHash)")
+            }
+        }
+
         @Volatile
         private var INSTANCE: CampusDatabase? = null
 
@@ -717,6 +864,7 @@ abstract class CampusDatabase : RoomDatabase() {
                     MIGRATION_5_6,
                     MIGRATION_6_7,
                     MIGRATION_7_8,
+                    MIGRATION_8_9,
                 )
                 .build()
                 INSTANCE = instance

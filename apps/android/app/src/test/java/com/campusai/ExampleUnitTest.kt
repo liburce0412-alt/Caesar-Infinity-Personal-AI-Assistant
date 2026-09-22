@@ -2,6 +2,7 @@ package com.campusai
 
 import com.campusai.features.schedule.ScheduleImporter
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ScheduleImporterTest {
@@ -22,7 +23,8 @@ class ScheduleImporterTest {
     assertEquals("数据结构", result.single().name)
     assertEquals(1, result.single().weekday)
     assertEquals(480, result.single().startMinute)
-    assertEquals("每周", result.single().weeks)
+    assertTrue(result.single().weeks.contains("RRULE:FREQ=WEEKLY;COUNT=16"))
+    assertTrue(result.single().reviewNote.isNotBlank())
   }
 
   @Test fun `course fingerprint is deterministic`() {

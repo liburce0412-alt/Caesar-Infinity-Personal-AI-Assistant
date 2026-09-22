@@ -55,10 +55,7 @@ object DailyContributionCalculator {
         val firstDay = LocalDate.of(year, 1, 1)
         val lastDay = LocalDate.of(year, 12, 31)
         val byDate = records.asSequence()
-            .filter { it.durationMinutes > 0L && it.endTime > it.startTime }
-            .map { record ->
-                Instant.ofEpochMilli(record.endTime).atZone(zoneId).toLocalDate() to record
-            }
+            .mapNotNull { record -> TimeRecordCalendar.completionDate(record, zoneId)?.let { it to record } }
             .filter { (date, _) -> date.year == year && !date.isAfter(today) }
             .groupBy({ it.first }, { it.second })
 

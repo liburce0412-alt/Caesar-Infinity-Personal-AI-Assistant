@@ -109,7 +109,7 @@ object DailyGreetingPolicy {
         if (listOf("晴天", "下雨", "气温", "天气", "刮风", "下雪").any(text::contains)) return false
         val dayStart = today.atStartOfDay(zone).toInstant().toEpochMilli()
         val dayEnd = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
-        val hasTodayRecord = snapshot.records.any { it.startTime in dayStart until dayEnd }
+        val hasTodayRecord = snapshot.records.any { it.durationMinutes > 0 && it.endTime > it.startTime && it.endTime <= nowMillis && it.endTime in dayStart until dayEnd }
         if (!hasTodayRecord && Regex("(?:已经|已|完成了|投入了|记录了).*(?:学习|分钟|记录|专注)").containsMatchIn(text)) return false
         return true
     }
@@ -138,7 +138,7 @@ object AiContextAssembler {
 
         val learningQuestion = task != CampusAiTask.CHAT || LEARNING_TERMS.any { prompt.contains(it, ignoreCase = true) }
         val courseQuestion = task == CampusAiTask.SCHEDULE_CLEANUP || COURSE_TERMS.any { prompt.contains(it, ignoreCase = true) }
-        if (selection.timeRecords && learningQuestion) personal.put("learning", learningContext(snapshot.records, prompt, today, zone))
+        if (selection.timeRecords && learningQuestion) personal.put("learning", learningContext(snapshot.records.filter { it.endTime <= nowMillis }, prompt, today, zone))
         if (selection.courses && courseQuestion) {
             val currentMinute = Instant.ofEpochMilli(nowMillis).atZone(zone).let { it.hour * 60 + it.minute }
             personal.put("courses", courseContext(snapshot.courses, today, currentMinute))
@@ -167,7 +167,7 @@ object AiContextAssembler {
         val today = Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate()
         val start = today.atStartOfDay(zone).toInstant().toEpochMilli()
         val end = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
-        val todayRecords = snapshot.records.filter { it.startTime in start until end }
+        val todayRecords = com.campusai.core.model.TimeRecordCalendar.inRange(snapshot.records, "日", Instant.ofEpochMilli(nowMillis), zone)
         val now = Instant.ofEpochMilli(nowMillis).atZone(zone)
         val currentMinute = now.hour * 60 + now.minute
         val nextCourse = snapshot.courses
@@ -180,6 +180,7 @@ object AiContextAssembler {
             .put("timeOfDay", timeOfDay(now.hour))
             .put("todayRecordCount", todayRecords.size)
             .put("todayMinutes", todayRecords.sumOf(TimeRecord::durationMinutes))
+            .put("scheduleDateReviewRequired", true)
             .put("nextCourse", nextCourse?.name ?: JSONObject.NULL)
             .put("locale", "zh-CN")
     }
@@ -197,8 +198,8 @@ object AiContextAssembler {
             prompt.contains("本月") || prompt.contains("这个月") -> monthStartMs
             else -> Long.MIN_VALUE
         }
-        val selected = records.filter { it.startTime in selectedStart until tomorrowStart }
-            .sortedByDescending(TimeRecord::startTime)
+        val selected = records.filter { it.durationMinutes > 0 && it.endTime > it.startTime && it.endTime in selectedStart until tomorrowStart }
+            .sortedWith(compareByDescending<TimeRecord> { it.endTime }.thenByDescending { it.startTime })
             .take(MAX_RECENT_RECORDS)
         return JSONObject()
             .put("today", summary(records, todayStart, tomorrowStart, 240L, zone, today))
@@ -216,13 +217,13 @@ object AiContextAssembler {
         zone: ZoneId,
         today: LocalDate,
     ): JSONObject {
-        val selected = records.filter { it.startTime in start until end }
+        val selected = records.filter { it.durationMinutes > 0 && it.endTime > it.startTime && it.endTime in start until end }
         val total = selected.sumOf(TimeRecord::durationMinutes)
         val categories = JSONObject()
         selected.groupBy(TimeRecord::category).toSortedMap().forEach { (name, rows) ->
             categories.put(name.take(40), rows.sumOf(TimeRecord::durationMinutes))
         }
-        val daily = selected.groupBy { Instant.ofEpochMilli(it.startTime).atZone(zone).toLocalDate() }
+        val daily = selected.groupBy { Instant.ofEpochMilli(it.endTime).atZone(zone).toLocalDate() }
             .mapValues { (_, rows) -> rows.sumOf(TimeRecord::durationMinutes) }
             .toSortedMap()
         val activeDates = daily.keys
@@ -248,18 +249,17 @@ object AiContextAssembler {
     }
 
     private fun courseContext(courses: List<CourseSchedule>, today: LocalDate, currentMinute: Int): JSONObject {
-        val conflicts = JSONArray()
-        courses.forEachIndexed { index, first -> courses.drop(index + 1).forEach { second ->
-            if (first.weekday == second.weekday && first.startMinute < second.endMinute && second.startMinute < first.endMinute) {
-                conflicts.put(JSONObject().put("first", first.name).put("second", second.name).put("weekday", first.weekday))
-            }
-        } }
+        val conflicts = JSONArray(com.campusai.features.schedule.potentialCourseOverlaps(courses).map { (first, second) ->
+            JSONObject().put("first", first.name).put("second", second.name).put("weekday", first.weekday)
+                .put("requiresDateReview", true).put("basis", "time_overlap_only")
+        })
         val rows = courses.sortedWith(compareBy(CourseSchedule::weekday, CourseSchedule::startMinute)).take(20)
         val next = courses
             .filter { it.weekday == today.dayOfWeek.value && it.startMinute >= currentMinute }
             .minByOrNull(CourseSchedule::startMinute)
         return JSONObject()
             .put("todayWeekday", today.dayOfWeek.value)
+            .put("scheduleDateReviewRequired", true)
             .put("nextCourse", next?.let { course -> JSONObject()
                 .put("name", course.name.take(80))
                 .put("startMinute", course.startMinute)
@@ -292,6 +292,8 @@ object AiContextAssembler {
         .put("category", record.category.take(40))
         .put("durationMinutes", record.durationMinutes)
         .put("startTime", record.startTime)
+        .put("endTime", record.endTime)
+        .put("dateBasis", "completion")
 
     private fun timeOfDay(hour: Int) = when (hour) {
         in 5..10 -> "morning"

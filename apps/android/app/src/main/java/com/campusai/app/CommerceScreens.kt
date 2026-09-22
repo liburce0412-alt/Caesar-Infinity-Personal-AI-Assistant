@@ -1,5 +1,10 @@
 package com.campusai.app
 
+import androidx.compose.material3.TextButton
+
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -177,8 +182,14 @@ private fun MessageThreadScreen(
     val messages = messageValues(state.messages)
     val listState = rememberLazyListState()
     val layout = SpectraTheme.layout
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) listState.scrollToItem(messages.lastIndex)
+    LaunchedEffect(messages.lastOrNull()?.id) {
+        if (messages.isNotEmpty()) listState.scrollToItem(messages.size)
+    }
+    LaunchedEffect(conversationId, listState) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.key as? String }
+            .distinctUntilChanged().collect { id ->
+                if (id != null) viewModel.markMessageVisible(conversationId, id)
+            }
     }
 
     SpectraPageScaffold(mood = PageMood.COMMERCE) {
@@ -245,6 +256,12 @@ private fun MessageThreadScreen(
                             onAction = { viewModel.openMessageThread(conversationId) },
                         )
                     }
+                }
+                item(key = "earlier-messages") {
+                    if (state.hasEarlierMessages) TextButton(
+                        onClick = viewModel::loadEarlierMessages,
+                        enabled = !state.loadingEarlierMessages,
+                    ) { Text(if (state.loadingEarlierMessages) "正在加载…" else "加载更早的消息") }
                 }
                 items(messages, key = { it.id }) { message -> MessageBubble(message, message.senderId == userId) }
             }

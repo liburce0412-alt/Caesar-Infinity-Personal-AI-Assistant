@@ -1,8 +1,12 @@
-name: Deploy Supabase (backup gated)
+name: Legacy hosted Supabase (backup gated)
 
 on:
   workflow_dispatch:
     inputs:
+      project_ref:
+        description: 'Legacy hosted project ref (NOT the AliCloud self-hosted instance)'
+        required: true
+        type: string
       backup_id:
         description: 'Verified backup identifier from the Supabase dashboard'
         required: true
@@ -19,22 +23,33 @@ jobs:
   deploy:
     if: inputs.confirm == 'APPLY_MIGRATIONS_AFTER_BACKUP' && inputs.backup_id != ''
     runs-on: ubuntu-latest
+    environment: legacy-hosted-supabase
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
+      - name: Verify legacy destination
+        env:
+          TARGET_PROJECT_REF: ${{ inputs.project_ref }}
+          APPROVED_PROJECT_REF: ${{ vars.LEGACY_SUPABASE_PROJECT_REF }}
+        run: |
+          [[ "$TARGET_PROJECT_REF" =~ ^[a-z]{20}$ ]] || exit 1
+          [[ -n "$APPROVED_PROJECT_REF" && "$TARGET_PROJECT_REF" == "$APPROVED_PROJECT_REF" ]] || exit 1
       - name: Link project
         env:
+          TARGET_PROJECT_REF: ${{ inputs.project_ref }}
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        run: npx supabase@2.115.0 link --project-ref mcpjecboqddqelgikvvc --password "$SUPABASE_DB_PASSWORD"
+        run: npx supabase@2.115.0 link --project-ref "$TARGET_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
       - name: Apply versioned schema
         env:
+          TARGET_PROJECT_REF: ${{ inputs.project_ref }}
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: npx supabase@2.115.0 db push --include-all --password "$SUPABASE_DB_PASSWORD"
       - name: Deploy AI gateway
         env:
+          TARGET_PROJECT_REF: ${{ inputs.project_ref }}
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: npx supabase@2.115.0 functions deploy ai-chat --project-ref mcpjecboqddqelgikvvc
+        run: npx supabase@2.115.0 functions deploy ai-chat --project-ref "$TARGET_PROJECT_REF"
