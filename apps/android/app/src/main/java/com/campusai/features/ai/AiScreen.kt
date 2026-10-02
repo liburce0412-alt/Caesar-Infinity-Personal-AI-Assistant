@@ -32,6 +32,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -525,11 +527,13 @@ fun AiScreen(
                                     Text(plainAiText(report.summary), style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurface.copy(.64f))
                                     Spacer(Modifier.size(6.dp))
                                     Text(
-                                        "${providerLabel(report.provider)} · ${report.model.ifBlank { report.mode.name }} · ${historyTime(report.updatedAt)}",
+                                        "${providerLabel(report.provider)} · ${report.model.ifBlank { report.mode.name }}",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = SpectraColors.Focus,
-                                        maxLines = 1,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis,
                                     )
+                                    Text(historyTime(report.updatedAt), style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                                 IconButton(onClick = {
                                     viewModel.deleteConversation(report)
@@ -601,7 +605,7 @@ fun AiScreen(
                                                     IconButton(onClick = {
                                                         val engine = tts ?: return@IconButton
                                                         if (engine.isSpeaking) engine.stop() else engine.speak(plainAiText(message.content), TextToSpeech.QUEUE_FLUSH, null, "caesar-${message.hashCode()}")
-                                                    }, modifier = Modifier.size(40.dp)) { Icon(Icons.Rounded.VolumeUp, "朗读或停止", modifier = Modifier.size(18.dp)) }
+                                                    }, modifier = Modifier.size(48.dp)) { Icon(Icons.Rounded.VolumeUp, "朗读或停止", modifier = Modifier.size(18.dp)) }
                                                     if (messageIndex == regeneratableAssistantIndex) {
                                                         TextButton(
                                                             onClick = { viewModel.regenerateLastResponse(snapshot) },
@@ -852,8 +856,8 @@ private fun FluidAiHeader(
     Row(
         Modifier
             .fillMaxWidth()
-            .height(64.dp)
-            .padding(horizontal = 10.dp),
+            .heightIn(min = 64.dp)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
@@ -866,11 +870,11 @@ private fun FluidAiHeader(
                 .clickable(enabled = !streaming, role = Role.Button, onClick = onRuntime)
                 .padding(horizontal = 6.dp, vertical = 4.dp),
         ) {
-            Text("Caesar∞", style = MaterialTheme.typography.titleLarge)
+            Text("Caesar∞", style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 "流体 · $runtimeLabel",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(.54f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -918,7 +922,7 @@ private fun ClassicAiChrome(
                     .clickable(enabled = !streaming, role = Role.Button, onClick = onRuntime)
                     .padding(horizontal = 4.dp, vertical = 2.dp),
             ) {
-                Text("Caesar∞", style = MaterialTheme.typography.titleLarge)
+                Text("Caesar∞", style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     runtimeLabel,
                     style = MaterialTheme.typography.bodyMedium,
@@ -951,13 +955,13 @@ private fun ClassicAiChrome(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         GlassPanel(
-            Modifier.weight(1f).height(54.dp),
+            Modifier.weight(1f).heightIn(min = 54.dp),
             radius = 24,
             shadowed = false,
             onClick = { if (!streaming) onRuntime() },
         ) {
             Row(
-                Modifier.fillMaxSize().padding(horizontal = 14.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -2005,14 +2009,14 @@ private data class AiComposerCallbacks(
 )
 
 @Composable
-private fun ComposerAttachments(
+internal fun ComposerAttachments(
     images: List<CaesarImageAttachment>,
     importingImage: Boolean,
     onRemoveImage: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (images.isEmpty() && !importingImage) return
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         images.forEachIndexed { index, image ->
             Box(Modifier.size(64.dp)) {
                 AsyncImage(
@@ -2023,9 +2027,9 @@ private fun ComposerAttachments(
                 )
                 IconButton(
                     onClick = { onRemoveImage(index) },
-                    modifier = Modifier.align(Alignment.TopEnd).size(26.dp).background(Color.Black.copy(.58f), CircleShape),
+                    modifier = Modifier.align(Alignment.TopEnd).size(48.dp),
                 ) {
-                    Icon(Icons.Rounded.Close, "移除图片", tint = Color.White, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Rounded.Close, "移除图片", tint = Color.White, modifier = Modifier.size(32.dp).background(Color.Black.copy(.68f), CircleShape).padding(7.dp))
                 }
             }
         }
@@ -2059,14 +2063,14 @@ private fun ClassicAiComposer(
             modifier = Modifier.fillMaxWidth(),
         )
         GlassPanel(
-            Modifier.fillMaxWidth().height(58.dp),
+            Modifier.fillMaxWidth().heightIn(min = 58.dp),
             radius = 28,
             emphasized = true,
             shadowed = false,
             opticalPriority = 5,
         ) {
             Row(
-                Modifier.fillMaxSize().padding(horizontal = 8.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 ClassicMediaAction(
@@ -2119,7 +2123,7 @@ private fun ClassicAiComposer(
                         keyboardActions = KeyboardActions(onSend = { if (!streaming && value.isNotBlank()) callbacks.onAction() }),
                         decorationBox = { inner ->
                             Box {
-                                if (value.isEmpty()) Text("告诉 Caesar∞ 你现在想做什么…", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface.copy(.42f))
+                                if (value.isEmpty()) Text("想聊些什么？", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 inner()
                             }
                         },
@@ -2162,17 +2166,17 @@ private fun ClassicMediaAction(
     val interaction = remember(label) { MutableInteractionSource() }
     Row(
         modifier
-            .fillMaxHeight()
+            .heightIn(min = 56.dp)
             .clip(RoundedCornerShape(20.dp))
             .background(if (selected) SpectraColors.Focus.copy(.12f) else Color.Transparent)
             .clickable(
                 interactionSource = interaction,
-                indication = null,
+                indication = LocalIndication.current,
                 enabled = enabled,
                 role = Role.Button,
                 onClick = onClick,
             )
-            .padding(horizontal = 10.dp),
+            .padding(horizontal = 6.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
@@ -2236,7 +2240,7 @@ private fun FluidAiComposer(
                     keyboardActions = KeyboardActions(onSend = { if (!streaming && value.isNotBlank()) callbacks.onAction() }),
                     decorationBox = { inner ->
                         Box {
-                            if (value.isEmpty()) Text("告诉 Caesar∞ 你现在想做什么…", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface.copy(.40f))
+                            if (value.isEmpty()) Text("想聊些什么？", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             inner()
                         }
                     },
@@ -2312,7 +2316,7 @@ private fun ComposerToolAction(
             )
             .clickable(
                 interactionSource = interaction,
-                indication = null,
+                indication = LocalIndication.current,
                 enabled = enabled,
                 role = Role.Button,
                 onClick = onClick,

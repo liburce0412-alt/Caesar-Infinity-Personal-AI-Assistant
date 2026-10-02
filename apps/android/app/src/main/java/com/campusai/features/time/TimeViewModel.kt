@@ -30,6 +30,7 @@ import com.campusai.core.sync.CampusSyncScheduler
 class TimeViewModel(private val dao: CampusDao, private val appContext: Context, initialUserId: String?) : ViewModel() {
 
     private val activeUser = MutableStateFlow(initialUserId?.takeIf { it.isNotBlank() } ?: "local_user")
+    val activeUserId: StateFlow<String> = activeUser.asStateFlow()
 
     // Reactive complete record list mapped to domain layer
     val timeRecords: StateFlow<List<TimeRecord>> = activeUser.flatMapLatest { userId -> dao.getAllTimeRecordsFlow(userId, userId != "local_user") }
@@ -84,15 +85,17 @@ class TimeViewModel(private val dao: CampusDao, private val appContext: Context,
     }
 
     // Add record
-    fun addTimeRecord(
+    suspend fun addTimeRecord(
         title: String,
         category: String,
         startTime: Long,
         endTime: Long,
-        remark: String
+        remark: String,
+        expectedOwner: String,
     ) {
-        viewModelScope.launch {
-            _isInserting.value = true
+        check(expectedOwner == activeUser.value) { "账号已切换，请重新打开记录" }
+        check(_isInserting.compareAndSet(false, true)) { "正在保存记录，请稍候" }
+        try {
             val durationMin = if (endTime > startTime) {
                 (endTime - startTime) / (1000 * 60)
             } else {
@@ -105,13 +108,12 @@ class TimeViewModel(private val dao: CampusDao, private val appContext: Context,
                 endTime = endTime,
                 durationMinutes = durationMin,
                 remark = remark,
-                userId = activeUser.value,
+                userId = expectedOwner,
             )
-            record.dailyGoalSnapshot()?.let { dao.insertDailyGoalSnapshots(listOf(it)) }
-            dao.insertTimeRecord(TimeRecordEntity.fromDomain(record))
-            CampusSyncScheduler.enqueue(appContext)
-            _isInserting.value = false
-        }
+            dao.insertTimeRecordWithSnapshot(TimeRecordEntity.fromDomain(record), record.dailyGoalSnapshot())
+            // A committed local record must not be offered for duplicate retry if sync scheduling fails.
+            runCatching { CampusSyncScheduler.enqueue(appContext) }
+        } finally { _isInserting.value = false }
     }
 
     // Delete record
@@ -130,12 +132,16 @@ class TimeViewModel(private val dao: CampusDao, private val appContext: Context,
         }
     }
 
-    fun editTimeRecord(id: Int, title: String, category: String, startTime: Long, endTime: Long, remark: String) {
-        viewModelScope.launch {
+    suspend fun editTimeRecord(id: Int, title: String, category: String, startTime: Long, endTime: Long, remark: String, expectedOwner: String) {
+        check(expectedOwner == activeUser.value) { "账号已切换，请重新打开记录" }
+        check(_isInserting.compareAndSet(false, true)) { "正在保存记录，请稍候" }
+        try {
             val duration = ((endTime - startTime) / 60_000L).coerceAtLeast(0)
-            dao.editTimeRecord(id, title, category, startTime, endTime, duration, remark)
-            CampusSyncScheduler.enqueue(appContext)
-        }
+            check(dao.editOwnedTimeRecord(id, title, category, startTime, endTime, duration, remark, expectedOwner) == 1) {
+                "记录已不可用，请重新打开后再试"
+            }
+            runCatching { CampusSyncScheduler.enqueue(appContext) }
+        } finally { _isInserting.value = false }
     }
 
     fun deleteCourse(id: Int) {
@@ -145,14 +151,13 @@ class TimeViewModel(private val dao: CampusDao, private val appContext: Context,
         }
     }
 
-    fun importCourses(courses: List<CourseSchedule>, onComplete: (inserted: Int, duplicates: Int) -> Unit) {
-        viewModelScope.launch {
-            val owner = activeUser.value
-            val results = dao.importCourseSchedules(courses.map { CourseScheduleEntity.fromDomain(it, owner) })
-            val inserted = results.count { it != -1L }
-            if (inserted > 0) CampusSyncScheduler.enqueue(appContext)
-            onComplete(inserted, results.size - inserted)
-        }
+    suspend fun importCourses(courses: List<CourseSchedule>, expectedOwner: String): CourseImportResult {
+        check(expectedOwner == activeUser.value) { "账号已切换，请重新导入课程表" }
+        val results = dao.importCourseSchedules(courses.map { CourseScheduleEntity.fromDomain(it, expectedOwner) })
+        val inserted = results.count { it != -1L }
+        // Match record saves: the committed import succeeds even if scheduling sync fails.
+        if (inserted > 0) runCatching { CampusSyncScheduler.enqueue(appContext) }
+        return CourseImportResult(inserted, results.size - inserted)
     }
 
     fun getStatsToday(records: List<TimeRecord>): Long = com.campusai.core.model.TimeRecordCalendar.inRange(records, "日").sumOf { it.durationMinutes }
@@ -161,6 +166,8 @@ class TimeViewModel(private val dao: CampusDao, private val appContext: Context,
     fun getStreakDays(records: List<TimeRecord>): Int = com.campusai.core.model.TimeRecordCalendar.streak(records)
 
 }
+
+data class CourseImportResult(val inserted: Int, val duplicates: Int)
 
 private fun TimeRecord.dailyGoalSnapshot(zoneId: ZoneId = ZoneId.systemDefault()): DailyGoalSnapshotEntity? {
     if (durationMinutes <= 0L || endTime <= startTime) return null

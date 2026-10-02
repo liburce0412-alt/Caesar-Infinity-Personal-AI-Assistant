@@ -9,6 +9,7 @@ import android.media.ToneGenerator
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.Build
+import android.os.SystemClock
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -16,6 +17,13 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -80,6 +88,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.rememberCoroutineScope
@@ -92,6 +101,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -116,6 +128,7 @@ import com.campusai.core.designsystem.SpectraSurface
 import com.campusai.core.designsystem.SpectraTheme
 import com.campusai.core.designsystem.TelemetryChip
 import com.campusai.core.model.TimeRecord
+import com.campusai.features.time.FocusCountdown
 import com.campusai.core.model.UiState
 import com.campusai.core.health.HealthAvailability
 import com.campusai.core.health.HealthFreshness
@@ -134,6 +147,8 @@ import com.campusai.features.schedule.CourseDraft
 import com.campusai.features.schedule.ScheduleImporter
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -194,12 +209,12 @@ fun HomeScreen(
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(SimpleDateFormat("M月d日 EEEE", Locale.CHINA).format(Date()), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.6f))
+                    Text(SimpleDateFormat("M月d日 EEEE", Locale.CHINA).format(Date()), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("${timeGreeting()}，${displayName.ifBlank { "Caesar 用户" }}", style = MaterialTheme.typography.headlineLarge)
                     Text(
                         dailyText.ifBlank { "先完成一件最重要的小事" },
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(.58f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 SpectraSurface(
@@ -232,11 +247,12 @@ fun HomeScreen(
             ) {
                 Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Column {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text("今日行动", style = MaterialTheme.typography.titleLarge)
-                            Text("目标 ${formatDuration(goalMinutes)}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.6f))
+                            Text("目标 ${formatDuration(goalMinutes)}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (LocalDensity.current.fontScale > 1.3f) SpectraStatus("${(totalMinutes * 100 / goalMinutes).coerceAtMost(100)}% 达成", tone = SpectraStatusTone.SUCCESS)
                         }
-                        SpectraStatus(
+                        if (LocalDensity.current.fontScale <= 1.3f) SpectraStatus(
                             text = "${(totalMinutes * 100 / goalMinutes).coerceAtMost(100)}% 达成",
                             tone = SpectraStatusTone.SUCCESS,
                         )
@@ -289,7 +305,7 @@ fun HomeScreen(
                         Box(Modifier.fillMaxWidth().height(7.dp).clip(CircleShape).background(SpectraColors.Silver.copy(.55f))) {
                             Box(
                                 Modifier
-                                    .fillMaxWidth((streak / 7f).coerceIn(.08f, 1f))
+                                    .fillMaxWidth((streak / 7f).coerceIn(0f, 1f))
                                     .fillMaxHeight()
                                     .background(MaterialTheme.colorScheme.onSurface.copy(.76f)),
                             )
@@ -462,7 +478,7 @@ private fun HealthOverviewCard(
                         color = MaterialTheme.colorScheme.onSurface.copy(.52f),
                     )
                 }
-                SpectraStatus(statusText, tone = statusTone)
+                if (LocalDensity.current.fontScale <= 1.3f) SpectraStatus(statusText, tone = statusTone)
                 Icon(
                     Icons.Rounded.KeyboardArrowDown,
                     contentDescription = "查看健康数据详情",
@@ -470,6 +486,7 @@ private fun HealthOverviewCard(
                     tint = MaterialTheme.colorScheme.onSurface.copy(.52f),
                 )
             }
+            if (LocalDensity.current.fontScale > 1.3f) SpectraStatus(statusText, tone = statusTone)
             Spacer(Modifier.height(16.dp))
             if (summaryMetrics.isEmpty()) {
                 Text(
@@ -524,7 +541,7 @@ private fun HealthOverviewCard(
                             Text(
                                 issueNotice ?: "今天还没有可显示的健康数据。",
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface.copy(.58f),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         } else {
                             metrics.forEach { HealthMetricDetailRow(it) }
@@ -810,7 +827,7 @@ private fun HealthMetricStrip(metrics: List<HealthMetricItem>) {
                     Text(metric.value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                     metric.unit?.takeIf(String::isNotBlank)?.let {
                         Spacer(Modifier.width(3.dp))
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(.58f))
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -890,7 +907,7 @@ private fun HealthMetricDetailRow(metric: HealthMetricItem, badge: String? = met
 @Composable
 private fun HealthDetailRow(label: String, value: String, error: Boolean = false) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.Top) {
-        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.58f), modifier = Modifier.weight(1f))
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
         Text(
             value,
             style = MaterialTheme.typography.bodyMedium,
@@ -983,7 +1000,7 @@ private fun SpectraProgress(totalMinutes: Long, goalMinutes: Long) {
             fontWeight = FontWeight.SemiBold,
         )
         Spacer(Modifier.height(5.dp))
-        Text("今日累计", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.58f))
+        Text("今日累计", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(18.dp))
         Box(
             Modifier
@@ -994,7 +1011,7 @@ private fun SpectraProgress(totalMinutes: Long, goalMinutes: Long) {
         ) {
             Box(
                 Modifier
-                    .fillMaxWidth(animatedProgress.coerceAtLeast(.012f))
+                    .fillMaxWidth(animatedProgress)
                     .fillMaxHeight()
                     .background(MaterialTheme.colorScheme.onSurface.copy(.82f)),
             )
@@ -1005,7 +1022,7 @@ private fun SpectraProgress(totalMinutes: Long, goalMinutes: Long) {
 @Composable
 private fun SectionLabel(title: String, meta: String) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-        Text(title, style = MaterialTheme.typography.titleLarge)
+        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
         Text(meta, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.55f))
     }
 }
@@ -1022,31 +1039,67 @@ fun TimeScreen(
     val layout = SpectraTheme.layout
     val scope = rememberCoroutineScope()
     val courses by viewModel.courses.collectAsState()
+    val importOwner by viewModel.activeUserId.collectAsState()
     var range by rememberSaveable { mutableStateOf("日") }
     var focusPreset by rememberSaveable { mutableIntStateOf(50) }
-    var showAdd by rememberSaveable { mutableStateOf(false) }
-    var editing by remember { mutableStateOf<TimeRecord?>(null) }
+    var showAdd by rememberSaveable(importOwner) { mutableStateOf(false) }
+    var editing by remember(importOwner) { mutableStateOf<TimeRecord?>(null) }
+    var recordSaving by remember(importOwner, showAdd, editing?.id) { mutableStateOf(false) }
+    var recordSaveError by remember(importOwner, showAdd, editing?.id) { mutableStateOf<String?>(null) }
     var showImport by rememberSaveable { mutableStateOf(false) }
     var importDrafts by remember { mutableStateOf<List<CourseDraft>?>(null) }
     var importError by remember { mutableStateOf<String?>(null) }
     var importing by remember { mutableStateOf(false) }
-    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        if (uri != null) scope.launch {
-            importing = true; importError = null
-            runCatching { ScheduleImporter.fromImage(context, uri) }
-                .onSuccess { if (it.isEmpty()) importError = "没有识别到可靠的课程格。请换一张清晰、完整的课程表截图，或使用日历文件。" else importDrafts = it }
-                .onFailure { importError = "截图识别失败：${it.message ?: "图片无法读取"}。你可以改用日历文件或手动添加。" }
-            importing = false
+    var importSaving by remember { mutableStateOf(false) }
+    var importSaveError by remember { mutableStateOf<String?>(null) }
+    var importJob by remember { mutableStateOf<Job?>(null) }
+    var importRequest by remember { mutableLongStateOf(0L) }
+    var pickerOwner by rememberSaveable { mutableStateOf<String?>(null) }
+    fun cancelRead() {
+        importRequest++
+        importJob?.cancel()
+        importJob = null
+        importing = false
+    }
+    fun readSchedule(uri: Uri, image: Boolean, owner: String) {
+        cancelRead()
+        val request = importRequest
+        importing = true
+        importError = null
+        importSaveError = null
+        importJob = scope.launch {
+            try {
+                val drafts = if (image) ScheduleImporter.fromImage(context, uri)
+                    else withContext(Dispatchers.IO) { ScheduleImporter.fromIcs(context, uri) }
+                if (request == importRequest && owner == viewModel.activeUserId.value) {
+                    if (drafts.isEmpty()) importError = if (image) "没有识别到可靠的课程格，请选择清晰完整的原图。" else "这个日历文件里没有可导入的课程事件。"
+                    else importDrafts = drafts
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                if (request == importRequest && owner == viewModel.activeUserId.value) importError = "${if (image) "截图识别" else "日历解析"}失败：${failure.message ?: "文件无法读取"}。可以重新选择文件，或手动添加。"
+            } finally {
+                if (request == importRequest) { importing = false; importJob = null }
+            }
         }
     }
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        val owner = pickerOwner
+        pickerOwner = null
+        if (uri != null && owner != null && owner == viewModel.activeUserId.value) readSchedule(uri, image = true, owner = owner)
+    }
     val icsPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null) scope.launch {
-            importing = true; importError = null
-            runCatching { withContext(Dispatchers.IO) { ScheduleImporter.fromIcs(context, uri) } }
-                .onSuccess { if (it.isEmpty()) importError = "这个日历文件里没有可导入的课程事件。" else importDrafts = it }
-                .onFailure { importError = "日历文件解析失败：${it.message ?: "格式不受支持"}。" }
-            importing = false
-        }
+        val owner = pickerOwner
+        pickerOwner = null
+        if (uri != null && owner != null && owner == viewModel.activeUserId.value) readSchedule(uri, image = false, owner = owner)
+    }
+    LaunchedEffect(importOwner) {
+        cancelRead()
+        importDrafts = null
+        importSaving = false
+        importSaveError = null
+        importError = null
+        showImport = false
     }
     val currentDay = java.time.LocalDate.now()
     val filtered = remember(records, range, currentDay) { TimeRecordCalendar.inRange(records, range) }
@@ -1072,40 +1125,12 @@ fun TimeScreen(
             ) {
             item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Column { Text("时间", style = MaterialTheme.typography.headlineLarge); Text("今天的轨迹，清楚而不嘈杂", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.6f)) }
+                    Column(Modifier.weight(1f)) { Text("时间", style = MaterialTheme.typography.headlineLarge); Text("今天的轨迹，清楚而不嘈杂", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     SpectraIconAction(
                         icon = Icons.Rounded.FileOpen,
                         label = "导入课程表",
                         onClick = { showImport = true },
                     )
-                }
-            }
-            item {
-                SpectraSurface(
-                    modifier = Modifier.fillMaxWidth(),
-                    mood = PageMood.FOCUS,
-                    emphasized = true,
-                    contentPadding = PaddingValues(0.dp),
-                ) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("专注预设", style = MaterialTheme.typography.titleLarge)
-                        Spacer(Modifier.height(12.dp))
-                        com.campusai.core.designsystem.CaesarSlidingSelector(
-                            options = listOf("25 分钟", "50 分钟", "90 分钟"),
-                            selectedIndex = listOf(25, 50, 90).indexOf(focusPreset).coerceAtLeast(0),
-                            onSelected = { focusPreset = listOf(25, 50, 90)[it] },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        SpectraPrimaryButton(
-                            text = "进入 $focusPreset 分钟专注",
-                            onClick = { onStartFocus(focusPreset) },
-                            modifier = Modifier.fillMaxWidth(),
-                            icon = Icons.Rounded.Timer,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text("时长可以点击，也可直接拖动选中胶囊；完成后自动写入时间轴。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.62f))
-                    }
                 }
             }
             if (courses.isNotEmpty()) {
@@ -1125,6 +1150,33 @@ fun TimeScreen(
                 }
             }
             item {
+                SpectraSurface(
+                    modifier = Modifier.fillMaxWidth(),
+                    mood = PageMood.FOCUS,
+                    emphasized = true,
+                    contentPadding = PaddingValues(0.dp),
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("开始专注", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(12.dp))
+                        com.campusai.core.designsystem.CaesarSlidingSelector(
+                            options = listOf("25 分钟", "50 分钟", "90 分钟"),
+                            selectedIndex = listOf(25, 50, 90).indexOf(focusPreset).coerceAtLeast(0),
+                            onSelected = { focusPreset = listOf(25, 50, 90)[it] },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        SpectraPrimaryButton(
+                            text = "进入 $focusPreset 分钟专注",
+                            onClick = { onStartFocus(focusPreset) },
+                            modifier = Modifier.fillMaxWidth(),
+                            icon = Icons.Rounded.Timer,
+                        )
+
+                    }
+                }
+            }
+            item {
                 com.campusai.core.designsystem.CaesarSlidingSelector(
                     options = listOf("日", "周", "月"),
                     selectedIndex = listOf("日", "周", "月").indexOf(range).coerceAtLeast(0),
@@ -1134,8 +1186,14 @@ fun TimeScreen(
             }
             item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("${range}时间轴", style = MaterialTheme.typography.titleLarge)
-                    Text(formatDuration(filtered.sumOf { it.durationMinutes }), style = MaterialTheme.typography.labelMedium)
+                    Column(Modifier.weight(1f)) {
+                        Text("${range}时间轴", style = MaterialTheme.typography.titleLarge)
+                        Text("共 ${formatDuration(filtered.sumOf { it.durationMinutes })}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    TextButton(onClick = { showAdd = true }) {
+                        Icon(Icons.Rounded.Add, null, Modifier.size(18.dp))
+                        Text("补录时间")
+                    }
                 }
             }
             if (filtered.isEmpty()) {
@@ -1159,33 +1217,46 @@ fun TimeScreen(
                 }
             }
         }
-            FloatingActionButton(
-                onClick = { showAdd = true },
-                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = contentPadding.calculateBottomPadding() + 22.dp),
-                shape = CircleShape,
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-            ) { Icon(Icons.Rounded.Add, "新增记录") }
+
         }
     }
-    if (showAdd) AddTimeRecordDialog(initial = null, onDismiss = { showAdd = false }, onSave = { title, category, minutes, note ->
-        val end = System.currentTimeMillis(); viewModel.addTimeRecord(title, category, end - minutes * 60_000L, end, note); showAdd = false
-    })
-    editing?.let { record -> AddTimeRecordDialog(initial = record, onDismiss = { editing = null }, onSave = { title, category, minutes, note ->
-        val end = record.endTime
-        viewModel.editTimeRecord(record.id, title, category, end - minutes * 60_000L, end, note)
-        editing = null
-    }) }
+    fun saveRecord(record: TimeRecord?, title: String, category: String, minutes: Long, note: String) {
+        if (recordSaving) return
+        recordSaving = true
+        recordSaveError = null
+        val owner = importOwner
+        val end = record?.endTime ?: System.currentTimeMillis()
+        scope.launch {
+            try {
+                if (record == null) viewModel.addTimeRecord(title, category, end - minutes * 60_000L, end, note, expectedOwner = owner)
+                else viewModel.editTimeRecord(record.id, title, category, end - minutes * 60_000L, end, note, expectedOwner = owner)
+                if (owner == viewModel.activeUserId.value) { showAdd = false; editing = null }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                if (owner == viewModel.activeUserId.value) recordSaveError = "保存失败，已保留你的修改：${failure.message ?: "请稍后重试"}"
+            } finally {
+                if (owner == viewModel.activeUserId.value) recordSaving = false
+            }
+        }
+    }
+    if (showAdd) AddTimeRecordDialog(initial = null, onDismiss = { showAdd = false },
+        saving = recordSaving, saveError = recordSaveError,
+        onSave = { title, category, minutes, note -> saveRecord(null, title, category, minutes, note) })
+    editing?.let { record -> AddTimeRecordDialog(initial = record, onDismiss = { editing = null },
+        saving = recordSaving, saveError = recordSaveError,
+        onSave = { title, category, minutes, note -> saveRecord(record, title, category, minutes, note) }) }
     if (showImport) ImportScheduleSourceDialog(
         onDismiss = { showImport = false },
-        onImage = { showImport = false; imagePicker.launch("image/*") },
-        onIcs = { showImport = false; icsPicker.launch(arrayOf("text/calendar", "application/ics", "application/octet-stream")) },
-        onManual = { showImport = false; importDrafts = listOf(CourseDraft("新课程", 1, 8*60, 9*60+40)) },
+        onImage = { showImport = false; pickerOwner = importOwner; imagePicker.launch("image/*") },
+        onIcs = { showImport = false; pickerOwner = importOwner; icsPicker.launch(arrayOf("text/calendar", "application/ics", "application/octet-stream")) },
+        onManual = { showImport = false; importSaveError = null; importDrafts = listOf(CourseDraft("新课程", 1, 8*60, 9*60+40)) },
     )
-    if (importing) SpectraDialog(onDismissRequest = {}) {
+    if (importing) SpectraDialog(onDismissRequest = { cancelRead() }) {
         Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("正在读取课程表", style = MaterialTheme.typography.titleLarge)
-            Text("识别在本机完成。完成后会先让你确认，不会直接覆盖现有课程。")
+            androidx.compose.material3.LinearProgressIndicator(Modifier.fillMaxWidth())
+            Text("正在分析课程格与文字。识别在本机完成，保存前可逐项核对。")
+            TextButton(onClick = { cancelRead() }) { Text("取消读取") }
         }
     }
     importError?.let { message ->
@@ -1194,6 +1265,7 @@ fun TimeScreen(
                 Text("暂时没能导入", style = MaterialTheme.typography.titleLarge)
                 Text(message)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = { importError = null; showImport = true }) { Text("重新选择") }
                     TextButton(onClick = { importError = null }) { Text("知道了") }
                 }
             }
@@ -1201,47 +1273,68 @@ fun TimeScreen(
     }
     importDrafts?.let { drafts -> SchedulePreviewDialog(
         initial = drafts,
+        isSaving = importSaving,
+        saveError = importSaveError,
         onDismiss = { importDrafts = null },
         onConfirm = { edited ->
-            viewModel.importCourses(edited.map { it.toCourse() }) { inserted, duplicates -> scope.launch { onMessage("已导入 $inserted 门课程${if (duplicates>0) "，跳过 $duplicates 条重复" else ""}", null) } }
-            importDrafts = null
+            if (!importSaving) {
+                importSaving = true
+                importSaveError = null
+                val owner = importOwner
+                val request = ++importRequest
+                importJob = scope.launch {
+                    try {
+                        val result = viewModel.importCourses(edited.map { it.toCourse() }, expectedOwner = owner)
+                        if (request == importRequest && owner == viewModel.activeUserId.value) {
+                            importDrafts = null
+                            onMessage("已导入 ${result.inserted} 门课程${if (result.duplicates > 0) "，跳过 ${result.duplicates} 条重复" else ""}", null)
+                        }
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (failure: Exception) {
+                        if (request == importRequest && owner == viewModel.activeUserId.value) importSaveError = "保存失败，已保留你的修改：${failure.message ?: "请稍后重试"}"
+                    } finally {
+                        if (request == importRequest) { importSaving = false; importJob = null }
+                    }
+                }
+            }
         },
     ) }
 }
 
 @Composable
-private fun TimelineRow(record: TimeRecord, onEdit: () -> Unit, onDelete: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(36.dp).background(MaterialTheme.colorScheme.onSurface.copy(.08f), CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Bolt, null, tint = MaterialTheme.colorScheme.onSurface.copy(.72f), modifier = Modifier.size(18.dp)) }
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(record.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("${record.category} · ${SimpleDateFormat("HH:mm", Locale.CHINA).format(Date(record.startTime))}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.58f))
+internal fun TimelineRow(record: TimeRecord, onEdit: () -> Unit, onDelete: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(record.title, style = MaterialTheme.typography.titleMedium)
+        Text("${record.category} · ${SimpleDateFormat("HH:mm", Locale.CHINA).format(Date(record.startTime))}",
+            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(formatDuration(record.durationMinutes), Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
+            IconButton(onClick = onEdit) { Icon(Icons.Rounded.EditNote, "编辑", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+            IconButton(onClick = onDelete) { Icon(Icons.Rounded.DeleteOutline, "删除", tint = MaterialTheme.colorScheme.error) }
         }
-        Text(formatDuration(record.durationMinutes), style = MaterialTheme.typography.labelMedium)
-        IconButton(onClick = onEdit) { Icon(Icons.Rounded.EditNote, "编辑", tint = MaterialTheme.colorScheme.onSurface.copy(.55f)) }
-        IconButton(onClick = onDelete) { Icon(Icons.Rounded.DeleteOutline, "删除", tint = MaterialTheme.colorScheme.onSurface.copy(.55f)) }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AddTimeRecordDialog(initial: TimeRecord?, onDismiss: () -> Unit, onSave: (String, String, Long, String) -> Unit) {
+internal fun AddTimeRecordDialog(initial: TimeRecord?, onDismiss: () -> Unit, onSave: (String, String, Long, String) -> Unit,
+    saving: Boolean = false, saveError: String? = null) {
     val haptic = LocalHapticFeedback.current
     var title by rememberSaveable(initial?.id) { mutableStateOf(initial?.title.orEmpty()) }
     var category by rememberSaveable(initial?.id) { mutableStateOf(initial?.category ?: "学习") }
     var note by rememberSaveable(initial?.id) { mutableStateOf(initial?.remark.orEmpty()) }
-    var minutes by rememberSaveable(initial?.id) { mutableIntStateOf(initial?.durationMinutes?.toInt()?.coerceIn(5, 240) ?: 50) }
-    SpectraDialog(onDismissRequest = onDismiss) {
-            Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    var minutes by rememberSaveable(initial?.id) { mutableLongStateOf(initial?.durationMinutes?.coerceAtLeast(1L) ?: 50L) }
+    SpectraDialog(onDismissRequest = { if (!saving) onDismiss() }) {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(if (initial == null) "补录时间" else "编辑记录", style = MaterialTheme.typography.headlineMedium)
-                SpectraTextField(title, { title = it }, label = { Text("做了什么") }, singleLine = true, shape = RoundedCornerShape(12.dp))
-                SpectraTextField(category, { category = it }, label = { Text("分类") }, singleLine = true, shape = RoundedCornerShape(12.dp))
+                SpectraTextField(title, { title = it }, enabled = !saving, label = { Text("做了什么") }, singleLine = true, shape = RoundedCornerShape(12.dp))
+                SpectraTextField(category, { category = it }, enabled = !saving, label = { Text("分类") }, singleLine = true, shape = RoundedCornerShape(12.dp))
                 Text("$minutes 分钟", style = MaterialTheme.typography.labelMedium)
+                if (minutes !in 5L..240L) Text("保留原时长；拖动滑块可调整为 5–240 分钟。", style = MaterialTheme.typography.bodySmall)
                 Slider(
-                    value = minutes.toFloat(),
+                    value = minutes.coerceIn(5L, 240L).toFloat(),
                     onValueChange = { value ->
-                        val next = ((value / 5f).roundToInt() * 5).coerceIn(5, 240)
+                        val next = ((value / 5f).roundToInt() * 5).coerceIn(5, 240).toLong()
                         if (next != minutes) {
                             minutes = next
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -1249,16 +1342,21 @@ private fun AddTimeRecordDialog(initial: TimeRecord?, onDismiss: () -> Unit, onS
                     },
                     valueRange = 5f..240f,
                     steps = 46,
+                    enabled = !saving,
                 )
-                SpectraTextField(note, { note = it }, label = { Text("描述（可选）") }, shape = RoundedCornerShape(12.dp))
+                SpectraTextField(note, { note = it }, enabled = !saving, label = { Text("描述（可选）") }, shape = RoundedCornerShape(12.dp))
+                saveError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onDismiss) { Text("取消") }
-                    TextButton(enabled = title.isNotBlank(), onClick = { onSave(title.trim(), category.trim().ifEmpty { "其他" }, minutes.toLong(), note.trim()) }) { Text("保存") }
+                    TextButton(onClick = onDismiss, enabled = !saving) { Text("取消") }
+                    TextButton(enabled = title.isNotBlank() && !saving, onClick = { onSave(title.trim(), category.trim().ifEmpty { "其他" }, minutes, note.trim()) }) {
+                        Text(if (saving) "正在保存…" else if (saveError != null) "重试保存" else "保存")
+                    }
                 }
             }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun FocusSessionScreen(
     presetMinutes: Int,
@@ -1266,19 +1364,32 @@ fun FocusSessionScreen(
     soundEnabled: Boolean,
     onMinimize: () -> Unit,
     onFinish: (Int) -> Unit,
+    saving: Boolean = false,
+    saveError: String? = null,
 ) {
     val context = LocalContext.current
     val focusLayout = SpectraTheme.layout
     val focusTokens = SpectraTheme.tokens
     val fluid = SpectraTheme.isFluid
-    var remaining by rememberSaveable(presetMinutes) { mutableLongStateOf(presetMinutes * 60L) }
-    var running by rememberSaveable { mutableStateOf(true) }
-    var completed by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(running, completed) {
-        while (running && remaining > 0) { delay(1_000); remaining-- }
-        if (remaining == 0L && !completed) {
-            completed = true; running = false
-            if (soundEnabled) ToneGenerator(AudioManager.STREAM_NOTIFICATION, 32).apply { startTone(ToneGenerator.TONE_PROP_ACK, 900); delay(950); release() }
+    val totalMillis = presetMinutes.coerceAtLeast(1) * 60_000L
+    var countdown by rememberSaveable(presetMinutes, stateSaver = listSaver(
+        save = { listOf(it.remainingMillis, it.deadlineMillis ?: -1L) },
+        restore = { FocusCountdown(it[0], it[1].takeIf { deadline -> deadline >= 0 }) },
+    )) { mutableStateOf(FocusCountdown(totalMillis, SystemClock.elapsedRealtime() + totalMillis)) }
+    val running = countdown.running
+    val completed = countdown.completed
+    var completionNotified by rememberSaveable(presetMinutes) { mutableStateOf(false) }
+    val remaining = (countdown.remainingMillis + 999) / 1_000
+    LaunchedEffect(running) {
+        while (countdown.running) {
+            countdown = countdown.at(SystemClock.elapsedRealtime())
+            if (countdown.running) delay(minOf(1_000L, countdown.remainingMillis))
+        }
+    }
+    // Completion owns its feedback; a timer state change must not cancel tone cleanup.
+    LaunchedEffect(completed) {
+        if (completed && !completionNotified) {
+            completionNotified = true
             val vibrator = context.getSystemService(Vibrator::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 vibrator?.vibrate(VibrationEffect.createOneShot(90, VibrationEffect.DEFAULT_AMPLITUDE))
@@ -1286,11 +1397,25 @@ fun FocusSessionScreen(
                 @Suppress("DEPRECATION")
                 vibrator?.vibrate(90)
             }
+            if (soundEnabled) {
+                val tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 32)
+                try {
+                    tone.startTone(ToneGenerator.TONE_PROP_ACK, 900)
+                    delay(950)
+                } finally { tone.release() }
+            }
         }
     }
-    val totalSeconds = presetMinutes * 60f
-    val progress = (remaining / totalSeconds).coerceIn(0f, 1f)
-    val elapsedMinutes = ((presetMinutes * 60L - remaining).coerceAtLeast(0L) / 60L).toInt()
+    var showExit by rememberSaveable { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler { if (!saving) showExit = true }
+    fun finish(minutes: Int) {
+        if (saving) return
+        countdown = countdown.pause(SystemClock.elapsedRealtime())
+        showExit = false
+        onFinish(minutes)
+    }
+    val progress = (countdown.remainingMillis / totalMillis.toFloat()).coerceIn(0f, 1f)
+    val elapsedMinutes = ((totalMillis - countdown.remainingMillis).coerceAtLeast(0L) / 60_000L).toInt()
     SpectraPageScaffold(mood = PageMood.FOCUS) {
         Box(Modifier.fillMaxSize()) {
             Column(
@@ -1298,6 +1423,7 @@ fun FocusSessionScreen(
                     .fillMaxSize()
                     .statusBarsPadding()
                     .navigationBarsPadding()
+                    .verticalScroll(rememberScrollState())
                     .padding(
                         horizontal = focusLayout.pageHorizontalPadding,
                         vertical = focusLayout.pageTopSpacing,
@@ -1305,32 +1431,33 @@ fun FocusSessionScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Column {
+                    Column(Modifier.weight(1f)) {
                         Text("专注会话", color = MaterialTheme.colorScheme.onSurface.copy(.56f), style = MaterialTheme.typography.labelMedium)
                         Text("无界专注", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.headlineMedium)
                     }
-                    GlassPanel(Modifier.size(48.dp), radius = 24, emphasized = true, shadowed = false, onClick = onMinimize, opticalPriority = 8) {
-                        Icon(Icons.Rounded.KeyboardArrowDown, "最小化", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.align(Alignment.Center))
+                    GlassPanel(Modifier.size(48.dp).semantics(mergeDescendants = true) { role = Role.Button; if (saving) disabled() }, radius = 24, emphasized = true, shadowed = false,
+                        onClick = if (saving) null else { { showExit = true } }, opticalPriority = 8) {
+                        Icon(Icons.Rounded.Close, "退出专注", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.align(Alignment.Center))
                     }
                 }
-                Spacer(Modifier.weight(.55f))
+                Spacer(Modifier.height(24.dp))
                 GlassPanel(
-                    Modifier.fillMaxWidth().height(if (fluid) 320.dp else 288.dp),
+                    Modifier.fillMaxWidth().heightIn(min = 240.dp),
                     radius = if (fluid) focusTokens.radii.hero.value.roundToInt() else 48,
                     emphasized = true,
                     shadowed = !fluid,
                     opticalPriority = 10,
                 ) {
                     Column(
-                        Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 30.dp),
+                        Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 28.dp),
                         verticalArrangement = Arrangement.Center,
                     ) {
-                        Text(
-                            "%02d:%02d".format(remaining / 60, remaining % 60),
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 62.sp,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
+                        BoxWithConstraints(Modifier.fillMaxWidth()) {
+                            val clockSize = minOf(62f, maxWidth.value / (3.4f * LocalDensity.current.fontScale))
+                            Text("%02d:%02d".format(remaining / 60, remaining % 60),
+                                fontWeight = FontWeight.SemiBold, fontSize = clockSize.sp,
+                                color = MaterialTheme.colorScheme.onSurface, maxLines = 1, softWrap = false)
+                        }
                         Spacer(Modifier.height(10.dp))
                         Text(
                             when {
@@ -1347,18 +1474,16 @@ fun FocusSessionScreen(
                                 .background(MaterialTheme.colorScheme.onSurface.copy(.10f)),
                         ) {
                             Box(
-                                Modifier.fillMaxWidth(progress.coerceAtLeast(.01f)).fillMaxHeight()
+                                Modifier.fillMaxWidth(progress).fillMaxHeight()
                                     .background(MaterialTheme.colorScheme.onSurface.copy(.82f)),
                             )
                         }
                         Spacer(Modifier.height(12.dp))
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("已专注 $elapsedMinutes 分钟", color = MaterialTheme.colorScheme.onSurface.copy(.56f), style = MaterialTheme.typography.bodySmall)
-                            Text("目标 $presetMinutes 分钟", color = MaterialTheme.colorScheme.onSurface.copy(.56f), style = MaterialTheme.typography.bodySmall)
-                        }
+                        Text("已专注 $elapsedMinutes 分钟 · 目标 $presetMinutes 分钟",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                     }
                 }
-                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.height(24.dp))
                 GlassPanel(
                     Modifier.fillMaxWidth(),
                     radius = if (fluid) focusTokens.radii.card.value.roundToInt() else 28,
@@ -1380,22 +1505,31 @@ fun FocusSessionScreen(
                             )
                             Text(if (motionEnabled) "流体场域" else "静默场域", color = MaterialTheme.colorScheme.onSurface.copy(.52f), style = MaterialTheme.typography.bodySmall)
                         }
+                        saveError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
+                        if (saving) Text("正在保存专注记录…", style = MaterialTheme.typography.bodyMedium)
                         if (completed) {
-                            SpectraPrimaryButton("完成并写入时间轴", { onFinish(presetMinutes) }, Modifier.fillMaxWidth(), icon = Icons.Rounded.CheckCircle)
+                            SpectraPrimaryButton(if (saving) "正在保存…" else "完成并写入时间轴", { finish(presetMinutes) }, Modifier.fillMaxWidth(),
+                                enabled = !saving, icon = Icons.Rounded.CheckCircle)
                         } else {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp), maxItemsInEachRow = if (LocalDensity.current.fontScale > 1.3f) 1 else 2) {
                                 FocusGlassAction(
                                     text = if (running) "暂停" else "继续",
                                     icon = if (running) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                    onClick = { running = !running },
+                                    onClick = {
+                                        val now = SystemClock.elapsedRealtime()
+                                        countdown = if (running) countdown.pause(now) else countdown.resume(now)
+                                    },
                                     modifier = Modifier.weight(1f),
                                     emphasized = true,
+                                    enabled = !saving,
                                 )
                                 FocusGlassAction(
-                                    text = "结束并记录",
+                                    text = if (saveError != null) "重试保存" else if (elapsedMinutes > 0) "结束并记录" else "结束专注",
                                     icon = Icons.Rounded.Stop,
-                                    onClick = { onFinish(max(1, presetMinutes - (remaining / 60).toInt())) },
+                                    onClick = { if (elapsedMinutes > 0) finish(elapsedMinutes) else showExit = true },
                                     modifier = Modifier.weight(1f),
+                                    enabled = !saving,
                                 )
                             }
                         }
@@ -1404,6 +1538,16 @@ fun FocusSessionScreen(
             }
         }
     }
+    if (showExit) SpectraDialog(onDismissRequest = { showExit = false }) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("结束本次专注？", style = MaterialTheme.typography.titleLarge)
+            Text(if (elapsedMinutes > 0) "已专注 $elapsedMinutes 分钟，可以保存这段时间。" else "尚未满一分钟，退出将不生成时间记录。")
+            if (elapsedMinutes > 0) TextButton(onClick = { finish(elapsedMinutes) }) { Text("保存并结束") }
+            TextButton(onClick = onMinimize) { Text("退出且不记录", color = MaterialTheme.colorScheme.error) }
+            TextButton(onClick = { showExit = false }) { Text("继续专注") }
+        }
+    }
+
 }
 
 @Composable
@@ -1413,11 +1557,14 @@ private fun FocusGlassAction(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     emphasized: Boolean = false,
+    enabled: Boolean = true,
 ) {
-    GlassPanel(modifier.height(54.dp), radius = 27, emphasized = emphasized, shadowed = false, onClick = onClick, optical = false) {
-        Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(19.dp))
-            Text(text, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+    GlassPanel(modifier.heightIn(min = 54.dp).semantics(mergeDescendants = true) { role = Role.Button; if (!enabled) disabled() }, radius = 27, emphasized = emphasized, shadowed = false,
+        onClick = if (enabled) onClick else null, optical = false) {
+        Row(Modifier.align(Alignment.Center).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
+            val ink = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else .38f)
+            Icon(icon, null, tint = ink, modifier = Modifier.size(19.dp))
+            Text(text, color = ink, style = MaterialTheme.typography.labelLarge)
         }
     }
 }

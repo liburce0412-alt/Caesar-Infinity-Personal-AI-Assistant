@@ -2,6 +2,11 @@ package com.campusai
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
@@ -65,9 +70,9 @@ class AdaptiveSpectraTest {
     @Test
     fun `fluid is a complete layout and material system`() {
         val fluidTokens = spectraTokensForStyle(style = SpectraVisualStyle.FLUID)
-        assertEquals(26.dp, fluidTokens.radii.card)
-        assertEquals(34.dp, fluidTokens.radii.hero)
-        assertEquals(58.dp, fluidTokens.sizes.navigationDock)
+        assertEquals(22.dp, fluidTokens.radii.card)
+        assertEquals(28.dp, fluidTokens.radii.hero)
+        assertEquals(64.dp, fluidTokens.sizes.navigationDock)
 
         var capturedStyle = SpectraVisualStyle.CLASSIC
         var capturedHorizontal = 0.dp
@@ -96,6 +101,21 @@ class AdaptiveSpectraTest {
         }
 
         compose.runOnIdle { assertSame(DefaultSpectraTokens, captured) }
+    }
+
+    @Test
+    fun `uncontained text inherits dark theme foreground`() {
+        var expected = Color.Unspecified
+        compose.setContent {
+            CampusTheme(ThemeMode.DARK) {
+                expected = MaterialTheme.colorScheme.onBackground
+                Text("默认正文")
+            }
+        }
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithText("默认正文")
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertEquals(expected, layouts.single().layoutInput.style.color)
     }
 
     @Test

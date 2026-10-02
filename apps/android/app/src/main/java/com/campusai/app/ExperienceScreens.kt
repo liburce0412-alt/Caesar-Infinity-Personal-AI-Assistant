@@ -2,7 +2,6 @@ package com.campusai.app
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -13,9 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -23,8 +20,6 @@ import com.campusai.core.designsystem.*
 import com.campusai.core.preferences.UserPreferences
 import com.campusai.core.preferences.UserPreferencesRepository
 import kotlinx.coroutines.launch
-import kotlin.math.cos
-import kotlin.math.sin
 
 internal enum class OptionalComponent(val title: String) {
     TODAY("今日进度"), HEALTH("今日健康"), STREAK("连续记录"), INSIGHTS("AI 洞察"), ANNOUNCEMENTS("公告消息"),
@@ -80,38 +75,17 @@ internal fun PeaceWelcome(motionEnabled: Boolean = SpectraTheme.tokens.motion.en
     LaunchedEffect(motionEnabled) {
         if (motionEnabled) {
             progress.snapTo(0f)
-            progress.animateTo(1f, tween(6200))
-        } else progress.snapTo(.5f)
+            progress.animateTo(1f, tween(600))
+        } else progress.snapTo(1f)
     }
-    val accent = MaterialTheme.colorScheme.primary
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("我们的心愿是", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface.copy(.65f))
-        Box(Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
-            Canvas(Modifier.fillMaxSize()) {
-                val dissolve = ((progress.value - .64f) / .3f).coerceIn(0f, 1f)
-                if (dissolve > 0f && dissolve < 1f) repeat(40) { i ->
-                    val angle = i * 2.39996f
-                    val radius = (18f + i % 9 * 3f + dissolve * 64f) * density
-                    drawCircle(accent.copy(alpha = (1f - dissolve) * .5f), (1f + i % 3) * density,
-                        Offset(size.width / 2 + cos(angle) * radius, size.height / 2 + sin(angle) * radius * .38f))
-                }
-            }
-            Row(Modifier.clearAndSetSemantics { contentDescription = "世界和平" }, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                "世界和平".forEachIndexed { index, character ->
-                    Text(character.toString(), style = MaterialTheme.typography.headlineLarge,
-                        modifier = Modifier.graphicsLayer {
-                            val appear = ((progress.value - index * .065f) / .12f).coerceIn(0f, 1f)
-                            val disappear = ((progress.value - .64f - index * .025f) / .2f).coerceIn(0f, 1f)
-                            // Return to a quiet, readable signature after the particles fade.
-                            val settle = ((progress.value - .94f) / .06f).coerceIn(0f, 1f)
-                            alpha = (appear * (1f - disappear)).coerceAtLeast(settle)
-                            translationY = ((1f - appear) * 16f - disappear * (1f - settle) * 22f) * density
-                            scaleX = 1f + disappear * (1f - settle) * .12f
-                            scaleY = scaleX
-                        })
-                }
-            }
-        }
+    Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("我们的心愿是", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("世界和平", style = MaterialTheme.typography.headlineLarge,
+            modifier = Modifier.graphicsLayer {
+                alpha = .65f + progress.value * .35f
+                translationY = (1f - progress.value) * 8f * density
+            })
     }
 }
 
@@ -131,9 +105,9 @@ internal fun WelcomeGuide(onFinish: () -> Unit) {
                 Text("初次见面 · ${step + 1} / 4", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
                 TextButton(onClick = onFinish) { Text("跳过引导") }
             }
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.Center) {
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(vertical = 20.dp), verticalArrangement = Arrangement.Center) {
                 PeaceWelcome()
-                Spacer(Modifier.height(28.dp))
+                Spacer(Modifier.height(24.dp))
                 Text(titles[step], style = MaterialTheme.typography.headlineLarge)
                 Spacer(Modifier.height(18.dp))
                 Text(details[step], style = MaterialTheme.typography.bodyLarge)

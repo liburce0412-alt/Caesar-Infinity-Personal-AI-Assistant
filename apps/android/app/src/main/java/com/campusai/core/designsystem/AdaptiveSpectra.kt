@@ -86,8 +86,8 @@ data class SpectraMotion(
 
 @Immutable
 data class SpectraAlpha(
-    val secondaryText: Float = .66f,
-    val tertiaryText: Float = .48f,
+    val secondaryText: Float = .78f,
+    val tertiaryText: Float = .64f,
     val subtleSurface: Float = .12f,
     val glass: Float = .17f,
     val emphasizedGlass: Float = .25f,
@@ -135,7 +135,7 @@ data class SpectraLayoutTokens(
 private val ClassicSpectraLayout = SpectraLayoutTokens(
     pageHorizontalPadding = 20.dp,
     pageTopSpacing = 12.dp,
-    pageBottomSpacing = 104.dp,
+    pageBottomSpacing = 24.dp,
     sectionGap = 14.dp,
     compactGap = 10.dp,
     dockHorizontalPadding = 16.dp,
@@ -145,13 +145,13 @@ private val ClassicSpectraLayout = SpectraLayoutTokens(
 
 private val FluidSpectraLayout = SpectraLayoutTokens(
     pageHorizontalPadding = 16.dp,
-    pageTopSpacing = 20.dp,
-    pageBottomSpacing = 112.dp,
-    sectionGap = 22.dp,
+    pageTopSpacing = 16.dp,
+    pageBottomSpacing = 28.dp,
+    sectionGap = 18.dp,
     compactGap = 12.dp,
-    dockHorizontalPadding = 28.dp,
-    dockVerticalPadding = 12.dp,
-    dockHeight = 58.dp,
+    dockHorizontalPadding = 16.dp,
+    dockVerticalPadding = 8.dp,
+    dockHeight = 64.dp,
 )
 
 val DefaultSpectraTokens = SpectraTokens()
@@ -191,11 +191,11 @@ fun spectraTokensForStyle(
 ): SpectraTokens = when (style) {
     SpectraVisualStyle.CLASSIC -> base
     SpectraVisualStyle.FLUID -> base.copy(
-        spacing = base.spacing.copy(md = 18.dp, lg = 24.dp, xl = 30.dp, xxl = 40.dp),
-        radii = base.radii.copy(input = 18.dp, card = 26.dp, hero = 34.dp),
+        spacing = base.spacing.copy(md = 16.dp, lg = 20.dp, xl = 26.dp, xxl = 32.dp),
+        radii = base.radii.copy(input = 14.dp, card = 22.dp, hero = 28.dp),
         motion = base.motion.copy(microMillis = 110, shortMillis = 240, longMillis = 520),
         alpha = base.alpha.copy(subtleSurface = .09f, glass = .13f, emphasizedGlass = .21f),
-        sizes = base.sizes.copy(navigationDock = 58.dp),
+        sizes = base.sizes.copy(navigationDock = 64.dp),
     )
 }
 
@@ -237,13 +237,16 @@ private fun PageMood.accent(): Color = when (this) {
 }
 
 @Composable
-private fun SpectraStatusTone.color(): Color = when (this) {
-    SpectraStatusTone.NEUTRAL -> MaterialTheme.colorScheme.onSurface
-    SpectraStatusTone.INFO -> SpectraColors.Focus
-    SpectraStatusTone.SUCCESS -> SpectraColors.Success
-    SpectraStatusTone.WARNING -> SpectraColors.Warning
-    SpectraStatusTone.ERROR -> MaterialTheme.colorScheme.error
-    SpectraStatusTone.STALE -> SpectraColors.Warm
+private fun SpectraStatusTone.color(): Color {
+    val dark = MaterialTheme.colorScheme.background.luminance() < .35f
+    return when (this) {
+        SpectraStatusTone.NEUTRAL -> MaterialTheme.colorScheme.onSurfaceVariant
+        SpectraStatusTone.INFO -> MaterialTheme.colorScheme.primary
+        SpectraStatusTone.SUCCESS -> if (dark) Color(0xFF7FDDB1) else Color(0xFF126D49)
+        SpectraStatusTone.WARNING -> if (dark) Color(0xFFFFD18A) else Color(0xFF825100)
+        SpectraStatusTone.ERROR -> MaterialTheme.colorScheme.error
+        SpectraStatusTone.STALE -> if (dark) Color(0xFFFFBE99) else Color(0xFF934817)
+    }
 }
 
 @Composable
@@ -344,7 +347,7 @@ fun SpectraAction(
         onClick = if (enabled) onClick else null,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = tokens.spacing.md, vertical = tokens.spacing.xs),
+            modifier = Modifier.align(Alignment.Center).padding(horizontal = tokens.spacing.md, vertical = tokens.spacing.xs),
             horizontalArrangement = Arrangement.spacedBy(tokens.spacing.xs),
             verticalAlignment = Alignment.CenterVertically,
         ) {

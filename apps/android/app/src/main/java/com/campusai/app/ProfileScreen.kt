@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.requiredWidth
@@ -78,6 +79,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -221,8 +223,8 @@ fun ProfileScreen(
             }
         }
         item {
-            GlassPanel(Modifier.fillMaxWidth().height(86.dp), radius = cardRadius, shadowed = !SpectraTheme.isFluid) {
-                Row(Modifier.fillMaxSize().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            GlassPanel(Modifier.fillMaxWidth().heightIn(min = 86.dp), radius = cardRadius, shadowed = !SpectraTheme.isFluid) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 18.dp), verticalAlignment = Alignment.CenterVertically) {
                     StatCell("$totalHours", "累计小时", Modifier.weight(1f))
                     VerticalRule()
                     StatCell(records.size.toString(), "时间记录", Modifier.weight(1f))
@@ -393,91 +395,44 @@ internal fun ProfileHero(profile: CampusProfile, fallbackName: String, level: In
     val hasCover = coverUrl.isNotBlank() && coverLoaded
     val primary = if (hasCover) Color.White else MaterialTheme.colorScheme.onSurface
     val tokens = SpectraTheme.tokens
-    val fluid = SpectraTheme.isFluid
     GlassPanel(
-        Modifier.fillMaxWidth().height(if (fluid) 224.dp else 208.dp),
-        radius = tokens.radii.hero.value.roundToInt(),
-        emphasized = true,
-        shadowed = false,
-        onClick = onEdit,
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(tokens.radii.hero)), radius = tokens.radii.hero.value.roundToInt(),
+        emphasized = true, shadowed = false, onClick = onEdit,
     ) {
-        Box(Modifier.fillMaxSize().clip(RoundedCornerShape(tokens.radii.hero))) {
-            if (!hasCover) {
-                Box(Modifier.fillMaxSize().background(Color.White.copy(.06f)))
-                BrandMark(Modifier.align(Alignment.TopCenter).padding(top = 26.dp).size(100.dp))
-            }
-            if (coverUrl.isNotBlank()) {
-                AsyncImage(
-                    model = coverUrl,
-                    contentDescription = "个人背景",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                    onLoading = { coverLoaded = false },
-                    onSuccess = { coverLoaded = true },
-                    onError = { coverLoaded = false },
-                )
-            }
-            if (hasCover) {
-                Box(
-                    Modifier.fillMaxSize().background(
-                        Brush.verticalGradient(
-                            listOf(
-                                Color.Transparent,
-                                Color(0xFF111827).copy(.18f),
-                                Color(0xFF111827).copy(.76f),
-                            ),
-                        ),
-                    ),
-                )
-            }
-            Row(
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .height(if (fluid) 108.dp else 100.dp)
-                    .background(
-                        if (hasCover) {
-                            Brush.horizontalGradient(listOf(Color.Black.copy(.06f), Color.Black.copy(.18f)))
-                        } else if (fluid) {
-                            Brush.horizontalGradient(listOf(Color.White.copy(.10f), Color.White.copy(.055f)))
-                        } else {
-                            Brush.horizontalGradient(
-                                listOf(
-                                    Color.White.copy(if (hasCover) .30f else .12f),
-                                    Color.White.copy(if (hasCover) .20f else .08f),
-                                    SpectraColors.Cyan.copy(.08f),
-                                    SpectraColors.Violet.copy(.07f),
-                                ),
-                            )
-                        },
-                    )
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(Modifier.size(76.dp), contentAlignment = Alignment.Center) {
+        if (coverUrl.isNotBlank()) AsyncImage(
+            model = coverUrl, contentDescription = "个人背景", modifier = Modifier.matchParentSize(),
+            contentScale = ContentScale.Crop,
+            onLoading = { coverLoaded = false }, onSuccess = { coverLoaded = true }, onError = { coverLoaded = false },
+        )
+        if (hasCover) Box(Modifier.matchParentSize().background(Brush.verticalGradient(
+            0f to Color.Transparent, .3f to Color.Transparent,
+            .55f to Color(0xFF111827).copy(.68f), 1f to Color(0xFF111827).copy(.9f),
+        )))
+        Column(Modifier.fillMaxWidth().padding(22.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(72.dp), contentAlignment = Alignment.Center) {
                     Canvas(Modifier.fillMaxSize()) {
-                        drawCircle(primary.copy(if (fluid) .34f else .20f), style = Stroke(if (fluid) 1.5.dp.toPx() else 1.dp.toPx()))
-                        if (!fluid) {
-                            drawArc(SpectraColors.Cyan.copy(.82f), 126f, 46f, false, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round))
-                            drawArc(SpectraColors.Violet.copy(.72f), 284f, 38f, false, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round))
-                            drawArc(SpectraColors.Warm.copy(.62f), 344f, 24f, false, style = Stroke(1.5.dp.toPx(), cap = StrokeCap.Round))
-                        }
+                        drawCircle(primary.copy(.3f), style = Stroke(1.5.dp.toPx()))
                     }
-                    BrandMark(Modifier.size(62.dp))
-                    if (profile.avatarUrl.isNotBlank()) {
-                        AsyncImage(profile.avatarUrl, "头像", Modifier.size(66.dp).clip(CircleShape), contentScale = ContentScale.Crop)
-                    }
+                    BrandMark(Modifier.size(54.dp))
+                    if (profile.avatarUrl.isNotBlank()) AsyncImage(
+                        profile.avatarUrl, "头像", Modifier.size(62.dp).clip(CircleShape), contentScale = ContentScale.Crop,
+                    )
                 }
-                Spacer(Modifier.size(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(profile.displayName.ifBlank { fallbackName }, style = MaterialTheme.typography.titleLarge, color = primary)
-                        if (profile.isStaff) { Spacer(Modifier.size(5.dp)); Icon(Icons.Rounded.Shield, "管理员", tint = if (hasCover) Color.White else SpectraColors.Focus, modifier = Modifier.size(18.dp)) }
-                    }
-                    if (profile.bio.isNotBlank()) Text(profile.bio, maxLines = 1, style = MaterialTheme.typography.bodyMedium, color = primary.copy(.70f))
-                    Text("LEVEL $level · ${maxOf(profile.experience.toLong(), xp)} XP", fontFamily = Tomorrow, fontWeight = FontWeight.SemiBold, color = primary.copy(.72f))
-                }
+                Spacer(Modifier.weight(1f))
                 Icon(Icons.Rounded.Edit, "编辑资料", tint = primary)
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(profile.displayName.ifBlank { fallbackName }, modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.headlineMedium, color = primary,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (profile.isStaff) Icon(Icons.Rounded.Shield, "管理员", tint = primary, modifier = Modifier.size(20.dp))
+                }
+                if (profile.bio.isNotBlank()) Text(profile.bio, maxLines = 3, overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium, color = primary.copy(.82f))
+                Text("LEVEL $level · ${maxOf(profile.experience.toLong(), xp)} XP", fontFamily = Tomorrow,
+                    style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = primary.copy(.76f))
             }
         }
     }
@@ -519,12 +474,12 @@ private fun ProfileEditor(profile: CampusProfile, saving: Boolean, message: Stri
                 SpectraPrimaryButton("更换头像", { avatarPicker.launch("image/*") }, Modifier.weight(1f), enabled = !saving, icon = Icons.Rounded.CameraAlt)
                 SpectraPrimaryButton("更换背景", { coverPicker.launch("image/*") }, Modifier.weight(1f), enabled = !saving, icon = Icons.Rounded.Badge)
             }
-            SpectraTextField(name, { name = it.take(32) }, Modifier.fillMaxWidth(), label = { Text("账号名称") }, singleLine = true, shape = RoundedCornerShape(12.dp))
-            SpectraTextField(bio, { bio = it.take(160) }, Modifier.fillMaxWidth(), label = { Text("个人简介（可选）") }, minLines = 2, shape = RoundedCornerShape(12.dp), supportingText = { Text("${bio.length}/160") })
+            SpectraTextField(name, { name = it.take(32) }, Modifier.fillMaxWidth(), enabled = !saving, label = { Text("账号名称") }, singleLine = true, shape = RoundedCornerShape(12.dp))
+            SpectraTextField(bio, { bio = it.take(160) }, Modifier.fillMaxWidth(), enabled = !saving, label = { Text("个人简介（可选）") }, minLines = 2, shape = RoundedCornerShape(12.dp), supportingText = { Text("${bio.length}/160") })
             message?.let { Text(it, color = SpectraColors.Success, style = MaterialTheme.typography.bodyMedium) }
             error?.let { Text(it, color = SpectraColors.Error, style = MaterialTheme.typography.bodyMedium) }
             SpectraPrimaryButton(if (saving) "正在保存…" else "保存资料", { scope.launch { repository.updateText(userId, name, bio) } }, Modifier.fillMaxWidth(), enabled = !saving && name.trim().length in 2..32, icon = Icons.Rounded.Save)
-            Text("图片保存在你的 Supabase 私有目录；替换成功后会清理旧文件。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.58f))
+            Text("图片仅用于你的个人资料，保存成功后会更新头像和背景。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.58f))
         }
     }
 }
@@ -535,9 +490,9 @@ private fun AppearanceSettings(preferences: UserPreferences, repository: UserPre
     GlassPanel(Modifier.fillMaxWidth(), radius = 16, emphasized = true) {
         Column {
             Column(Modifier.padding(16.dp)) {
-                Text("界面体系", style = MaterialTheme.typography.titleMedium)
+                Text("界面风格", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "经典保留当前信息架构；Strba Fluid 会同步改变全 App 的留白、卡片、导航、转场与环境场。",
+                    "经典紧凑清晰，Strba Fluid 带来更宽松的布局与流动光影。选择后即可预览。",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(.58f),
                 )
@@ -559,8 +514,8 @@ private fun AppearanceSettings(preferences: UserPreferences, repository: UserPre
             SettingSelector(Icons.Rounded.Palette, "主题", ThemeMode.entries, preferences.themeMode, { themeLabel(it) }) { onFeedback(); scope.launch { repository.setTheme(it) } }
             DividerInset()
             Column(Modifier.padding(16.dp)) {
-                Text("SPECTRA 环境", style = MaterialTheme.typography.titleMedium)
-                Text("样本会立即改变整页体积色场。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.58f))
+                Text("背景色彩", style = MaterialTheme.typography.titleMedium)
+                Text("选择喜欢的色彩，页面会立即更新。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(12.dp))
                 com.campusai.core.designsystem.CaesarSlidingSelector(
                     options = SpectraEnvironment.entries.map(::environmentSelectorLabel),
@@ -599,12 +554,10 @@ private fun AppearanceSettings(preferences: UserPreferences, repository: UserPre
 @Composable
 private fun EnvironmentSample(environment: SpectraEnvironment) {
     val colors = environmentColors(environment)
-    Box(
-        Modifier.fillMaxWidth().height(88.dp).background(Brush.horizontalGradient(colors), RoundedCornerShape(44.dp)).border(1.dp, Color.White.copy(.8f), RoundedCornerShape(44.dp)),
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(Modifier.fillMaxSize().background(Brush.radialGradient(listOf(Color.White.copy(.54f), Color.Transparent)), RoundedCornerShape(44.dp)))
-        Text(environmentLabel(environment), style = MaterialTheme.typography.labelMedium, color = SpectraColors.Ink)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.width(72.dp).height(24.dp).background(Brush.horizontalGradient(colors), RoundedCornerShape(8.dp)))
+        Text("色彩预览 · ${environmentLabel(environment)}", style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -883,8 +836,8 @@ private fun currentStreak(records: List<TimeRecord>): Int = com.campusai.core.mo
 
 @Composable
 private fun AchievementCard(item: AchievementUi, modifier: Modifier = Modifier.width(150.dp)) {
-    GlassPanel(modifier.height(132.dp), radius = 16) {
-        Column(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.SpaceBetween) {
+    GlassPanel(modifier.heightIn(min = 148.dp), radius = 16) {
+        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             OpticalBadge(item.colors, item.unlocked, item.progress.toFloat() / item.target.coerceAtLeast(1), Modifier.size(48.dp))
             Column {
                 Text(item.name, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface.copy(if (item.unlocked) 1f else .55f))
@@ -1795,8 +1748,8 @@ private fun LocalAiSettings(
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(availableModels, key = CloudProviderModel::id) { model ->
                             GlassPanel(
-                                modifier = Modifier.height(38.dp),
-                                radius = 19,
+                                modifier = Modifier.heightIn(min = 48.dp),
+                                radius = 24,
                                 emphasized = model.id == modelId,
                                 shadowed = false,
                                 onClick = {
@@ -1808,7 +1761,7 @@ private fun LocalAiSettings(
                                     }
                                 },
                             ) {
-                                Box(Modifier.padding(horizontal = 12.dp).fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Box(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), contentAlignment = Alignment.Center) {
                                     Text(model.displayName, maxLines = 1, style = MaterialTheme.typography.labelMedium)
                                 }
                             }
@@ -2072,9 +2025,9 @@ private fun SettingLink(icon: ImageVector, label: String, subtitle: String? = nu
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null)
         Spacer(Modifier.size(12.dp))
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(label, style = MaterialTheme.typography.titleMedium)
-            subtitle?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.56f)) }
+            subtitle?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurface.copy(.45f))
     }

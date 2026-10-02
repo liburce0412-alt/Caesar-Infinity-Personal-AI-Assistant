@@ -14,11 +14,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.unit.dp
 
 /** Shared clear-glass input. Native editing, password masking and IME semantics are preserved. */
 @Composable
@@ -40,13 +38,17 @@ fun SpectraTextField(
     singleLine: Boolean = false,
     maxLines: Int = if (singleLine) 1 else Int.MAX_VALUE,
     minLines: Int = 1,
-    shape: Shape = RoundedCornerShape(18.dp),
+    shape: Shape = RoundedCornerShape(SpectraTheme.tokens.radii.input),
 ) {
     val source = remember { MutableInteractionSource() }
     val focused by source.collectIsFocusedAsState()
     val dark = MaterialTheme.colorScheme.background.luminance() < .35f
     val tint by animateColorAsState(
-        Color.White.copy(alpha = if (dark) { if (focused) .10f else .045f } else { if (focused) .32f else .16f }),
+        MaterialTheme.colorScheme.surface.copy(alpha = when {
+            !SpectraTheme.tokens.motion.enabled -> 1f
+            focused -> if (dark) .94f else .96f
+            else -> if (dark) .78f else .82f
+        }),
         animationSpec = tween(SpectraTheme.tokens.motion.resolve(160)),
         label = "glass-input-focus",
     )
@@ -61,7 +63,14 @@ fun SpectraTextField(
         colors = OutlinedTextFieldDefaults.colors(
             focusedContainerColor = tint, unfocusedContainerColor = tint,
             disabledContainerColor = tint, errorContainerColor = tint,
-            unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(.18f),
+            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+            unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            unfocusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+            focusedBorderColor = MaterialTheme.colorScheme.primary,
+            errorBorderColor = MaterialTheme.colorScheme.error,
+            errorLabelColor = MaterialTheme.colorScheme.error,
         ),
     )
 }

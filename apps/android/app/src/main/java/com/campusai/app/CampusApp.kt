@@ -9,6 +9,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -27,6 +28,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -61,8 +65,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.saveable.SaveableStateHolder
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -85,6 +92,7 @@ import androidx.compose.ui.semantics.selectableGroup
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -152,6 +160,21 @@ enum class MainDestination(val label: String, val icon: ImageVector) {
     CAMPUS("树洞", Icons.Rounded.Forum),
     MARKET("心愿墙", Icons.Rounded.FavoriteBorder),
     PROFILE("我的", Icons.Rounded.Person),
+}
+
+internal fun MainDestination.savedStateKey(owner: String): String = "$owner:$name"
+
+@Composable
+internal fun rememberAccountDestinationState(owner: String): SaveableStateHolder {
+    val holder = rememberSaveableStateHolder()
+    var previousOwner by rememberSaveable { mutableStateOf(owner) }
+    LaunchedEffect(owner) {
+        if (previousOwner != owner) {
+            MainDestination.entries.forEach { holder.removeState(it.savedStateKey(previousOwner)) }
+            previousOwner = owner
+        }
+    }
+    return holder
 }
 
 /** One mutually-exclusive app surface; full-screen tasks never coexist with the main scaffold. */
@@ -295,6 +318,8 @@ fun CampusApp(
     var appSurface by rememberSaveable(stateSaver = AppSurfaceSaver) {
         mutableStateOf<AppSurface>(AppSurface.Main(MainDestination.HOME))
     }
+    val destinationOwner = authState.userId.takeIf { authState.signedIn && it.isNotBlank() } ?: "local_user"
+    val destinationState = rememberAccountDestinationState(destinationOwner)
     // Set the route before any glass node can attach. Navigation below repeats this synchronously
     // before changing Compose state, making a route transition an atomic registry boundary.
     remember { OpticalGlassRegistry.beginRouteHost(appSurface.opticalRouteKey) }
@@ -459,21 +484,21 @@ fun CampusApp(
                 is AppSurface.Main -> {
                     Scaffold(
                         containerColor = Color.Transparent,
+                        contentWindowInsets = WindowInsets.safeDrawing,
                         snackbarHost = { SnackbarHost(snackbar) },
                         bottomBar = {
-                            // The dock survives destination changes inside the main Scaffold. Key it
-                            // to the optical route so its Modifier nodes detach before the registry
-                            // advances, then attach with the new authorized generation.
-                            androidx.compose.runtime.key(surface.destination) {
-                                SpectraDock(
-                                    destination = surface.destination,
-                                    motionEnabled = preferences.motionMode == MotionMode.ON,
-                                    onDestination = { navigateTo(AppSurface.Main(it)) },
-                                )
-                            }
+                            SpectraDock(
+                                destination = surface.destination,
+                                motionEnabled = preferences.motionMode == MotionMode.ON,
+                                onDestination = { navigateTo(AppSurface.Main(it)) },
+                            )
                         },
                     ) { padding ->
                         AnimatedContent(
+                            // Insets must constrain the viewport, not only the first/last list
+                            // items: otherwise scrolling draws text under the status bar and dock.
+                            modifier = Modifier.fillMaxSize().padding(padding)
+                                .consumeWindowInsets(padding).clipToBounds(),
                             targetState = surface.destination,
                             transitionSpec = {
                                 val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
@@ -486,12 +511,13 @@ fun CampusApp(
                                             (fadeOut() + slideOutHorizontally { -it * direction / 10 })
                                     }
                                 } else {
-                                    fadeIn() togetherWith fadeOut()
+                                    fadeIn(tween(0)) togetherWith fadeOut(tween(0))
                                 }
                             },
                             contentKey = MainDestination::name,
                             label = "main-destination",
                         ) { selected ->
+                            destinationState.SaveableStateProvider(selected.savedStateKey(destinationOwner)) {
                             when (selected) {
                             MainDestination.HOME -> HomeScreen(
                                  collapsedComponents = preferences.collapsedComponents,
@@ -507,14 +533,14 @@ fun CampusApp(
                                  healthState = healthState,
                                  onRefreshHealth = aiViewModel::refreshHealthStatus,
                                  onSyncMiFitnessSteps = aiViewModel::refreshMiFitnessSteps,
-                                contentPadding = padding,
+                                contentPadding = PaddingValues(0.dp),
                             )
                             MainDestination.TIME -> TimeScreen(
                                 records = records,
                                 viewModel = timeViewModel,
                                 onStartFocus = { navigateTo(AppSurface.Focus(it, surface.destination)) },
                                 onMessage = { message, action -> snackbar.showSnackbar(message, actionLabel = action) },
-                                contentPadding = padding,
+                                contentPadding = PaddingValues(0.dp),
                             )
                             MainDestination.CAMPUS -> CampusScreen(
                                 state = campusState,
@@ -525,7 +551,7 @@ fun CampusApp(
                                     .ifBlank { "我" },
                                 viewModel = campusViewModel,
                                 onLogin = { navigateTo(AppSurface.Login(surface.destination)) },
-                                contentPadding = padding,
+                                contentPadding = PaddingValues(0.dp),
                             )
                             MainDestination.MARKET -> MarketScreen(
                                 state = campusState,
@@ -537,7 +563,7 @@ fun CampusApp(
                                     campusViewModel.openMessageThread(conversationId)
                                     navigateTo(AppSurface.Messages(surface.destination))
                                 },
-                                contentPadding = padding,
+                                contentPadding = PaddingValues(0.dp),
                             )
                             MainDestination.PROFILE -> ProfileScreen(
                                 preferences = preferences,
@@ -552,7 +578,7 @@ fun CampusApp(
                                 localAiEngine = localAiEngine,
                                  personalAiProviderStore = personalAiProviderStore,
                                  profileRepository = profileRepository,
-                                 contentPadding = padding,
+                                 contentPadding = PaddingValues(0.dp),
                                  dailyTargetSnapshots = dailyTargetSnapshots,
                                  onOpenTimeRecordsForDay = { navigateTo(AppSurface.Main(MainDestination.TIME)) },
                                  miFitnessConfigured = healthState.miFitnessConfigured,
@@ -664,20 +690,40 @@ fun CampusApp(
                                  },
                              )
                         }
+                        }
                     }
                 }
                 }
                 is AppSurface.Focus -> {
+                    var focusSaving by remember(surface) { mutableStateOf(false) }
+                    var focusSaveError by remember(surface) { mutableStateOf<String?>(null) }
+                    val focusOwner = rememberSaveable(surface) { timeViewModel.activeUserId.value }
                     FocusSessionScreen(
                         presetMinutes = surface.presetMinutes,
                         motionEnabled = preferences.motionMode == MotionMode.ON,
                         soundEnabled = preferences.soundEnabled,
                         onMinimize = { navigateTo(AppSurface.Main(surface.returnDestination)) },
                         onFinish = { elapsedMinutes ->
-                            val end = System.currentTimeMillis()
-                            timeViewModel.addTimeRecord("专注 $elapsedMinutes 分钟", "专注", end - elapsedMinutes * 60_000L, end, "专注计时自动记录")
-                            navigateTo(AppSurface.Main(surface.returnDestination))
+                            if (!focusSaving) {
+                                focusSaving = true
+                                focusSaveError = null
+                                val owner = focusOwner
+                                val end = System.currentTimeMillis()
+                                appScope.launch {
+                                    try {
+                                        timeViewModel.addTimeRecord("专注 $elapsedMinutes 分钟", "专注", end - elapsedMinutes * 60_000L, end,
+                                            "专注计时自动记录", expectedOwner = owner)
+                                        if (appSurface == surface) navigateTo(AppSurface.Main(surface.returnDestination))
+                                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                        throw cancelled
+                                    } catch (_: Exception) {
+                                        focusSaveError = "保存失败，已保留本次专注，请重试。"
+                                    } finally { focusSaving = false }
+                                }
+                            }
                         },
+                        saving = focusSaving,
+                        saveError = focusSaveError,
                     )
                 }
                 is AppSurface.Ai -> {
@@ -746,7 +792,6 @@ internal fun SpectraDock(
     val entries = MainDestination.entries
     val layout = SpectraTheme.layout
     val fluid = SpectraTheme.isFluid
-    val dark = MaterialTheme.colorScheme.background.luminance() < .35f
     val density = LocalDensity.current
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
@@ -756,6 +801,11 @@ internal fun SpectraDock(
     var dragDelta by remember { mutableFloatStateOf(0f) }
     var dragging by remember { mutableStateOf(false) }
     var visualIndex by remember { mutableIntStateOf(destination.ordinal) }
+    val stackedLabels = density.fontScale > 1.1f ||
+        (dockWidth > 0f && dockWidth / density.density < 280f)
+    val dockHeight = if (stackedLabels) {
+        maxOf(layout.dockHeight, (36f + 26f * density.fontScale).dp)
+    } else layout.dockHeight
 
     fun centerFor(index: Int): Float {
         val slot = dockWidth / entries.size.coerceAtLeast(1)
@@ -782,118 +832,127 @@ internal fun SpectraDock(
             .navigationBarsPadding()
             .padding(horizontal = layout.dockHorizontalPadding, vertical = layout.dockVerticalPadding),
     ) {
-        GlassPanel(
-            Modifier.fillMaxWidth().height(layout.dockHeight),
-            radius = (layout.dockHeight.value / 2f).roundToInt(),
-            emphasized = true,
-            shadowed = false,
-        ) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = if (fluid) 5.dp else 7.dp)
-                    .onSizeChanged {
-                        dockWidth = it.width.toFloat()
-                        if (animatedCenter.value == 0f) {
-                            dragCenter = centerFor(destination.ordinal)
+        // Retain the lens animation above this boundary. Only the route-owned optical nodes
+        // must reattach to the current registry generation when the selected tab changes.
+        androidx.compose.runtime.key(destination) {
+            GlassPanel(
+                Modifier.fillMaxWidth().height(dockHeight),
+                radius = (dockHeight.value / 2f).roundToInt(),
+                emphasized = true,
+                shadowed = false,
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = if (fluid) 5.dp else 7.dp)
+                        .onSizeChanged {
+                            dockWidth = it.width.toFloat()
+                            if (animatedCenter.value == 0f) {
+                                dragCenter = centerFor(destination.ordinal)
+                            }
                         }
-                    }
-                    .pointerInput(dockWidth, motionEnabled) {
-                        detectHorizontalDragGestures(
-                            onDragStart = {
-                                if (dockWidth <= 0f) return@detectHorizontalDragGestures
-                                dragging = true
-                                dragCenter = animatedCenter.value.takeIf { it > 0f } ?: centerFor(destination.ordinal)
-                                dragDelta = 0f
-                                visualIndex = destination.ordinal
-                            },
-                            onHorizontalDrag = { change, amount ->
-                                change.consume()
-                                val slot = dockWidth / entries.size
-                                dragCenter = (dragCenter + amount).coerceIn(slot * .5f, dockWidth - slot * .5f)
-                                dragDelta = if (motionEnabled) amount else 0f
-                                val next = ((dragCenter / slot) - .5f).roundToInt().coerceIn(entries.indices)
-                                if (next != visualIndex) {
-                                    visualIndex = next
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                }
-                            },
-                            onDragEnd = {
-                                val targetIndex = visualIndex.coerceIn(entries.indices)
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                scope.launch {
-                                    animatedCenter.snapTo(dragCenter)
-                                    dragging = false
-                                    dragDelta = 0f
-                                    onDestination(entries[targetIndex])
-                                }
-                            },
-                            onDragCancel = {
-                                scope.launch {
-                                    animatedCenter.snapTo(dragCenter)
-                                    dragging = false
+                        .pointerInput(dockWidth, motionEnabled) {
+                            detectHorizontalDragGestures(
+                                onDragStart = {
+                                    if (dockWidth <= 0f) return@detectHorizontalDragGestures
+                                    dragging = true
+                                    dragCenter = animatedCenter.value.takeIf { it > 0f } ?: centerFor(destination.ordinal)
                                     dragDelta = 0f
                                     visualIndex = destination.ordinal
-                                }
-                            },
-                        )
-                    },
-            ) {
-                val center = if (dragging) dragCenter else animatedCenter.value
-                LiquidDockSelection(
-                    centerX = center,
-                    dragDelta = dragDelta,
-                    motionEnabled = motionEnabled,
-                    fluid = fluid,
-                    modifier = Modifier.fillMaxSize(),
-                )
-                Row(
-                    Modifier.fillMaxSize().semantics { selectableGroup() },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    entries.forEachIndexed { index, item ->
-                        val selected = index == if (dragging) visualIndex else destination.ordinal
-                        Row(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
-                                .testTag("main-nav-${item.name.lowercase()}")
-                                .selectable(
-                                    selected = selected,
-                                    interactionSource = remember(item) { MutableInteractionSource() },
-                                    indication = null,
-                                    role = Role.Tab,
-                                    onClick = {
-                                        visualIndex = index
-                                        if (item != destination) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        onDestination(item)
-                                    },
-                                )
-                                .semantics(mergeDescendants = true) {
-                                    contentDescription = item.label
-                                    this.selected = selected
-                                    stateDescription = if (selected) "当前页" else "未选中"
                                 },
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                item.icon,
-                                null,
-                                tint = if (selected) {
-                                    if (dark) Color.White else SpectraColors.Ink
-                                } else MaterialTheme.colorScheme.onSurface.copy(.62f),
-                                modifier = Modifier.size(if (selected) 20.dp else 22.dp),
+                                onHorizontalDrag = { change, amount ->
+                                    change.consume()
+                                    val slot = dockWidth / entries.size
+                                    dragCenter = (dragCenter + amount).coerceIn(slot * .5f, dockWidth - slot * .5f)
+                                    dragDelta = if (motionEnabled) amount else 0f
+                                    val next = ((dragCenter / slot) - .5f).roundToInt().coerceIn(entries.indices)
+                                    if (next != visualIndex) {
+                                        visualIndex = next
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    }
+                                },
+                                onDragEnd = {
+                                    val targetIndex = visualIndex.coerceIn(entries.indices)
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    scope.launch {
+                                        animatedCenter.snapTo(dragCenter)
+                                        dragging = false
+                                        dragDelta = 0f
+                                        onDestination(entries[targetIndex])
+                                    }
+                                },
+                                onDragCancel = {
+                                    scope.launch {
+                                        animatedCenter.snapTo(dragCenter)
+                                        dragging = false
+                                        dragDelta = 0f
+                                        visualIndex = destination.ordinal
+                                    }
+                                },
                             )
-                            if (selected) {
-                                Spacer(Modifier.size(4.dp))
-                                Text(
-                                    item.label,
-                                    color = if (dark) Color.White else SpectraColors.Ink,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                )
+                        },
+                ) {
+                    val center = if (dragging) dragCenter else animatedCenter.value
+                    LiquidDockSelection(
+                        centerX = center,
+                        dragDelta = dragDelta,
+                        motionEnabled = motionEnabled,
+                        fluid = fluid,
+                        stackedLabels = stackedLabels,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    Row(
+                        Modifier.fillMaxSize().semantics { selectableGroup() },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        entries.forEachIndexed { index, item ->
+                            val selected = index == if (dragging) visualIndex else destination.ordinal
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .testTag("main-nav-${item.name.lowercase()}")
+                                    .selectable(
+                                        selected = selected,
+                                        interactionSource = remember(item) { MutableInteractionSource() },
+                                        indication = null,
+                                        role = Role.Tab,
+                                        onClick = {
+                                            visualIndex = index
+                                            if (item != destination) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            onDestination(item)
+                                        },
+                                    )
+                                    .semantics(mergeDescendants = true) {
+                                        contentDescription = item.label
+                                        this.selected = selected
+                                        stateDescription = if (selected) "当前页" else "未选中"
+                                    },
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                val ink = if (selected) MaterialTheme.colorScheme.onSurface
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                                if (selected && stackedLabels) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(item.icon, null, tint = ink, modifier = Modifier.size(20.dp))
+                                        Spacer(Modifier.height(3.dp))
+                                        Text(
+                                            item.label, color = ink, fontSize = 11.sp, lineHeight = 13.sp,
+                                            fontWeight = FontWeight.SemiBold, maxLines = 2,
+                                            textAlign = TextAlign.Center,
+                                        )
+                                    }
+                                } else {
+                                    Icon(item.icon, null, tint = ink, modifier = Modifier.size(22.dp))
+                                    if (selected) {
+                                        Spacer(Modifier.size(4.dp))
+                                        Text(
+                                            item.label, color = ink, fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold, maxLines = 1,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -909,14 +968,16 @@ private fun LiquidDockSelection(
     dragDelta: Float,
     motionEnabled: Boolean,
     fluid: Boolean,
+    stackedLabels: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
     val dark = MaterialTheme.colorScheme.background.luminance() < .35f
     Canvas(modifier) {
         if (centerX <= 0f) return@Canvas
-        val baseHalfWidth = with(density) { (if (fluid) 34.dp else 38.dp).toPx() }
-        val halfHeight = with(density) { (if (fluid) 19.dp else 23.dp).toPx() }
+        val baseHalfWidth = size.width / MainDestination.entries.size * .48f
+        val halfHeight = if (stackedLabels) size.height / 2f - with(density) { 5.dp.toPx() }
+        else with(density) { 24.dp.toPx() }
         val maxStretch = with(density) { (if (fluid) 16.dp else 12.dp).toPx() }
         val stretch = if (motionEnabled) (abs(dragDelta) * .68f).coerceAtMost(maxStretch) else 0f
         val direction = when {
@@ -928,7 +989,7 @@ private fun LiquidDockSelection(
         val right = centerX + baseHalfWidth + if (direction > 0f) stretch else 0f
         val top = center.y - halfHeight
         val bottom = center.y + halfHeight
-        val radius = halfHeight
+        val radius = minOf(halfHeight, baseHalfWidth)
         val liquid = Path().apply {
             moveTo(left + radius, top)
             lineTo(right - radius, top)

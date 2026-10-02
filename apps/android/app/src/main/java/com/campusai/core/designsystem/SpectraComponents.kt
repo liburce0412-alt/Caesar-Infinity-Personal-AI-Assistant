@@ -17,6 +17,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -28,10 +30,14 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -49,6 +55,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -63,6 +71,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -102,8 +111,11 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -318,11 +330,16 @@ fun GlassPanel(
 ) {
     val shape = RoundedCornerShape(radius.dp)
     val dark = MaterialTheme.colorScheme.background.luminance() < .35f
-    val fill = if (dark) Color.White.copy(alpha = if (emphasized) .075f else .045f)
-    else Color.White.copy(alpha = if (emphasized) .085f else .055f)
+    val motion = SpectraTheme.tokens.motion.enabled
+    // Text needs a stable reading surface even when the live field passes a dark fold.
+    // The shared renderer still supplies refraction beneath this neutral material layer.
+    val fill = MaterialTheme.colorScheme.surface.copy(alpha = when {
+        !motion -> .96f
+        emphasized -> if (dark) .62f else .48f
+        else -> if (dark) .74f else .62f
+    })
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
-    val motion = SpectraTheme.tokens.motion.enabled
     val effects = SpectraTheme.tokens.glassEffects.active(dark, motion)
     var touching by remember { mutableStateOf(false) }
     var touch by remember { mutableStateOf(Offset(.5f, .5f)) }
@@ -361,7 +378,7 @@ fun GlassPanel(
                 scaleY = 1f - if (effects.deformation) press * .032f else 0f
             }
             .opticalGlassRegion(
-                enabled = optical,
+                enabled = optical && motion,
                 radius = radius.dp,
                 priority = opticalPriority + if (touching || abs(press) > .01f) 100 else 0,
                 refraction = ((if (emphasized) 6f else 4f) + if (effects.deformation) press * 4f else 0f).dp,
@@ -374,7 +391,7 @@ fun GlassPanel(
             .then(
                 if (shadowed) Modifier
                     .shadow(
-                        8.dp,
+                        4.dp,
                         shape,
                         ambientColor = SpectraColors.Ink.copy(if (dark) .16f else .055f),
                         spotColor = SpectraColors.Ink.copy(if (dark) .20f else .08f),
@@ -396,8 +413,8 @@ fun GlassPanel(
                 val corner = CornerRadius(radius.dp.toPx(), radius.dp.toPx())
                 val edge = Brush.linearGradient(
                     listOf(
-                        Color.White.copy(if (dark) .44f else .78f),
-                        Color.White.copy(if (dark) .16f else .30f),
+                        Color.White.copy(if (dark) .28f else .60f),
+                        Color.White.copy(if (dark) .10f else .24f),
                         SpectraColors.Ink.copy(if (dark) .18f else .10f),
                     ),
                     start = Offset.Zero,
@@ -406,7 +423,7 @@ fun GlassPanel(
                 val crown = Brush.horizontalGradient(
                     listOf(
                         Color.Transparent,
-                        Color.White.copy(if (dark) .38f else .76f),
+                        Color.White.copy(if (dark) .28f else .54f),
                         Color.Transparent,
                     ),
                     startX = size.width * .08f,
@@ -474,7 +491,7 @@ fun GlassPanel(
 fun SpectraDialog(
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
-    properties: DialogProperties = DialogProperties(usePlatformDefaultWidth = false),
+    properties: DialogProperties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     content: @Composable BoxScope.() -> Unit,
 ) {
     val dark = MaterialTheme.colorScheme.background.luminance() < .35f
@@ -492,18 +509,22 @@ fun SpectraDialog(
         accent = scheme.primary,
     )
     Dialog(onDismissRequest = onDismissRequest, properties = properties) {
+        SpectraDialogWindow()
         SpectraBackdropBlurEffect()
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(scrim)
+                // The dialog owns its complete window. safeDrawing includes the IME and
+                // system bars, so the bounded panel and its footer stay above either one.
+                .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(horizontal = 24.dp, vertical = 20.dp),
             contentAlignment = Alignment.Center,
         ) {
             GlassPanel(
                 modifier = modifier
-                    .fillMaxWidth()
                     .widthIn(max = 560.dp)
+                    .fillMaxWidth()
                     .background(modalBase, RoundedCornerShape(24.dp)),
                 radius = 24,
                 emphasized = true,
@@ -540,33 +561,8 @@ fun SpectraFullScreenDialog(
         onDismissRequest = onDismissRequest,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
+        SpectraDialogWindow()
         SpectraBackdropBlurEffect(blurRadius = 32.dp)
-        val dialogView = LocalView.current
-        DisposableEffect(dialogView, dark) {
-            val window = (dialogView.parent as? DialogWindowProvider)?.window
-            if (window != null) {
-                // Android 15 can fit a floating dialog's frame to bars while Compose still
-                // measures it at full display height, placing the footer below that frame.
-                androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
-                window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    window.attributes = window.attributes.apply {
-                        setFitInsetsTypes(0)
-                        layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-                    }
-                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    window.attributes = window.attributes.apply {
-                        layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-                    }
-                }
-                window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-                androidx.core.view.WindowInsetsControllerCompat(window, dialogView).apply {
-                    isAppearanceLightStatusBars = !dark
-                    isAppearanceLightNavigationBars = !dark
-                }
-            }
-            onDispose { }
-        }
         Box(
             modifier = Modifier.fillMaxSize().background(
                 Brush.linearGradient(
@@ -575,6 +571,33 @@ fun SpectraFullScreenDialog(
             ),
             content = content,
         )
+    }
+}
+
+/** Use one complete dialog frame; callers decide whether the entire page or its panel consumes insets. */
+@Composable
+private fun SpectraDialogWindow() {
+    val dialogView = LocalView.current
+    DisposableEffect(dialogView) {
+        val window = (dialogView.parent as? DialogWindowProvider)?.window
+        if (window != null) {
+            // Android 15 can fit a floating dialog's frame to bars while Compose still
+            // measures it at full display height, placing the footer below that frame.
+            androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+            window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                window.attributes = window.attributes.apply {
+                    setFitInsetsTypes(0)
+                    layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                window.attributes = window.attributes.apply {
+                    layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                }
+            }
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        }
+        onDispose { }
     }
 }
 
@@ -590,7 +613,7 @@ fun SpectraAlertDialog(
 ) {
     SpectraDialog(onDismissRequest = onDismissRequest) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(20.dp),
+            modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Text(title, style = MaterialTheme.typography.titleLarge)
@@ -606,7 +629,7 @@ fun SpectraAlertDialog(
             ) {
                 TextButton(onClick = onDismissRequest) { Text(dismissLabel) }
                 TextButton(onClick = onConfirm) {
-                    Text(confirmLabel, color = if (destructive) SpectraColors.Warm else MaterialTheme.colorScheme.primary)
+                    Text(confirmLabel, color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
                 }
             }
         }
@@ -619,8 +642,13 @@ fun SpectraAlertDialog(
 fun SpectraModalBottomSheet(
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
+    dismissible: Boolean = true,
     content: @Composable BoxScope.() -> Unit,
 ) {
+    val canDismiss by rememberUpdatedState(dismissible)
+    val sheetState = rememberModalBottomSheetState(
+        confirmValueChange = { next -> next != SheetValue.Hidden || canDismiss },
+    )
     val dark = MaterialTheme.colorScheme.background.luminance() < .35f
     val scheme = MaterialTheme.colorScheme
     val modalBase = spectraModalGlass(
@@ -636,7 +664,9 @@ fun SpectraModalBottomSheet(
         accent = scheme.primary,
     )
     ModalBottomSheet(
-        onDismissRequest = onDismissRequest,
+        onDismissRequest = { if (canDismiss) onDismissRequest() },
+        sheetState = sheetState,
+        contentWindowInsets = { WindowInsets.safeDrawing },
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         containerColor = modalBase,
         contentColor = MaterialTheme.colorScheme.onSurface,
@@ -697,10 +727,10 @@ private fun spectraModalGlass(
 ): Color {
     val environmentTint = lerp(surface, accent, if (dark) .10f else .075f)
     val alpha = when {
-        dark && longForm -> .52f
-        dark -> .48f
-        longForm -> .46f
-        else -> .40f
+        dark && longForm -> .92f
+        dark -> .86f
+        longForm -> .90f
+        else -> .84f
     }
     return environmentTint.copy(alpha = alpha)
 }
@@ -737,6 +767,7 @@ private fun spectraModalMist(
 private fun SpectraBackdropBlurEffect(
     blurRadius: androidx.compose.ui.unit.Dp = 28.dp,
 ) {
+    SpectraSystemBars(MaterialTheme.colorScheme.background.luminance() < .35f)
     val localView = LocalView.current
     val activity = LocalContext.current.findActivity()
     val blurRadiusPx = with(LocalDensity.current) { blurRadius.roundToPx() }.coerceAtLeast(1)
@@ -874,171 +905,192 @@ fun CaesarSlidingSelector(
     enabled: Boolean = true,
 ) {
     if (options.isEmpty()) return
-    val safeIndex = selectedIndex.coerceIn(options.indices)
-    val haptic = LocalHapticFeedback.current
-    val scope = rememberCoroutineScope()
-    val animatedX = remember { Animatable(0f) }
-    var railWidth by remember { mutableFloatStateOf(0f) }
-    var dragX by remember { mutableFloatStateOf(0f) }
-    var dragging by remember { mutableStateOf(false) }
-    var visualIndex by remember { mutableIntStateOf(safeIndex) }
-    var positionInitialized by remember(options) { mutableStateOf(false) }
-
-    fun xFor(index: Int): Float = railWidth / options.size.coerceAtLeast(1) * index
-
-    LaunchedEffect(safeIndex, railWidth, dragging, motionEnabled) {
-        if (railWidth <= 0f || dragging) return@LaunchedEffect
-        visualIndex = safeIndex
-        val target = xFor(safeIndex)
-        if (!motionEnabled || !positionInitialized) {
-            animatedX.snapTo(target)
-            positionInitialized = true
-        } else {
-            animatedX.animateTo(
-                target,
-                spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMediumLow,
-                ),
-            )
+    val allowMotion = motionEnabled && SpectraTheme.tokens.motion.enabled
+    val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
+    val labelStyle = MaterialTheme.typography.labelMedium.copy(
+        fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold,
+        textAlign = TextAlign.Center,
+    )
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        // Use real CJK fallback metrics and the available slot width, not a guessed line count.
+        val textWidthPx = with(density) {
+            (((maxWidth - 8.dp).toPx() / options.size).toInt() - 8.dp.roundToPx()).coerceAtLeast(1)
         }
-    }
+        val textHeightPx = options.maxOf { label ->
+            textMeasurer.measure(label, style = labelStyle, constraints = Constraints(maxWidth = textWidthPx)).size.height
+        }
+        val selectorHeight = maxOf(56.dp, with(density) { textHeightPx.toDp() } + 16.dp)
+        val safeIndex = selectedIndex.coerceIn(options.indices)
+        val haptic = LocalHapticFeedback.current
+        val scope = rememberCoroutineScope()
+        val animatedX = remember { Animatable(0f) }
+        var railWidth by remember { mutableFloatStateOf(0f) }
+        var dragX by remember { mutableFloatStateOf(0f) }
+        var dragging by remember { mutableStateOf(false) }
+        var visualIndex by remember { mutableIntStateOf(safeIndex) }
+        var positionInitialized by remember(options) { mutableStateOf(false) }
 
-    val dark = MaterialTheme.colorScheme.background.luminance() < .35f
-    GlassPanel(
-        modifier = modifier.height(56.dp),
-        radius = 28,
-        emphasized = true,
-        shadowed = false,
-        opticalPriority = 3,
-    ) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .padding(5.dp)
-                .onSizeChanged {
-                    railWidth = it.width.toFloat()
-                    if (!positionInitialized) dragX = xFor(safeIndex)
-                }
-                .pointerInput(enabled, railWidth, options) {
-                    if (!enabled || railWidth <= 0f || options.size < 2) return@pointerInput
-                    detectHorizontalDragGestures(
-                        onDragStart = {
-                            dragging = true
-                            dragX = animatedX.value.takeIf { it >= 0f } ?: xFor(safeIndex)
-                            visualIndex = safeIndex
-                        },
-                        onHorizontalDrag = { change, amount ->
-                            change.consume()
-                            val slot = railWidth / options.size
-                            dragX = (dragX + amount).coerceIn(0f, railWidth - slot)
-                            val next = (dragX / slot).roundToInt().coerceIn(options.indices)
-                            if (next != visualIndex) {
-                                visualIndex = next
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            }
-                        },
-                        onDragEnd = {
-                            val next = visualIndex.coerceIn(options.indices)
-                            scope.launch {
-                                animatedX.snapTo(dragX)
-                                dragging = false
-                                onSelected(next)
-                            }
-                        },
-                        onDragCancel = {
-                            scope.launch {
-                                dragging = false
-                                visualIndex = safeIndex
-                                animatedX.snapTo(xFor(safeIndex))
-                            }
-                        },
-                    )
-                },
+        fun xFor(index: Int): Float = railWidth / options.size.coerceAtLeast(1) * index
+
+        LaunchedEffect(safeIndex, railWidth, dragging, allowMotion) {
+            if (railWidth <= 0f || dragging) return@LaunchedEffect
+            visualIndex = safeIndex
+            val target = xFor(safeIndex)
+            if (!allowMotion || !positionInitialized) {
+                animatedX.snapTo(target)
+                positionInitialized = true
+            } else {
+                animatedX.animateTo(
+                    target,
+                    spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMediumLow,
+                    ),
+                )
+            }
+        }
+
+        val dark = MaterialTheme.colorScheme.background.luminance() < .35f
+        GlassPanel(
+            modifier = Modifier.fillMaxWidth().height(selectorHeight),
+            radius = 28,
+            emphasized = true,
+            shadowed = false,
+            opticalPriority = 3,
         ) {
-            val slotFraction = 1f / options.size
             Box(
                 Modifier
-                    .fillMaxHeight()
-                    .fillMaxWidth(slotFraction)
-                    .graphicsLayer { translationX = if (dragging) dragX else animatedX.value }
-                    .clip(CircleShape)
-                    .background(
-                        Brush.horizontalGradient(
-                            if (dark) listOf(
-                                Color(0xFF171A21).copy(.58f),
-                                Color(0xFF343943).copy(.36f),
-                                Color(0xFF171A21).copy(.58f),
-                            ) else listOf(
-                                Color.White.copy(.46f),
-                                Color(0xFFE7E8EA).copy(.20f),
-                                Color.White.copy(.38f),
-                            ),
-                        ),
-                    )
-                    .drawWithCache {
-                        val edge = Brush.horizontalGradient(
-                            listOf(
-                                Color.White.copy(if (dark) .28f else .58f),
-                                Color.White.copy(if (dark) .62f else .92f),
-                                SpectraColors.Ink.copy(if (dark) .20f else .10f),
+                    .fillMaxSize()
+                    .padding(4.dp)
+                    .onSizeChanged {
+                        railWidth = it.width.toFloat()
+                        if (!positionInitialized) dragX = xFor(safeIndex)
+                    }
+                    .pointerInput(enabled, railWidth, options, safeIndex) {
+                        if (!enabled || railWidth <= 0f || options.size < 2) return@pointerInput
+                        detectHorizontalDragGestures(
+                            onDragStart = {
+                                dragging = true
+                                dragX = animatedX.value.takeIf { it >= 0f } ?: xFor(safeIndex)
+                                visualIndex = safeIndex
+                            },
+                            onHorizontalDrag = { change, amount ->
+                                change.consume()
+                                val slot = railWidth / options.size
+                                dragX = (dragX + amount).coerceIn(0f, railWidth - slot)
+                                val next = (dragX / slot).roundToInt().coerceIn(options.indices)
+                                if (next != visualIndex) {
+                                    visualIndex = next
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                }
+                            },
+                            onDragEnd = {
+                                val next = visualIndex.coerceIn(options.indices)
+                                scope.launch {
+                                    animatedX.snapTo(dragX)
+                                    dragging = false
+                                    onSelected(next)
+                                }
+                            },
+                            onDragCancel = {
+                                scope.launch {
+                                    dragging = false
+                                    visualIndex = safeIndex
+                                    animatedX.snapTo(xFor(safeIndex))
+                                }
+                            },
+                        )
+                    },
+            ) {
+                val slotFraction = 1f / options.size
+                Box(
+                    Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(slotFraction)
+                        .graphicsLayer { translationX = if (dragging) dragX else animatedX.value }
+                        .clip(CircleShape)
+                        .background(
+                            Brush.horizontalGradient(
+                                if (dark) listOf(
+                                    Color(0xFF171A21).copy(.58f),
+                                    Color(0xFF343943).copy(.36f),
+                                    Color(0xFF171A21).copy(.58f),
+                                ) else listOf(
+                                    Color.White.copy(.46f),
+                                    Color(0xFFE7E8EA).copy(.20f),
+                                    Color.White.copy(.38f),
+                                ),
                             ),
                         )
-                        onDrawWithContent {
-                            drawContent()
-                            drawRoundRect(edge, cornerRadius = CornerRadius(size.height / 2f), style = Stroke(1.dp.toPx()))
-                            drawLine(
-                                Brush.horizontalGradient(listOf(Color.Transparent, Color.White.copy(.76f), Color.Transparent)),
-                                Offset(size.width * .20f, 3.dp.toPx()),
-                                Offset(size.width * .80f, 3.dp.toPx()),
-                                1.dp.toPx(),
+                        .drawWithCache {
+                            val edge = Brush.horizontalGradient(
+                                listOf(
+                                    Color.White.copy(if (dark) .28f else .58f),
+                                    Color.White.copy(if (dark) .62f else .92f),
+                                    SpectraColors.Ink.copy(if (dark) .20f else .10f),
+                                ),
+                            )
+                            onDrawWithContent {
+                                drawContent()
+                                drawRoundRect(edge, cornerRadius = CornerRadius(size.height / 2f), style = Stroke(1.dp.toPx()))
+                                drawLine(
+                                    Brush.horizontalGradient(listOf(Color.Transparent, Color.White.copy(.76f), Color.Transparent)),
+                                    Offset(size.width * .20f, 3.dp.toPx()),
+                                    Offset(size.width * .80f, 3.dp.toPx()),
+                                    1.dp.toPx(),
+                                )
+                            }
+                        },
+                )
+                Row(
+                    Modifier.fillMaxSize().semantics { selectableGroup() },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    options.forEachIndexed { index, label ->
+                        val selectedNow = index == if (dragging) visualIndex else safeIndex
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .selectable(
+                                    selected = selectedNow,
+                                    enabled = enabled,
+                                    interactionSource = remember(label) { MutableInteractionSource() },
+                                    indication = null,
+                                    role = Role.Tab,
+                                    onClick = {
+                                        if (index != safeIndex) {
+                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            onSelected(index)
+                                        }
+                                    },
+                                )
+                                .semantics(mergeDescendants = true) {
+                                    contentDescription = label
+                                    selected = selectedNow
+                                    stateDescription = if (selectedNow) "已选中" else "未选中"
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                label,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                                style = labelStyle,
+                                color = MaterialTheme.colorScheme.onSurface.copy(
+                                    when {
+                                        !enabled -> .34f
+                                        selectedNow -> .96f
+                                        else -> .80f
+                                    },
+                                ),
+                                fontSize = 12.sp,
+                                fontWeight = if (selectedNow) FontWeight.SemiBold else FontWeight.Medium,
+                                lineHeight = 16.sp,
+                                maxLines = Int.MAX_VALUE,
+                                textAlign = TextAlign.Center,
                             )
                         }
-                    },
-            )
-            Row(
-                Modifier.fillMaxSize().semantics { selectableGroup() },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                options.forEachIndexed { index, label ->
-                    val selectedNow = index == if (dragging) visualIndex else safeIndex
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .selectable(
-                                selected = selectedNow,
-                                enabled = enabled,
-                                interactionSource = remember(label) { MutableInteractionSource() },
-                                indication = null,
-                                role = Role.Tab,
-                                onClick = {
-                                    if (index != safeIndex) {
-                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        onSelected(index)
-                                    }
-                                },
-                            )
-                            .semantics(mergeDescendants = true) {
-                                contentDescription = label
-                                selected = selectedNow
-                                stateDescription = if (selectedNow) "已选中" else "未选中"
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            label,
-                            color = MaterialTheme.colorScheme.onSurface.copy(
-                                when {
-                                    !enabled -> .34f
-                                    selectedNow -> .96f
-                                    else -> .58f
-                                },
-                            ),
-                            fontSize = 12.sp,
-                            fontWeight = if (selectedNow) FontWeight.SemiBold else FontWeight.Medium,
-                            maxLines = 1,
-                        )
                     }
                 }
             }
@@ -1055,7 +1107,8 @@ fun SpectraPrimaryButton(
     icon: ImageVector? = null,
 ) {
     GlassPanel(
-        modifier = modifier.defaultMinSize(minHeight = 52.dp).semantics {
+        modifier = modifier.defaultMinSize(minHeight = 52.dp).semantics(mergeDescendants = true) {
+            role = Role.Button
             if (!enabled) disabled()
         },
         radius = 50,

@@ -786,10 +786,14 @@ private class SpectraGlRenderer(
                 float flowB = uQuality < 0.5
                     ? flowA
                     : noise(p * 2.10 + vec2(-t * 0.08, t * 0.11));
-                vec2 fieldP = p + vec2(flowA - 0.5, flowB - 0.5) * 0.038;
-                vec2 c0 = vec2(-0.13 * aspect + 0.020 * sin(t * 0.82), -0.315 + 0.025 * cos(t * 0.64));
-                vec2 c1 = vec2(0.16 * aspect + 0.018 * cos(t * 0.71), 0.015 + 0.028 * sin(t * 0.57));
-                vec2 c2 = vec2(-0.08 * aspect + 0.022 * sin(t * 0.53), 0.345 + 0.022 * cos(t * 0.76));
+                // Slow, unequal phases carry colour and breathing through the same field. The
+                // quieter CLASSIC variation shares the clock; it never adds another animation.
+                float breath = 0.5 + 0.5 * sin(t * 1.03 + 0.35 * sin(t * 0.37));
+                float counterFlow = sin(t * 0.77 + 1.9);
+                vec2 fieldP = p + vec2(flowA - 0.5, flowB - 0.5) * mix(0.028, 0.055, breath);
+                vec2 c0 = vec2(-0.13 * aspect + 0.040 * sin(t * 0.82), -0.315 + 0.045 * cos(t * 0.64));
+                vec2 c1 = vec2(0.16 * aspect + 0.034 * cos(t * 0.71), 0.015 + 0.048 * sin(t * 0.57));
+                vec2 c2 = vec2(-0.08 * aspect + 0.038 * sin(t * 0.53), 0.345 + 0.040 * cos(t * 0.76));
                 float w0 = softLobe(fieldP, c0, vec2(0.250 + aspect * 0.080, 0.270));
                 float w1 = softLobe(fieldP, c1, vec2(0.270 + aspect * 0.070, 0.290));
                 float w2 = softLobe(fieldP, c2, vec2(0.240 + aspect * 0.090, 0.260));
@@ -813,10 +817,11 @@ private class SpectraGlRenderer(
 
                 // A single open pearl fold adds depth across the whole viewport. It is deliberately
                 // broad and low-contrast: no closed silhouette, no billiard-like object, no HUD rim.
-                float foldAxis = fieldP.y + 0.12 * sin(fieldP.x * 4.0 - t * 0.36) +
+                float foldAxis = fieldP.y + fieldP.x * counterFlow * 0.30 +
+                    mix(0.09, 0.16, breath) * sin(fieldP.x * 4.0 - t * 0.36) +
                     (flowB - 0.5) * 0.08;
-                float foldShade = exp(-pow((foldAxis + 0.075) / 0.155, 2.0));
-                float foldLight = exp(-pow((foldAxis - 0.095) / 0.210, 2.0));
+                float foldShade = exp(-pow((foldAxis + 0.075) / mix(0.135, 0.180, breath), 2.0));
+                float foldLight = exp(-pow((foldAxis - 0.095) / mix(0.180, 0.245, breath), 2.0));
                 color = mix(color, mix(envBody(), color, 0.36), foldShade * mix(0.080, 0.14, uDark));
                 color = mix(color, paperLift, foldLight * mix(0.090, 0.08, uDark));
                 vec2 classicRail = silverRailMask(
@@ -858,12 +863,18 @@ private class SpectraGlRenderer(
                 float focusing
             ) {
                 vec2 baseQ = fluidCoordinates(p, aspect, t);
+                // The main breathing takes about 30 seconds; the counter-flow takes about 41.
+                // Phase modulation prevents a short repeated wallpaper loop without random jumps.
+                float breath = 0.5 + 0.5 * sin(t * 1.03 + 0.35 * sin(t * 0.37));
+                float counterFlow = sin(t * 0.77 + 1.9);
                 float broad = (uQuality < 0.5
                     ? noise(baseQ * 1.18 + vec2(t * 0.075, -t * 0.055))
                     : fbm(baseQ * 1.32 + vec2(t * 0.085, -t * 0.060))) - 0.46;
                 float cross = noise(baseQ.yx * vec2(1.42, 1.18) + vec2(-t * 0.052, t * 0.070)) - 0.5;
-                vec2 q = baseQ + vec2(broad, cross) * (uQuality < 0.5 ? 0.035 : 0.052);
-                mat2 turn = mat2(0.82, -0.57, 0.57, 0.82);
+                float warpStrength = mix(0.038, 0.070, breath) * (uQuality < 0.5 ? 0.68 : 1.0);
+                vec2 q = baseQ + vec2(broad, cross) * warpStrength;
+                float turnAngle = 0.61 + 0.24 * sin(t * 0.94) + 0.10 * sin(t * 0.59 + 1.3);
+                mat2 turn = mat2(cos(turnAngle), -sin(turnAngle), sin(turnAngle), cos(turnAngle));
                 vec2 r = turn * q;
 
                 // Reuse the warp samples as colour fields: AUTO is three noise evaluations per
@@ -872,18 +883,18 @@ private class SpectraGlRenderer(
                 float flowB = clamp(cross + 0.50, 0.0, 1.0);
                 float flowC = clamp(mix(flowA, flowB, 0.46), 0.0, 1.0);
 
-                // One open field continuously changes topology instead of translating a fixed
-                // fold. The three phases connect opposite viewport edges and loop in 28 seconds
-                // at normal speed (about 34 seconds on LOW), without a closed SDF or extra layer.
+                // One open fold morphs across three edge-to-edge axes in roughly 28–34 seconds.
+                // Its direction, bend and width evolve on unequal phases, so arriving at the same
+                // axis later retains continuity without repeating the same silhouette.
                 float bendA = sin(r.x * 4.60 - t * 0.85);
                 float bendB = sin(r.y * 4.05 + t * 0.68);
                 float bendC = sin((r.x + r.y) * 3.45 - t * 0.54);
-                float topologyA = r.y + bendA * 0.16 + (flowA - 0.46) * 0.16;
-                float topologyB = r.x * 0.72 + r.y * 0.18 + bendB * 0.15 +
+                float topologyA = r.y + bendA * mix(0.12, 0.22, breath) + (flowA - 0.46) * 0.16;
+                float topologyB = r.x * 0.72 + r.y * (0.18 + counterFlow * 0.10) + bendB * 0.15 +
                     (flowB - 0.50) * 0.14;
                 float topologyC = r.y * 0.56 - r.x * 0.48 + bendC * 0.14 +
                     (flowC - 0.48) * 0.18;
-                float macroSegment = fract(t / 5.60) * 3.0;
+                float macroSegment = fract(t / 5.90 + 0.035 * sin(t * 0.59)) * 3.0;
                 float topologyMorph = smoothstep(0.08, 0.92, fract(macroSegment));
                 float topologyAxis;
                 if (macroSegment < 1.0) {
@@ -897,10 +908,10 @@ private class SpectraGlRenderer(
                 // Two open waves carry colour through every edge of the viewport. Unlike the
                 // former ellipse field, these contours never close into a ball or focal object.
                 float openSweepA = 0.5 + 0.5 * sin(
-                    r.x * 3.15 + r.y * 1.70 + t * 0.82 + broad * 1.25
+                    r.x * 3.15 + r.y * 1.70 + t * 0.82 + broad * 1.25 + counterFlow * 0.55
                 );
                 float openSweepB = 0.5 + 0.5 * sin(
-                    -r.x * 1.90 + r.y * 2.65 - t * 0.63 + cross * 1.10
+                    -r.x * 1.90 + r.y * 2.65 - t * 0.63 + cross * 1.10 - breath * 0.48
                 );
 
                 vec3 base = mix(vec3(0.966, 0.970, 0.982), vec3(0.030, 0.043, 0.071), uDark);
@@ -913,7 +924,7 @@ private class SpectraGlRenderer(
                 vec3 tintB = mix(pearlNeutral, envAccent(1.0), mix(0.62, 0.50, uDark));
                 vec3 tintC = mix(pearlNeutral, envAccent(2.0), mix(0.58, 0.48, uDark));
                 vec3 pigment = mix(tintA, tintB, smoothstep(0.16, 0.84, openSweepA));
-                pigment = mix(pigment, tintC, smoothstep(0.20, 0.86, openSweepB) * 0.68);
+                pigment = mix(pigment, tintC, smoothstep(0.20, 0.86, openSweepB) * mix(0.56, 0.72, breath));
                 float zone = smoothstep(-0.24, 0.24, topologyAxis);
                 vec3 zoneTint = mix(tintA, tintC, zone);
                 pigment = mix(pigment, zoneTint, 0.32);
@@ -934,9 +945,11 @@ private class SpectraGlRenderer(
 
                 // The same morphing open axis carries depth and colour, keeping FLUID a single
                 // connected environment rather than overlapping ribbons or a floating object.
-                float foldAxis = topologyAxis + 0.020;
-                float foldShadow = exp(-pow((foldAxis + 0.055) / 0.105, 2.0));
-                float foldGlow = exp(-pow((foldAxis - 0.080) / 0.170, 2.0));
+                float foldAxis = topologyAxis + 0.020 +
+                    sin(r.x * 5.2 + t * 0.61 + flowB * 1.6) * (0.012 + breath * 0.018);
+                float foldWidth = mix(0.86, 1.22, breath);
+                float foldShadow = exp(-pow((foldAxis + 0.055) / (0.105 * foldWidth), 2.0));
+                float foldGlow = exp(-pow((foldAxis - 0.080) / (0.170 * foldWidth), 2.0));
                 // CLASSIC and FLUID deliberately share the exact same rail lifecycle. FLUID only
                 // changes its carrier axis, so switching visual systems never hides the feature.
                 vec2 foldPearl = silverRailMask(r, foldAxis, railT);

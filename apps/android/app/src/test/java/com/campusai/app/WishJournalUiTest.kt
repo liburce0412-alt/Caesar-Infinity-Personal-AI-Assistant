@@ -27,7 +27,7 @@ class WishJournalUiTest {
     @get:Rule val compose = createComposeRule()
     private val wish = MarketplaceListing("wish", "self", "我", "去看一次海", "把这一天留给自己。", null, "", "", "active", "approved", "2026-09-06T01:30:00Z", isPublic = true)
 
-    @Test fun `text card is horizontal and image card is square with no public or sale badge`() {
+    @Test fun `wish media keeps its aspect ratio above naturally sized text with no public or sale badge`() {
         compose.setContent { CampusTheme(ThemeMode.DARK) {
             Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(20.dp)) {
                 ListingCardView(wish) {}
@@ -38,8 +38,10 @@ class WishJournalUiTest {
         val textBounds = compose.onNodeWithText(wish.title).fetchSemanticsNode().boundsInRoot
         // Clickable card bounds are the merged semantics node containing the label.
         assertTrue(textBounds.width > textBounds.height * 1.5f)
-        val imageBounds = compose.onNodeWithText("等一个日出").fetchSemanticsNode().boundsInRoot
-        assertEquals(imageBounds.width, imageBounds.height, 1f)
+        val imageBounds = compose.onNodeWithContentDescription("心愿图片", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val titleBounds = compose.onNodeWithText("等一个日出", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertEquals(imageBounds.width * 3f / 4f, imageBounds.height, 1f)
+        assertTrue("Description belongs below the image, not over it", titleBounds.top >= imageBounds.bottom)
         compose.onNodeWithText("公开").assertDoesNotExist()
         compose.onNodeWithText("在售", substring = true).assertDoesNotExist()
         compose.onRoot().captureRoboImage("../../../artifacts/wish-journal-cards.png")

@@ -22,6 +22,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -43,6 +48,7 @@ import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Sell
@@ -76,6 +82,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -142,19 +149,17 @@ fun CampusScreen(
                     start = layout.pageHorizontalPadding,
                     end = layout.pageHorizontalPadding,
                     top = contentPadding.calculateTopPadding() + layout.pageTopSpacing,
-                    bottom = pageBottom,
+                    bottom = pageBottom + 80.dp,
                 ),
                 verticalArrangement = Arrangement.spacedBy(layout.sectionGap),
             ) {
             item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) { Text(if (state.postsScope == CommunityFeedScope.MINE) "${ownerName}的树洞" else "树洞广场", style = MaterialTheme.typography.headlineLarge); Text("收起喧闹，留下对你真正重要的声音", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.6f)) }
-                    SpectraAction(
-                        text = "刷新动态",
-                        onClick = { if (signedIn) viewModel.refreshPosts() else onLogin() },
-                        emphasized = true,
-                        mood = PageMood.SOCIAL,
+                    SpectraIconAction(
                         icon = Icons.Rounded.Refresh,
+                        label = "刷新动态",
+                        onClick = { if (signedIn) viewModel.refreshPosts() else onLogin() },
                     )
                 }
             }
@@ -167,7 +172,7 @@ fun CampusScreen(
                     SpectraStatePane(
                         kind = SpectraStateKind.LOADING,
                         title = "正在打开树洞",
-                        detail = "正在同步最新留言；完成前不会用占位内容替代。",
+                        detail = "稍等片刻，正在同步最新留言。",
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -177,11 +182,10 @@ fun CampusScreen(
                         detail = if (state.postsScope == CommunityFeedScope.MINE) "你发表的私密与公开内容，都会留在这里。" else "审核通过的公开内容，会出现在这里。",
                         action = "写进树洞",
                         mood = PageMood.SOCIAL,
-                    ) { composing = true }
+                    ) { if (signedIn) composing = true else onLogin() }
                 }
                 is UiState.Error -> item { RemoteError(posts.message, signedIn, onLogin, viewModel::refreshPosts, PageMood.SOCIAL) }
-                is UiState.Data -> items(posts.value.size) { index ->
-                    val post = posts.value[index]
+                is UiState.Data -> items(posts.value, key = { it.id }) { post ->
                     PostCard(post, { viewModel.toggleLike(post.id) }, { viewModel.toggleBookmark(post.id) }, { selectedPost = post; viewModel.openPostComments(post.id) }) { if (post.authorId == userId) managingPost = post else reportingPost = post }
                 }
                 is UiState.Offline -> {
@@ -195,8 +199,7 @@ fun CampusScreen(
                             onAction = viewModel::refreshPosts,
                         )
                     }
-                    items(posts.value.size) { index ->
-                        val post = posts.value[index]
+                    items(posts.value, key = { it.id }) { post ->
                         PostCard(post, { viewModel.toggleLike(post.id) }, { viewModel.toggleBookmark(post.id) }, { selectedPost = post; viewModel.openPostComments(post.id) }) { if (post.authorId == userId) managingPost = post else reportingPost = post }
                     }
                 }
@@ -254,6 +257,7 @@ fun CampusScreen(
     reportingPost?.let { post -> ReportDialog(
         targetLabel = post.body.take(42),
         busy = state.operationBusy,
+        error = state.operationError,
         onDismiss = { reportingPost = null },
         onSubmit = { reason, details -> viewModel.submitReport(userId, "post", post.id, reason, details) { reportingPost = null } },
     ) }
@@ -262,42 +266,61 @@ fun CampusScreen(
 @Composable
 internal fun PostCard(post: CommunityPost, onLike: () -> Unit, onBookmark: () -> Unit, onComments: () -> Unit, onReport: () -> Unit) {
     val hasImage = post.mediaUrl.isNotBlank()
-    GlassPanel(Modifier.fillMaxWidth().then(if (hasImage) Modifier.aspectRatio(1f) else Modifier), onClick = onComments) {
-        if (hasImage) {
-            AsyncImage(post.mediaUrl, "树洞图片", Modifier.matchParentSize().clip(RoundedCornerShape(24.dp)), contentScale = ContentScale.Crop)
-            Box(Modifier.matchParentSize().clip(RoundedCornerShape(24.dp)).background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.surface.copy(.88f), Color.Transparent, MaterialTheme.colorScheme.surface.copy(.96f)))))
-        }
-        Column(Modifier.then(if (hasImage) Modifier.fillMaxSize() else Modifier.fillMaxWidth()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(post.author, style = MaterialTheme.typography.titleMedium, maxLines = 1)
-                    Text(remoteTime(post.createdAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(.6f))
+    GlassPanel(Modifier.fillMaxWidth(), onClick = onComments) {
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))) {
+            if (hasImage) CommunityCardImage(post.mediaUrl, "树洞图片", 1.6f)
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(post.author, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(remoteTime(post.createdAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    SpectraIconAction(Icons.Rounded.MoreHoriz, "更多操作", onReport)
                 }
-                SpectraIconAction(Icons.Rounded.MoreHoriz, "更多操作", onReport)
-            }
-            if (hasImage) Spacer(Modifier.weight(1f))
-            if (post.topic.isNotBlank()) Text("# ${post.topic}", style = MaterialTheme.typography.labelMedium, maxLines = 1)
-            Text(post.body, style = MaterialTheme.typography.bodyLarge, maxLines = if (hasImage) 2 else 3, overflow = TextOverflow.Ellipsis)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                SpectraAction(post.likes.toString(), onLike, selected = post.likedByMe, icon = if (post.likedByMe) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder)
-                SpectraAction(if (post.comments == 0) "评论" else "${post.comments} 条评论", onComments, Modifier.weight(1f), icon = Icons.Rounded.ChatBubbleOutline)
-                SpectraIconAction(Icons.Rounded.BookmarkBorder, "收藏", onBookmark)
+                if (post.topic.isNotBlank()) Text("# ${post.topic}", style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(post.body, style = MaterialTheme.typography.bodyLarge, maxLines = 5, overflow = TextOverflow.Ellipsis)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    SpectraAction(post.likes.toString(), onLike, selected = post.likedByMe, icon = if (post.likedByMe) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder)
+                    SpectraAction(if (post.comments == 0) "评论" else "${post.comments}", onComments, Modifier.weight(1f), icon = Icons.Rounded.ChatBubbleOutline)
+                    SpectraIconAction(Icons.Rounded.BookmarkBorder, "收藏", onBookmark)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun ReportDialog(targetLabel: String, busy: Boolean, onDismiss: () -> Unit, onSubmit: (String, String) -> Unit) {
+private fun CommunityCardImage(model: String, description: String, ratio: Float) {
+    var loading by remember(model) { mutableStateOf(true) }
+    var failed by remember(model) { mutableStateOf(false) }
+    Box(Modifier.fillMaxWidth().aspectRatio(ratio).background(MaterialTheme.colorScheme.surfaceVariant.copy(.45f)),
+        contentAlignment = Alignment.Center) {
+        if (loading || failed) Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(Icons.Rounded.Image, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(if (failed) "图片暂时无法显示" else "正在载入图片", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        AsyncImage(model, description, Modifier.matchParentSize(), contentScale = ContentScale.Crop,
+            onLoading = { loading = true; failed = false },
+            onSuccess = { loading = false; failed = false },
+            onError = { loading = false; failed = true })
+    }
+}
+
+@Composable
+internal fun ReportDialog(targetLabel: String, busy: Boolean, onDismiss: () -> Unit, onSubmit: (String, String) -> Unit, error: String? = null) {
     var reason by rememberSaveable { mutableStateOf("") }
     var details by rememberSaveable { mutableStateOf("") }
     SpectraDialog(onDismissRequest = { if (!busy) onDismiss() }) {
         Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("举报内容", style = MaterialTheme.typography.titleLarge)
             Text(targetLabel, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurface.copy(.58f))
-            SpectraTextField(reason, { reason = it.take(120) }, label = { Text("原因") }, singleLine = true, shape = RoundedCornerShape(12.dp))
-            SpectraTextField(details, { details = it.take(1000) }, label = { Text("补充说明") }, minLines = 3, shape = RoundedCornerShape(12.dp))
+            SpectraTextField(reason, { reason = it.take(120) }, enabled = !busy, label = { Text("原因") }, singleLine = true, shape = RoundedCornerShape(12.dp))
+            SpectraTextField(details, { details = it.take(1000) }, enabled = !busy, label = { Text("补充说明") }, minLines = 3, shape = RoundedCornerShape(12.dp))
             Text("举报会进入审核队列，不会直接删除内容。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.58f))
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(enabled = !busy, onClick = onDismiss) { Text("取消") }
                 TextButton(enabled = reason.isNotBlank() && !busy, onClick = { onSubmit(reason, details) }) { Text(if (busy) "正在提交" else "提交举报") }
@@ -307,7 +330,7 @@ private fun ReportDialog(targetLabel: String, busy: Boolean, onDismiss: () -> Un
 }
 
 @Composable
-private fun PostDetails(
+internal fun PostDetails(
     post: CommunityPost,
     comments: UiState<List<CommunityComment>>,
     busy: Boolean,
@@ -326,8 +349,7 @@ private fun PostDetails(
                     Modifier
                         .fillMaxSize()
                         .statusBarsPadding()
-                        .imePadding()
-                        .padding(bottom = 48.dp),
+                        .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars)),
                 ) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     SpectraIconAction(
@@ -335,7 +357,7 @@ private fun PostDetails(
                         label = "返回树洞",
                         onClick = onDismiss,
                     )
-                    Column(Modifier.weight(1f)) { Text("帖子与评论", style = MaterialTheme.typography.titleLarge); Text("${post.author} · ${remoteTime(post.createdAt)}", color = MaterialTheme.colorScheme.onSurface.copy(.55f)) }
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text("帖子与评论", style = MaterialTheme.typography.titleLarge); Text(post.author, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     SpectraIconAction(
                         icon = Icons.Rounded.Refresh,
                         label = "刷新评论",
@@ -415,7 +437,10 @@ private fun PostDetails(
                             maxLines = 4,
                         )
                         IconButton(
-                            onClick = { onPublish(draft) { draft = "" } },
+                            onClick = {
+                                val submitted = draft
+                                onPublish(submitted) { if (draft == submitted) draft = "" }
+                            },
                             enabled = draft.isNotBlank() && !busy,
                             modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.primary, CircleShape),
                         ) { Icon(Icons.AutoMirrored.Rounded.Send, "发布评论", tint = MaterialTheme.colorScheme.onPrimary) }
@@ -471,12 +496,12 @@ fun MarketScreen(
     SpectraPageScaffold(mood = PageMood.COMMERCE) {
         Box(Modifier.fillMaxSize()) {
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(168.dp),
+                columns = GridCells.Adaptive((176f * LocalDensity.current.fontScale.coerceIn(1f, 1.6f)).dp),
                 contentPadding = PaddingValues(
                     start = layout.pageHorizontalPadding,
                     end = layout.pageHorizontalPadding,
                     top = contentPadding.calculateTopPadding() + layout.pageTopSpacing,
-                    bottom = pageBottom,
+                    bottom = pageBottom + 80.dp,
                 ),
                 horizontalArrangement = Arrangement.spacedBy(layout.compactGap),
                 verticalArrangement = Arrangement.spacedBy(layout.sectionGap),
@@ -499,7 +524,7 @@ fun MarketScreen(
                         refreshing = true,
                         hasSynced = false,
                         syncError = null,
-                        onPublish = { composing = true },
+                        onPublish = { if (signedIn) composing = true else onLogin() },
                         onRetry = viewModel::refreshListings,
                     )
                 }
@@ -510,13 +535,13 @@ fun MarketScreen(
                             detail = if (state.listingsScope == CommunityFeedScope.MINE) "你记下的心愿和实现后的留念，都会在这里。" else "审核通过的公开心愿，会在这里相遇。",
                             action = "记下心愿",
                             mood = PageMood.COMMERCE,
-                        ) { composing = true }
+                        ) { if (signedIn) composing = true else onLogin() }
                     } else {
                     MarketEmptyState(
                         refreshing = state.listingsRefreshing,
                         hasSynced = state.listingsHasSynced,
                         syncError = state.listingsSyncError,
-                        onPublish = { composing = true },
+                        onPublish = { if (signedIn) composing = true else onLogin() },
                         onRetry = viewModel::refreshListings,
                     )
                     }
@@ -599,20 +624,19 @@ fun MarketScreen(
 @Composable
 internal fun ListingCardView(listing: MarketplaceListing, onClick: () -> Unit) {
     val hasImage = listing.mediaUrl.isNotBlank()
-    GlassPanel(Modifier.fillMaxWidth().then(if (hasImage) Modifier.aspectRatio(1f) else Modifier), onClick = onClick) {
-        if (hasImage) {
-            AsyncImage(listing.mediaUrl, "心愿图片", Modifier.matchParentSize().clip(RoundedCornerShape(24.dp)), contentScale = ContentScale.Crop)
-            Box(Modifier.matchParentSize().clip(RoundedCornerShape(24.dp)).background(Brush.verticalGradient(listOf(Color.Transparent, MaterialTheme.colorScheme.surface.copy(.96f)))))
-        }
-        Column(Modifier.then(if (hasImage) Modifier.fillMaxSize() else Modifier.fillMaxWidth()).padding(if (hasImage) 12.dp else 18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (hasImage) Spacer(Modifier.weight(1f))
-            Text(listing.title, maxLines = if (hasImage) 2 else 1, overflow = TextOverflow.Ellipsis,
-                style = if (hasImage) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge)
-            if (!hasImage && listing.description.isNotBlank()) Text(listing.description, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.76f))
-            if (listing.completedAt.isNotBlank()) Text("已实现 · 把这一刻留下", style = MaterialTheme.typography.labelMedium)
-            else if (!hasImage) wishDateMessage(listing.targetDate)?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary) }
-            Text(wishRecordedTime(listing.createdAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(.6f))
+    GlassPanel(Modifier.fillMaxWidth(), onClick = onClick) {
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))) {
+            if (hasImage) CommunityCardImage(listing.mediaUrl, "心愿图片", 4f / 3f)
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(listing.title, maxLines = 3, overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.titleMedium)
+                if (listing.description.isNotBlank()) Text(listing.description, maxLines = 3, overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (listing.completedAt.isNotBlank()) Text("已实现 · 把这一刻留下", style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary)
+                else wishDateMessage(listing.targetDate)?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary) }
+                Text(wishRecordedTime(listing.createdAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }
@@ -625,11 +649,13 @@ internal fun PostComposer(busy: Boolean, onClose: () -> Unit, onPublish: (String
     var isPublic by rememberSaveable(initial?.id) { mutableStateOf(initial?.isPublic ?: false) }
     var removeImage by rememberSaveable(initial?.id) { mutableStateOf(false) }
     var preparing by remember { mutableStateOf(false) }
-    var imageUri by remember { mutableStateOf<Uri?>(null) }
+    var imageUri by rememberSaveable(initial?.id) { mutableStateOf<Uri?>(null) }
     var mediaError by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> imageUri = uri; mediaError = null }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) { imageUri = uri; mediaError = null }
+    }
     ComposerDialog(
         title = if (initial == null) "写进树洞" else "修改树洞",
         subtitle = "一句真话就够了。完成后点击保存，未保存的修改不会提交。",
@@ -637,9 +663,11 @@ internal fun PostComposer(busy: Boolean, onClose: () -> Unit, onPublish: (String
         progress = "${body.length} / 5000",
         primaryText = if (busy || preparing) "正在保存" else "保存",
         primaryEnabled = body.isNotBlank() && !busy && !preparing,
+        canClose = !busy && !preparing,
         onClose = { if (!busy && !preparing) onClose() },
         mood = PageMood.SOCIAL,
-        onPrimary = {
+        onPrimary = save@{
+            if (busy || preparing) return@save
             preparing = true
             scope.launch {
                 try {
@@ -655,6 +683,7 @@ internal fun PostComposer(busy: Boolean, onClose: () -> Unit, onPublish: (String
             SpectraTextField(
                 value = body,
                 onValueChange = { body = it.take(5000) },
+                enabled = !busy && !preparing,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 190.dp),
                 placeholder = { Text("今天有什么想被记住？") },
                 shape = RoundedCornerShape(18.dp),
@@ -664,6 +693,7 @@ internal fun PostComposer(busy: Boolean, onClose: () -> Unit, onPublish: (String
             SpectraTextField(
                 value = topic,
                 onValueChange = { topic = it.take(40) },
+                enabled = !busy && !preparing,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("话题") },
                 placeholder = { Text("例如：今夜、灵感、想说") },
@@ -677,6 +707,7 @@ internal fun PostComposer(busy: Boolean, onClose: () -> Unit, onPublish: (String
                 options = listOf("以本人发布", "匿名发布"),
                 selectedIndex = if (anonymous) 1 else 0,
                 onSelected = { anonymous = it == 1 },
+                enabled = !busy && !preparing,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -689,10 +720,11 @@ internal fun PostComposer(busy: Boolean, onClose: () -> Unit, onPublish: (String
                 emptyLabel = "从相册选一张图",
                 contentDescription = "待发布的树洞图片",
                 mood = PageMood.SOCIAL,
+                enabled = !busy && !preparing,
                 onClick = { picker.launch("image/*") },
             )
             mediaError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            if (imageUri != null || (!removeImage && initial?.mediaPaths?.isNotEmpty() == true)) TextButton(onClick = { imageUri = null; removeImage = true }) { Text("移除图片") }
+            if (imageUri != null || (!removeImage && initial?.mediaPaths?.isNotEmpty() == true)) TextButton(enabled = !busy && !preparing, onClick = { imageUri = null; removeImage = true }) { Text("移除图片") }
         }
     }
 }
@@ -707,11 +739,13 @@ internal fun ListingComposer(busy: Boolean, onClose: () -> Unit, onPublish: (Str
     var removeImage by rememberSaveable(initial?.id) { mutableStateOf(false) }
     var targetDate by rememberSaveable(initial?.id) { mutableStateOf(initial?.targetDate.orEmpty()) }
     var preparing by remember { mutableStateOf(false) }
-    var imageUri by remember { mutableStateOf<Uri?>(null) }
+    var imageUri by rememberSaveable(initial?.id) { mutableStateOf<Uri?>(null) }
     var mediaError by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> imageUri = uri; mediaError = null }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) { imageUri = uri; mediaError = null }
+    }
     val cents = wishPriceCents(price)
     ComposerDialog(
         title = if (initial == null) "贴一张心愿" else "修改心愿",
@@ -720,9 +754,11 @@ internal fun ListingComposer(busy: Boolean, onClose: () -> Unit, onPublish: (Str
         progress = if (title.isBlank()) "草稿" else "可以保存",
         primaryText = if (busy || preparing) "正在保存" else "保存",
         primaryEnabled = title.isNotBlank() && wishPriceValid(price) && !busy && !preparing,
+        canClose = !busy && !preparing,
         onClose = { if (!busy && !preparing) onClose() },
         mood = PageMood.COMMERCE,
-        onPrimary = {
+        onPrimary = save@{
+            if (busy || preparing) return@save
             preparing = true
             scope.launch {
                 try {
@@ -736,12 +772,12 @@ internal fun ListingComposer(busy: Boolean, onClose: () -> Unit, onPublish: (Str
         VisibilityChoice(isPublic, { isPublic = it }, enabled = !busy && !preparing)
         WishDateChoice(targetDate, { targetDate = it }, enabled = !busy && !preparing)
         ComposerSection("01", "这是什么", "先给心愿一个一眼能懂的名字。", PageMood.COMMERCE) {
-            SpectraTextField(title, { title = it.take(160) }, Modifier.fillMaxWidth(), label = { Text("心愿标题") }, singleLine = true, shape = RoundedCornerShape(18.dp))
-            SpectraTextField(description, { description = it.take(2000) }, Modifier.fillMaxWidth().heightIn(min = 132.dp), label = { Text("细节（可选）") }, placeholder = { Text("为什么想实现它、期待怎样的回应…") }, shape = RoundedCornerShape(18.dp))
+            SpectraTextField(title, { title = it.take(160) }, Modifier.fillMaxWidth(), enabled = !busy && !preparing, label = { Text("心愿标题") }, singleLine = true, shape = RoundedCornerShape(18.dp))
+            SpectraTextField(description, { description = it.take(2000) }, Modifier.fillMaxWidth().heightIn(min = 132.dp), enabled = !busy && !preparing, label = { Text("细节（可选）") }, placeholder = { Text("为什么想实现它、期待怎样的回应…") }, shape = RoundedCornerShape(18.dp))
         }
         ComposerSection("02", "期待的条件", "不涉及金钱就留空；填写 0 元表示明确免费。地点也可留空。", PageMood.COMMERCE) {
-            SpectraTextField(price, { price = it.filter { char -> char.isDigit() || char == '.' }.take(10) }, Modifier.fillMaxWidth(), label = { Text("期待价格（元，可选）") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, shape = RoundedCornerShape(18.dp), isError = !wishPriceValid(price), supportingText = { Text(if (wishPriceValid(price)) "可以留空" else "请输入有效金额，最多两位小数") })
-            SpectraTextField(location, { location = it.take(80) }, Modifier.fillMaxWidth(), label = { Text("碰面地点（可选）") }, singleLine = true, shape = RoundedCornerShape(18.dp))
+            SpectraTextField(price, { price = it.filter { char -> char.isDigit() || char == '.' }.take(10) }, Modifier.fillMaxWidth(), enabled = !busy && !preparing, label = { Text("期待价格（元，可选）") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, shape = RoundedCornerShape(18.dp), isError = !wishPriceValid(price), supportingText = { Text(if (wishPriceValid(price)) "可以留空" else "请输入有效金额，最多两位小数") })
+            SpectraTextField(location, { location = it.take(80) }, Modifier.fillMaxWidth(), enabled = !busy && !preparing, label = { Text("碰面地点（可选）") }, singleLine = true, shape = RoundedCornerShape(18.dp))
         }
         ComposerSection("03", "让它被看见", "清楚的图片会让回应更准确。", PageMood.COMMERCE) {
             if (imageUri == null && !removeImage && initial?.mediaUrl?.isNotBlank() == true) {
@@ -752,10 +788,11 @@ internal fun ListingComposer(busy: Boolean, onClose: () -> Unit, onPublish: (Str
                 emptyLabel = "选一张代表它的图",
                 contentDescription = "待发布的心愿图片",
                 mood = PageMood.COMMERCE,
+                enabled = !busy && !preparing,
                 onClick = { picker.launch("image/*") },
             )
             mediaError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            if (imageUri != null || (!removeImage && initial?.mediaPaths?.isNotEmpty() == true)) TextButton(onClick = { imageUri = null; removeImage = true }) { Text("移除图片") }
+            if (imageUri != null || (!removeImage && initial?.mediaPaths?.isNotEmpty() == true)) TextButton(enabled = !busy && !preparing, onClick = { imageUri = null; removeImage = true }) { Text("移除图片") }
         }
     }
 }
@@ -790,6 +827,7 @@ private fun ComposerDialog(
     editing: Boolean,
     primaryText: String,
     primaryEnabled: Boolean,
+    canClose: Boolean = true,
     onClose: () -> Unit,
     mood: PageMood,
     onPrimary: () -> Unit,
@@ -807,7 +845,7 @@ private fun ComposerDialog(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    SpectraIconAction(icon = Icons.AutoMirrored.Rounded.ArrowBack, label = "返回", onClick = onClose)
+                    SpectraIconAction(icon = Icons.AutoMirrored.Rounded.ArrowBack, label = "返回", onClick = onClose, enabled = canClose)
                     Column(Modifier.weight(1f)) {
                         Text(title, style = MaterialTheme.typography.headlineMedium)
                         Text(if (editing) "修改后保存生效" else "尚未保存", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(.52f))
@@ -861,10 +899,11 @@ private fun MediaPickerSlot(
     emptyLabel: String,
     contentDescription: String,
     mood: PageMood,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     GlassPanel(
-        modifier = Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick),
+        modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, role = Role.Button, onClick = onClick),
         radius = 22,
         emphasized = uri != null,
         shadowed = false,

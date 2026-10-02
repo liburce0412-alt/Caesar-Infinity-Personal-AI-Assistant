@@ -245,7 +245,8 @@ class LocalMnnAiEngine(
         val pointer = nativePointer
         nativePointer = 0
         loadedModelId = null
-        MnnNativeBridge.release(pointer)
+        // Calling the bridge initializes JNI; an idle engine has nothing to unload.
+        if (pointer != 0L) MnnNativeBridge.release(pointer)
     }
 
     private fun scheduleIdleRelease() {

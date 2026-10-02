@@ -24,4 +24,13 @@ class TimetableLayoutTest {
         val placed = placeDayCourses(listOf(course("A", 480, 485), course("B", 490, 495), course("C", 520, 525)))
         assertEquals(listOf(0, 1, 0), placed.map { it.lane })
     }
+    @Test fun `connected overlaps group without widening or dropping courses`() {
+        val input = listOf(course("A", 480, 540), course("B", 530, 600), course("C", 590, 630), course("D", 650, 710))
+        assertEquals(listOf(input.take(3), input.takeLast(1)), groupDayCourses(input.reversed()))
+    }
+
+    @Test fun `short adjacent courses share accessible group but distant courses do not`() {
+        val input = listOf(course("A", 480, 485), course("B", 490, 495), course("C", 540, 550))
+        assertEquals(listOf(input.take(2), input.takeLast(1)), groupDayCourses(input))
+    }
 }

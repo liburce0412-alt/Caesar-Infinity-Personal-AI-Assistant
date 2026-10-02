@@ -20,7 +20,12 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -137,7 +142,7 @@ fun MessageCenterScreen(
 }
 
 @Composable
-private fun ConversationRow(summary: ConversationSummary, onClick: () -> Unit) {
+internal fun ConversationRow(summary: ConversationSummary, onClick: () -> Unit) {
     SpectraSurface(
         modifier = Modifier
             .fillMaxWidth()
@@ -153,17 +158,15 @@ private fun ConversationRow(summary: ConversationSummary, onClick: () -> Unit) {
             ) { BrandMark(Modifier.size(32.dp), Color.White) }
             Spacer(Modifier.size(12.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(summary.otherName, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                    Text(commerceTime(summary.lastMessageAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(.5f))
-                }
+                Text(summary.otherName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(commerceTime(summary.lastMessageAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (summary.listingTitle.isNotBlank()) Text(summary.listingTitle, style = MaterialTheme.typography.labelMedium, color = SpectraColors.Focus, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(summary.lastMessage.ifBlank { "开始这段对话" }, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurface.copy(.62f))
             }
             if (summary.unreadCount > 0) {
                 Spacer(Modifier.size(8.dp))
-                Box(Modifier.size(24.dp).background(SpectraColors.Rose, CircleShape), contentAlignment = Alignment.Center) {
-                    Text(summary.unreadCount.coerceAtMost(99).toString(), color = Color.White, style = MaterialTheme.typography.labelSmall)
+                Box(Modifier.heightIn(min = 28.dp).widthIn(min = 28.dp).background(MaterialTheme.colorScheme.primary, CircleShape).padding(horizontal = 6.dp, vertical = 4.dp), contentAlignment = Alignment.Center) {
+                    Text(if (summary.unreadCount > 99) "99+" else summary.unreadCount.toString(), color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelSmall)
                 }
             }
         }
@@ -194,7 +197,7 @@ private fun MessageThreadScreen(
 
     SpectraPageScaffold(mood = PageMood.COMMERCE) {
         Column(
-            Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding(),
+            Modifier.fillMaxSize().statusBarsPadding().windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars)),
         ) {
         Row(
             Modifier
@@ -208,8 +211,8 @@ private fun MessageThreadScreen(
                 onClick = viewModel::closeMessageThread,
             )
             Column(Modifier.weight(1f)) {
-                Text(summary?.otherName ?: "心愿会话", style = MaterialTheme.typography.titleLarge)
-                if (!summary?.listingTitle.isNullOrBlank()) Text(summary?.listingTitle.orEmpty(), style = MaterialTheme.typography.bodySmall, color = SpectraColors.Focus)
+                Text(summary?.otherName ?: "心愿会话", style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (!summary?.listingTitle.isNullOrBlank()) Text(summary?.listingTitle.orEmpty(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             SpectraIconAction(
                 icon = Icons.Rounded.Refresh,
@@ -269,7 +272,7 @@ private fun MessageThreadScreen(
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(Color.White.copy(.12f))
+                .background(MaterialTheme.colorScheme.surface.copy(.72f))
                 .padding(horizontal = layout.pageHorizontalPadding, vertical = layout.compactGap),
             verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(layout.compactGap),
@@ -283,10 +286,13 @@ private fun MessageThreadScreen(
                 maxLines = 4,
             )
             IconButton(
-                onClick = { viewModel.sendMessage(conversationId, draft) { draft = "" } },
+                onClick = {
+                    val submitted = draft
+                    viewModel.sendMessage(conversationId, submitted) { if (draft == submitted) draft = "" }
+                },
                 enabled = draft.isNotBlank() && !state.operationBusy,
-                modifier = Modifier.size(52.dp).background(MaterialTheme.colorScheme.primary, CircleShape),
-            ) { Icon(Icons.AutoMirrored.Rounded.Send, "发送", tint = MaterialTheme.colorScheme.onPrimary) }
+                modifier = Modifier.size(52.dp).background(if (draft.isNotBlank() && !state.operationBusy) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant, CircleShape),
+            ) { Icon(Icons.AutoMirrored.Rounded.Send, "发送", tint = if (draft.isNotBlank() && !state.operationBusy) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         }
     }
@@ -311,7 +317,7 @@ private fun MessageBubble(message: CampusMessage, own: Boolean) {
             ) {
                 Text(message.body, style = MaterialTheme.typography.bodyLarge)
                 Spacer(Modifier.height(4.dp))
-                Text(commerceTime(message.createdAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(.48f))
+                Text(commerceTime(message.createdAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -378,7 +384,10 @@ fun OrdersScreen(
     }
 
     pending?.let { (order, action) ->
-        SpectraModalBottomSheet(onDismissRequest = { if (!state.operationBusy) pending = null }) {
+        SpectraModalBottomSheet(
+            onDismissRequest = { if (!state.operationBusy) pending = null },
+            dismissible = !state.operationBusy,
+        ) {
             Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), contentAlignment = Alignment.BottomCenter) {
                 SpectraSurface(
                     modifier = Modifier.fillMaxWidth(),
@@ -387,6 +396,7 @@ fun OrdersScreen(
                 ) {
                     Text(action.label, style = MaterialTheme.typography.titleLarge)
                     Text(action.detail, color = MaterialTheme.colorScheme.onSurface.copy(.64f))
+                    state.operationError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
                     SlideConfirm(
                         text = if (state.operationBusy) "正在确认…" else "滑动确认",
                         enabled = !state.operationBusy,
@@ -397,6 +407,7 @@ fun OrdersScreen(
                     SpectraAction(
                         text = "暂不操作",
                         onClick = { pending = null },
+                        enabled = !state.operationBusy,
                         modifier = Modifier.fillMaxWidth(),
                         mood = PageMood.COMMERCE,
                     )
@@ -418,6 +429,14 @@ private fun OrderCard(
     val counterpart = if (isBuyer) order.sellerName else order.buyerName
     val actions = orderActions(order, isBuyer)
     SpectraSurface(Modifier.fillMaxWidth(), mood = PageMood.COMMERCE) {
+            SpectraStatus(
+                text = orderStatusText(order.status),
+                tone = when (order.status) {
+                    "completed" -> SpectraStatusTone.SUCCESS
+                    "cancelled", "disputed" -> SpectraStatusTone.WARNING
+                    else -> SpectraStatusTone.INFO
+                },
+            )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(72.dp).clip(RoundedCornerShape(12.dp)).background(Brush.linearGradient(listOf(SpectraColors.Warm.copy(.24f), SpectraColors.Rose.copy(.12f)))), contentAlignment = Alignment.Center) {
                     if (order.listingMediaUrl.isNotBlank()) AsyncImage(order.listingMediaUrl, "商品图片", Modifier.fillMaxSize().aspectRatio(1f))
@@ -427,16 +446,9 @@ private fun OrderCard(
                 Column(Modifier.weight(1f)) {
                     Text(order.listingTitle, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text("¥${"%.2f".format(order.priceCents / 100.0)}", fontFamily = Tomorrow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleLarge)
-                    Text("${if (isBuyer) "卖家" else "买家"} · $counterpart", color = MaterialTheme.colorScheme.onSurface.copy(.58f))
+                    Text("${if (isBuyer) "卖家" else "买家"} · $counterpart", maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                SpectraStatus(
-                    text = orderStatusText(order.status),
-                    tone = when (order.status) {
-                        "completed" -> SpectraStatusTone.SUCCESS
-                        "cancelled", "disputed" -> SpectraStatusTone.WARNING
-                        else -> SpectraStatusTone.INFO
-                    },
-                )
+
             }
             OrderProgress(order.status)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

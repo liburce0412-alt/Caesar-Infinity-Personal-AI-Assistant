@@ -86,7 +86,7 @@ internal fun ListingDetails(
     var draft by rememberSaveable(listing.id) { mutableStateOf("") }
     SpectraFullScreenDialog(onDismissRequest = onClose, mood = PageMood.COMMERCE) {
         SpectraPageScaffold(mood = PageMood.COMMERCE) {
-            Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().padding(bottom = 48.dp)) {
+            Column(Modifier.fillMaxSize().statusBarsPadding().windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))) {
                 Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     SpectraIconAction(Icons.AutoMirrored.Rounded.ArrowBack, "返回心愿墙", onClose)
                     Text("留给未来的心愿", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
@@ -105,10 +105,10 @@ internal fun ListingDetails(
                                 Text("希望实现于 ${listing.targetDate}", style = MaterialTheme.typography.bodyMedium)
                                 if (listing.completedAt.isBlank()) wishDateMessage(listing.targetDate)?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
                             }
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                if (ownListing) SpectraAction(if (listing.completedAt.isBlank()) "实现了，留个纪念" else "编辑留念", onComplete, enabled = !busy)
-                                else SpectraAction("联系发布者", onContact, enabled = !busy)
-                                SpectraAction("收藏", onFavorite, enabled = !busy)
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                if (ownListing) SpectraAction(if (listing.completedAt.isBlank()) "实现了，留个纪念" else "编辑留念", onComplete, Modifier.fillMaxWidth(), enabled = !busy)
+                                else SpectraAction("联系发布者", onContact, Modifier.fillMaxWidth(), enabled = !busy)
+                                SpectraAction("收藏", onFavorite, Modifier.fillMaxWidth(), enabled = !busy)
                             }
                         }
                     }
@@ -123,7 +123,7 @@ internal fun ListingDetails(
                     error?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
                     item { Text(if (ownListing) "评论 · 也可以写给自己" else "给心愿留句话", style = MaterialTheme.typography.titleLarge) }
                     when (comments) {
-                        UiState.Loading -> item { Text("正在打开留言…") }
+                        UiState.Loading -> item { SpectraStatePane(SpectraStateKind.LOADING, "正在打开留言", "稍等片刻，正在同步这份心愿的回应。", modifier = Modifier.fillMaxWidth()) }
                         UiState.Empty -> item { Text(if (ownListing) "今天，离它近了一点吗？把这一小步记在这里。" else "一句真诚的回应，也能让期待多一点温度。", color = MaterialTheme.colorScheme.onSurface.copy(.65f)) }
                         is UiState.Error -> item { Text(comments.message, color = MaterialTheme.colorScheme.error); SpectraAction("重试", onRetry) }
                         is UiState.Data -> items(comments.value, key = { it.id }) { CommentRow(it) }
@@ -135,7 +135,10 @@ internal fun ListingDetails(
                 }
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SpectraTextField(draft, { draft = it.take(2000) }, Modifier.weight(1f), placeholder = { Text("写下评论…") }, maxLines = 4)
-                    SpectraIconAction(Icons.AutoMirrored.Rounded.Send, "发布心愿评论", { onComment(draft) { draft = "" } }, enabled = draft.isNotBlank() && !busy)
+                    SpectraIconAction(Icons.AutoMirrored.Rounded.Send, "发布心愿评论", {
+                        val submitted = draft
+                        onComment(submitted) { if (draft == submitted) draft = "" }
+                    }, enabled = draft.isNotBlank() && !busy)
                 }
             }
         }
@@ -145,12 +148,14 @@ internal fun ListingDetails(
 @Composable
 internal fun WishCompletionDialog(wish: MarketplaceListing, busy: Boolean, error: String?, onClose: () -> Unit, onSave: (String, UploadImage?) -> Unit) {
     var note by rememberSaveable(wish.id) { mutableStateOf(wish.completionNote) }
-    var imageUri by remember { mutableStateOf<Uri?>(null) }
+    var imageUri by rememberSaveable(wish.id) { mutableStateOf<Uri?>(null) }
     var preparing by remember { mutableStateOf(false) }
     var mediaError by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { imageUri = it }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) { imageUri = uri; mediaError = null }
+    }
     SpectraFullScreenDialog(onDismissRequest = { if (!busy && !preparing) onClose() }, mood = PageMood.COMMERCE) {
         SpectraPageScaffold(mood = PageMood.COMMERCE) {
             Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -158,12 +163,13 @@ internal fun WishCompletionDialog(wish: MarketplaceListing, busy: Boolean, error
                 Text("后来，它是这样实现的", style = MaterialTheme.typography.headlineMedium)
                 Text(wish.title, style = MaterialTheme.typography.titleLarge)
                 Text("留一句当时的感受，或放一张照片。空着也没关系，这一天已经值得纪念。")
-                SpectraTextField(note, { note = it.take(2000) }, Modifier.fillMaxWidth(), label = { Text("此刻的感受（可选）") }, minLines = 4)
+                SpectraTextField(note, { note = it.take(2000) }, Modifier.fillMaxWidth(), enabled = !busy && !preparing, label = { Text("此刻的感受（可选）") }, minLines = 4)
                 val preview = imageUri?.toString() ?: wish.completionMediaUrl
                 if (preview.isNotBlank()) AsyncImage(preview, "留念照片", Modifier.fillMaxWidth().height(200.dp), contentScale = ContentScale.Crop)
                 SpectraAction("加一张留念照片", { picker.launch("image/*") }, enabled = !busy && !preparing)
                 (mediaError ?: error)?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                SpectraPrimaryButton(if (busy || preparing) "正在保存" else "把这一刻留下", enabled = !busy && !preparing, onClick = {
+                SpectraPrimaryButton(if (busy || preparing) "正在保存" else "把这一刻留下", enabled = !busy && !preparing, onClick = save@{
+                    if (busy || preparing) return@save
                     preparing = true
                     scope.launch {
                         try {

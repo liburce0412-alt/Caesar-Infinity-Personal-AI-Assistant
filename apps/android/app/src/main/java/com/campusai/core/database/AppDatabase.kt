@@ -301,6 +301,12 @@ interface CampusDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTimeRecord(entity: TimeRecordEntity): Long
 
+    @Transaction
+    suspend fun insertTimeRecordWithSnapshot(entity: TimeRecordEntity, snapshot: DailyGoalSnapshotEntity?) {
+        insertTimeRecord(entity)
+        snapshot?.let { insertDailyGoalSnapshots(listOf(it)) }
+    }
+
     @Query("UPDATE time_records SET deletedAt = :deletedAt, updatedAt = :deletedAt, version = version + 1, syncState = 'pending' WHERE id = :id AND deletedAt IS NULL")
     suspend fun softDeleteTimeRecord(id: Int, deletedAt: Long = System.currentTimeMillis())
 
@@ -309,6 +315,9 @@ interface CampusDao {
 
     @Query("UPDATE time_records SET title = :title, category = :category, startTime = :startTime, endTime = :endTime, durationMinutes = :durationMinutes, remark = :remark, updatedAt = :updatedAt, version = version + 1, syncState = 'pending' WHERE id = :id AND deletedAt IS NULL")
     suspend fun editTimeRecord(id: Int, title: String, category: String, startTime: Long, endTime: Long, durationMinutes: Long, remark: String, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE time_records SET title = :title, category = :category, startTime = :startTime, endTime = :endTime, durationMinutes = :durationMinutes, remark = :remark, updatedAt = :updatedAt, version = version + 1, syncState = 'pending' WHERE id = :id AND deletedAt IS NULL AND (userId = :expectedOwner OR userId = 'local_user')")
+    suspend fun editOwnedTimeRecord(id: Int, title: String, category: String, startTime: Long, endTime: Long, durationMinutes: Long, remark: String, expectedOwner: String, updatedAt: Long = System.currentTimeMillis()): Int
 
     @Query("SELECT * FROM time_records WHERE syncState IN ('pending', 'failed') AND userId = :activeUser ORDER BY updatedAt")
     suspend fun getPendingTimeRecords(activeUser: String): List<TimeRecordEntity>

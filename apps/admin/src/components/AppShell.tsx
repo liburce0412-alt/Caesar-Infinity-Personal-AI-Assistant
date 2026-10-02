@@ -1,6 +1,6 @@
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type PointerEvent } from 'react'
 import { BrandMark, Symbol } from './BrandMark'
 import { SpectraCanvas, type SpectraEnvironment } from './SpectraCanvas'
 import { backend, currentAdmin } from '../lib/backend'
@@ -16,6 +16,8 @@ const roles: Record<string,string> = {super_admin:'超级管理员',admin:'管�
 export function AppShell() {
   const [menuOpen,setMenuOpen]=useState(false)
   const drawer=useRef<HTMLDialogElement>(null)
+  const outsidePress=useRef<{pointer:number;x:number;y:number}|null>(null)
+  const outsideClick=useRef(false)
   const [environment,setEnvironment]=useState<SpectraEnvironment>(()=>{
     const saved=localStorage.getItem('spectra-environment')
     return saved && saved in environments ? saved as SpectraEnvironment : 'original'
@@ -24,6 +26,8 @@ export function AppShell() {
   const navigate=useNavigate(),queryClient=useQueryClient()
   const who=useQuery({queryKey:['admin-me'],queryFn:currentAdmin})
   const [signOutError,setSignOutError]=useState('')
+  const [signingOut,setSigningOut]=useState(false)
+  const signOutInFlight=useRef(false)
   const path=useRouterState({select:state=>state.location.pathname})
   const page=groups.flatMap(group=>[...group.items]).find(item=>item[0]===path)?.[2]||'管理台'
   useEffect(()=>setMenuOpen(false),[path])
@@ -45,10 +49,20 @@ export function AppShell() {
     return ()=>data.subscription.unsubscribe()
   },[navigate,queryClient])
   const signOut=async()=>{
+    if(signOutInFlight.current)return
+    signOutInFlight.current=true
+    setSigningOut(true)
     setSignOutError('')
-    const result=await backend?.auth.signOut()
-    if(result?.error){setSignOutError('退出失败，请重试。');return}
-    await navigate({to:'/login'})
+    try{
+      const result=await backend?.auth.signOut()
+      if(result?.error){setSignOutError('退出失败，请重试。');return}
+      await navigate({to:'/login'})
+    }catch{setSignOutError('退出失败，请重试。')}
+    finally{signOutInFlight.current=false;setSigningOut(false)}
+  }
+  const outsideDrawer=(event:PointerEvent<HTMLDialogElement>)=>{
+    const bounds=event.currentTarget.getBoundingClientRect()
+    return event.clientX<bounds.left||event.clientX>bounds.right||event.clientY<bounds.top||event.clientY>bounds.bottom
   }
   const navigation=<>
     <div className="brand"><BrandMark/><div>CampusAI<small>管理工作台</small></div></div>
@@ -58,7 +72,7 @@ export function AppShell() {
     </div>)}</nav>
     <div className="nav-spacer"/>
     <div className="sidebar-footer"><div className="profile-line"><div className="avatar"><Symbol>person</Symbol></div><div className="profile-copy"><strong>{roles[who.data?.role ?? ""]||'管理账号'}</strong><small title={who.data?.email}>{who.data?.email||'正在读取账号'}</small></div></div>
-      <button className="signout-button" onClick={()=>void signOut()}><Symbol>logout</Symbol>退出登录</button>
+      <button className="signout-button" disabled={signingOut} aria-busy={signingOut} onClick={()=>void signOut()}><Symbol>logout</Symbol>{signingOut?'正在退出':'退出登录'}</button>
       {signOutError&&<p role="alert">{signOutError}</p>}
     </div>
   </>
@@ -67,7 +81,11 @@ export function AppShell() {
     <a className="skip-link" href="#main-content">跳到主要内容</a>
     <div className="app-shell">
       <aside className="sidebar desktop-sidebar">{navigation}</aside>
-      <dialog ref={drawer} className="mobile-drawer" aria-label="管理台导航菜单" onCancel={e=>{e.preventDefault();setMenuOpen(false)}} onClick={e=>{if(e.target===e.currentTarget)setMenuOpen(false)}}>
+      <dialog ref={drawer} className="mobile-drawer" aria-label="管理台导航菜单" onCancel={e=>{e.preventDefault();setMenuOpen(false)}}
+        onPointerDown={e=>{outsideClick.current=false;outsidePress.current=e.button===0&&outsideDrawer(e)?{pointer:e.pointerId,x:e.clientX,y:e.clientY}:null}}
+        onPointerUp={e=>{const start=outsidePress.current;outsidePress.current=null;outsideClick.current=Boolean(start&&start.pointer===e.pointerId&&outsideDrawer(e)&&Math.hypot(e.clientX-start.x,e.clientY-start.y)<=6)}}
+        onPointerCancel={()=>{outsidePress.current=null;outsideClick.current=false}}
+        onClick={e=>{if(outsideClick.current&&e.target===e.currentTarget)setMenuOpen(false);outsideClick.current=false}}>
         <button className="icon-button drawer-close" aria-label="关闭导航" onClick={()=>setMenuOpen(false)}><Symbol>close</Symbol></button>
         {navigation}
       </dialog>

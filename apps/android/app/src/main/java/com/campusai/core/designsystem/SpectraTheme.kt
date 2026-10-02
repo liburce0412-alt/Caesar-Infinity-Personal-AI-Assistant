@@ -1,15 +1,19 @@
 package com.campusai.core.designsystem
 
 import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
@@ -50,7 +54,7 @@ val Plex = FontFamily(
 )
 
 private val LightColors = lightColorScheme(
-    primary = SpectraColors.Focus,
+    primary = Color(0xFF3655C9),
     onPrimary = Color.White,
     secondary = SpectraColors.Violet,
     tertiary = SpectraColors.Cyan,
@@ -58,7 +62,23 @@ private val LightColors = lightColorScheme(
     onBackground = SpectraColors.Ink,
     surface = Color.White,
     onSurface = SpectraColors.Ink,
-    outline = SpectraColors.Silver,
+    surfaceVariant = Color(0xFFE9EDF5),
+    surfaceDim = Color(0xFFDCE2EB),
+    surfaceBright = Color(0xFFFAFBFE),
+    surfaceContainerLowest = Color.White,
+    surfaceContainerLow = Color(0xFFF4F6FA),
+    surfaceContainer = Color(0xFFEEF1F7),
+    surfaceContainerHigh = Color(0xFFE7ECF4),
+    surfaceContainerHighest = Color(0xFFDFE5EF),
+    onSurfaceVariant = Color(0xFF465369),
+    primaryContainer = Color(0xFFE3E9FF),
+    onPrimaryContainer = Color(0xFF182C70),
+    secondaryContainer = Color(0xFFEBE5FA),
+    onSecondaryContainer = Color(0xFF392B5F),
+    tertiaryContainer = Color(0xFFD8EFEE),
+    onTertiaryContainer = Color(0xFF173F40),
+    outline = Color(0xFF728096),
+    outlineVariant = Color(0xFFCDD5E2),
     error = SpectraColors.Error,
 )
 
@@ -71,7 +91,23 @@ private val DarkColors = darkColorScheme(
     onBackground = Color(0xFFF3F6FC),
     surface = Color(0xFF151E2E),
     onSurface = Color(0xFFF3F6FC),
-    outline = Color(0xFF42506A),
+    surfaceVariant = Color(0xFF253248),
+    surfaceDim = SpectraColors.Night,
+    surfaceBright = Color(0xFF334158),
+    surfaceContainerLowest = Color(0xFF0A101B),
+    surfaceContainerLow = Color(0xFF121B2B),
+    surfaceContainer = Color(0xFF182335),
+    surfaceContainerHigh = Color(0xFF202D40),
+    surfaceContainerHighest = Color(0xFF2A384D),
+    onSurfaceVariant = Color(0xFFC1CCDC),
+    primaryContainer = Color(0xFF2E416C),
+    onPrimaryContainer = Color(0xFFDFE7FF),
+    secondaryContainer = Color(0xFF423655),
+    onSecondaryContainer = Color(0xFFECE2FF),
+    tertiaryContainer = Color(0xFF214747),
+    onTertiaryContainer = Color(0xFFCEEEEE),
+    outline = Color(0xFF91A0B8),
+    outlineVariant = Color(0xFF42506A),
     error = Color(0xFFFF7D9D),
 )
 
@@ -95,7 +131,16 @@ internal fun spectraColorScheme(
             background = Color(0xFF0B1915),
             onBackground = Color(0xFFEFF9F3),
             surface = Color(0xFF10231D),
+            surfaceVariant = Color(0xFF243B2D),
+            surfaceDim = Color(0xFF0B1915),
+            surfaceBright = Color(0xFF304C3B),
+            surfaceContainerLowest = Color(0xFF07110D),
+            surfaceContainerLow = Color(0xFF0F1C16),
+            surfaceContainer = Color(0xFF15261D),
+            surfaceContainerHigh = Color(0xFF1D3127),
+            surfaceContainerHighest = Color(0xFF273E31),
             onSurface = Color(0xFFEFF9F3),
+            onSurfaceVariant = Color(0xFFC1D6C9),
             outline = Color(0xFF3D6757),
         )
     } else {
@@ -107,7 +152,16 @@ internal fun spectraColorScheme(
             background = Color(0xFFF3FAF6),
             onBackground = Color(0xFF13251D),
             surface = Color(0xFFFAFFFC),
+            surfaceVariant = Color(0xFFE3EEE7),
+            surfaceDim = Color(0xFFD5E3DB),
+            surfaceBright = Color(0xFFFBFFFC),
+            surfaceContainerLowest = Color(0xFFFAFFFC),
+            surfaceContainerLow = Color(0xFFF2F8F4),
+            surfaceContainer = Color(0xFFEAF2ED),
+            surfaceContainerHigh = Color(0xFFDFEBE3),
+            surfaceContainerHighest = Color(0xFFD3E3D9),
             onSurface = Color(0xFF13251D),
+            onSurfaceVariant = Color(0xFF415E4C),
             outline = Color(0xFFC6DBD0),
         )
     }
@@ -137,9 +191,23 @@ fun CampusTheme(
         ThemeMode.DARK -> true
     }
     val colors = spectraColorScheme(dark, environment)
+    SpectraSystemBars(dark)
+    CompositionLocalProvider(
+        LocalSpectraTokens provides DefaultSpectraTokens,
+        // Transparent scaffolds and standalone full-screen routes have no Surface to
+        // establish foreground color; inherit the active theme instead of default black.
+        LocalContentColor provides colors.onBackground,
+    ) {
+        MaterialTheme(colorScheme = colors, typography = SpectraTypography, content = content)
+    }
+}
+
+/** Keep every native window aligned with the app theme, including a sheet changed in place. */
+@Composable
+internal fun SpectraSystemBars(dark: Boolean) {
     val view = LocalView.current
-    DisposableEffect(dark) {
-        val window = (view.context as? Activity)?.window
+    val window = (view.parent as? DialogWindowProvider)?.window ?: view.context.themeActivity()?.window
+    DisposableEffect(view, window, dark) {
         if (window != null) {
             WindowCompat.getInsetsController(window, view).apply {
                 isAppearanceLightStatusBars = !dark
@@ -149,7 +217,10 @@ fun CampusTheme(
         }
         onDispose { }
     }
-    CompositionLocalProvider(LocalSpectraTokens provides DefaultSpectraTokens) {
-        MaterialTheme(colorScheme = colors, typography = SpectraTypography, content = content)
-    }
+}
+
+private tailrec fun Context.themeActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.themeActivity()
+    else -> null
 }

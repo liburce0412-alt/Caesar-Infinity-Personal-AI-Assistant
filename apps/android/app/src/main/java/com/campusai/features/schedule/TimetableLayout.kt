@@ -21,3 +21,19 @@ internal fun CourseSchedule.hasTimeOverlap(courses: List<CourseSchedule>): Boole
 }
 
 internal fun courseClock(minutes: Int): String = "%02d:%02d".format(minutes / 60, minutes % 60)
+
+/** Connected overlapping visual intervals share one cell; dense days never widen the week. */
+internal fun groupDayCourses(courses: List<CourseSchedule>, minimumMinutes: Int = 48): List<List<CourseSchedule>> {
+    val groups = mutableListOf<MutableList<CourseSchedule>>()
+    var end = -1
+    courses.sortedWith(compareBy(CourseSchedule::startMinute, CourseSchedule::endMinute, CourseSchedule::name)).forEach { course ->
+        if (groups.isEmpty() || course.startMinute >= end) {
+            groups.add(mutableListOf(course))
+            end = maxOf(course.endMinute, course.startMinute + minimumMinutes)
+        } else {
+            groups.last().add(course)
+            end = maxOf(end, course.endMinute, course.startMinute + minimumMinutes)
+        }
+    }
+    return groups
+}
