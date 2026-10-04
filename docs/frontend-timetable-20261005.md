@@ -62,3 +62,9 @@ SHA-256：`0d4215c2a7c67efec7bae6bd49d32fcdc6d9a9e3956849a7f8dd37b4dbc5333b`
 清理已删除约 1.35 GiB 可再生缓存。两个目标因自动审批拒绝（blocked by policy）保留：宣传工程的依赖目录链接，以及临时课表参考克隆的只读残余；未尝试绕过。源文件、验证证据、交付包及用户既有未提交部署工作保留。
 
 用户叫停前已启动的本地回归随后正常结束：491 项测试全部通过（含两项深浅色关闭追光像素回归），assembleDebug 与 lintDebug 通过。没有在叫停后追加设备效果验收。正式发布脚本修正 SDK 已下架的 tools 包依赖，支持用已存在的版本标签恢复发布。
+
+## 正式版发布结果
+
+[v2.1.0 正式 Release](https://github.com/liburce0412-alt/Caesar-Infinity-Personal-AI-Assistant/releases/tag/v2.1.0) 已发布，包含正式 APK 与 SHA256SUMS.txt。GitHub 发布流程通过。APK 版本为 2.1.0（4），非 debuggable；生产客户端 URL / key 与当前配置一致，签名与历史 v2.0.1 相同。
+
+正式包 SHA-256：`5d3dae20de02cacfb961b35b5641875947504ca2084481c9a0937fc9379dc4e7`。已从 Release 下载并通过 adb install -r 覆盖安装到手机；设备 base.apk 哈希一致，未卸载应用或清除数据。仅完成安装与版本核对，没有追加界面验收。
