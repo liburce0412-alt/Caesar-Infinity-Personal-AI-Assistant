@@ -37,6 +37,30 @@ class CourseTimetableUiTest {
         CourseSchedule(name = "体育", weekday = 7, startMinute = 840, endMinute = 940, location = "体育馆", sourceHash = "sport"),
     )
 
+    @Test fun `actual week5 OCR displays ten period blocks and switching weeks keeps them separate`() {
+        val raw = org.json.JSONArray(javaClass.getResource("/course-week5-ocr.json")!!.readText())
+        val week5 = (0 until raw.length()).map { index ->
+            val row = raw.getJSONObject(index)
+            CourseDraft(row.getString("name"), row.getInt("weekday"), row.getInt("startMinute"), row.getInt("endMinute"),
+                location = row.getString("location"), weeks = row.getString("weeks"),
+                periodStart = row.getInt("periodStart"), periodEnd = row.getInt("periodEnd"),
+                periodStartTimes = row.getString("periodStartTimes")).toCourse().copy(id = index + 2)
+        }
+        val week4 = week5.first().copy(id = 1, name = "上一周课程", weeks = "第4周（截图）")
+        compose.setContent { CampusTheme(ThemeMode.LIGHT) {
+            Column(Modifier.fillMaxSize().padding(12.dp)) { CourseTimetable(week5 + week4) {} }
+        } }
+        compose.onNodeWithTag("period-grid").assertExists()
+        compose.onAllNodes(hasContentDescription("起", substring = true)).assertCountEquals(10)
+        compose.onNodeWithText("20:20").assertExists()
+        compose.onRoot().captureRoboImage("../../../artifacts/timetable-week5-periods.png")
+        compose.onNodeWithText("第4周").performClick()
+        compose.onAllNodes(hasContentDescription("上一周课程", substring = true)).assertCountEquals(1)
+        compose.onAllNodes(hasContentDescription("起", substring = true)).assertCountEquals(1)
+        compose.onNodeWithText("第5周").performClick()
+        compose.onAllNodes(hasContentDescription("起", substring = true)).assertCountEquals(10)
+    }
+
     private fun show(theme: ThemeMode = ThemeMode.LIGHT, fontScale: Float = 1f) {
         compose.setContent {
             CampusTheme(theme) {

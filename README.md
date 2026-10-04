@@ -25,11 +25,14 @@
 **适合想围绕健康数据与日常记录继续追问，也愿意自行配置 AI 的 Android 用户。** 你可以先从一次今日健康反馈开始，再体验时间记录和需要你确认的个人记忆。
 
 <p align="center">
-  <a href="design/readme/caesar-home.png"><img src="design/readme/caesar-home.png" width="32%" alt="首页界面示例：今日行动与 Mi Fitness 健康卡，显示步数、睡眠和心率" /></a>&nbsp;
-  <a href="design/readme/posters/health-automation.png"><img src="design/readme/posters/health-automation.png" width="47%" alt="健康自动化海报：选择模型、设置检查间隔、授权今日汇总；仅在 App 前台运行" /></a>
+  <a href="design/readme/caesar-home.png"><img src="design/readme/caesar-home.png" width="31%" alt="新版首页：达成区域跟随背景配色" /></a>
+  <a href="design/readme/caesar-time.png"><img src="design/readme/caesar-time.png" width="31%" alt="新版课表：截图导入后按周、星期和节次显示" /></a>
+  <a href="design/readme/caesar-profile.png"><img src="design/readme/caesar-profile.png" width="31%" alt="新版个人页：统一透明材质与组件入口" /></a>
 </p>
 
-<p align="center"><sub>左侧为已有版本的首页截图，右侧为使用开发候选与演示数据制作的海报，点击可查看原图。用于说明界面与设置，不代表一次完整的真实联网执行；实际界面以安装版本为准。</sub></p>
+截图更新于 **2026-10-05**。首页、个人页及下方界面来自实际 Compose / GL 模拟器，使用明确的演示数据；课表来自用户授权截图导入后的真机。截图不是生成效果图，演示健康数据不代表真实健康记录。
+
+本轮支持多张课表截图自动识别周次、直接本地保存并同步云端；在「我的 → 组件与内容」可折叠课程表。浅色触摸彩光只在手指附近的边框及紧邻边缘淡淡出现，深色保留白色追光。见[课表与外观使用说明](docs/timetable-and-appearance.md)和[验证记录](docs/frontend-timetable-20261005.md)。
 
 ### 第一次可以这样用
 
@@ -94,6 +97,7 @@ Caesar∞ 把模型、工具、个人上下文和原生界面放进同一个受�
 | 本地 Agent | Qwen3.5-2B FAST 与 Qwen3.5-4B DEEP，MNN Q4，按会话锁定 | 两个模型独立下载，不同时常驻，也不会在会话中静默换模 |
 | 多模态 | 文字、相册、拍照、截图分享、OCR 辅助、语音输入与 TTS；明确选择 Codex 时默认上传当前轮图片 | Codex 每轮最多 4 张，经旋转校正、缩放、JPEG 重编码并移除 EXIF；不持续监听、持续摄像或理解视频 |
 | App 工具 | 32 个 App 工具与 1 个只读 `web.search`，Tool Registry、DAG、类型校验、确认、幂等与动态结果卡片 | 模型不能绕过 Repository / UseCase 直接碰数据库或令牌；每轮只投影与意图相关的工具 |
+| 按周课程表 | 多张截图识别周次、七天节次网格、重复跳过、本地先存与账号云同步 | 截图被省略号遮挡的完整名称不能恢复；未给出下课时间时不编造；可在组件与内容折叠 |
 | 个人记忆 | 短期任务状态、结构化摘要、确认式长期记忆 | 原始健康序列不写入记忆；拒绝后不落库 |
 | 健康感知 | Health Connect 聚合、来源、新鲜度、首页折叠卡和 Agent 健康工具 | Caesar∞ 解释状态与趋势，不提供医疗诊断 |
 | 小米手环健康 | Mi Fitness 每日健康汇总、步数分时趋势与本机加密缓存 | 新鲜度取决于 Mi Fitness 先完成手环到云端的同步；CampusAI 不建立 BLE/SPP 连接 |
@@ -101,23 +105,19 @@ Caesar∞ 把模型、工具、个人上下文和原生界面放进同一个受�
 | 动态界面 | 类型化 CaesarSurface Compose Renderer、A2UI 稳定子集适配 | 未知组件、任意 URI、代码、SQL 与未注册 `actionId` 会被拒绝 |
 | 受控联网 | Supabase 业务数据；直连 DeepSeek、Google Gemini 或 OpenAI-compatible Codex；云端 Agent 可调用只读 `web.search` | 搜索只发送查询词并读取 Bing RSS 摘要，不抓取结果网页、浏览器 Cookie 或任意 URL；没有 `web.open` |
 
-## 宣传海报
+## 当前界面
 
 <p align="center">
-  <a href="design/readme/posters/health-automation.png"><img src="design/readme/posters/health-automation.png" width="47%" alt="健康自动化：让关心融入日常，当前仅在 App 前台运行" /></a>&nbsp;
-  <a href="design/readme/posters/health-permission.png"><img src="design/readme/posters/health-permission.png" width="47%" alt="明确授权：只发送必要的今日健康汇总" /></a>
+  <a href="design/readme/caesar-ai.png"><img src="design/readme/caesar-ai.png" width="31%" alt="AI 对话演示" /></a>
+  <a href="design/readme/caesar-tree.png"><img src="design/readme/caesar-tree.png" width="31%" alt="树洞演示" /></a>
+  <a href="design/readme/caesar-wish.png"><img src="design/readme/caesar-wish.png" width="31%" alt="心愿墙演示" /></a>
 </p>
 
 <p align="center">
-  <a href="design/readme/posters/component-folding.png"><img src="design/readme/posters/component-folding.png" width="47%" alt="组件与内容：按需折叠首页卡片，设置重启后保留" /></a>&nbsp;
-  <a href="design/readme/posters/glass-environments.png"><img src="design/readme/posters/glass-environments.png" width="47%" alt="环境与玻璃：五种环境，经典与流体，浅色与深色" /></a>
+  <a href="design/readme/caesar-dark.png"><img src="design/readme/caesar-dark.png" width="31%" alt="深色 Fluid 与玻璃材质" /></a>
 </p>
 
-<p align="center">
-  <a href="design/readme/posters/peace-and-wishes.png"><img src="design/readme/posters/peace-and-wishes.png" width="47%" alt="新的开始：世界和平逐字浮现，也给自己的心愿留一个位置" /></a>
-</p>
-
-<p align="center"><sub>沿用新版宣传片的五张海报，点击查看原图。画面使用开发候选与演示数据；健康自动化当前仅在 App 前台运行，演示画面不代表真实联网或发送记录。</sub></p>
+旧宣传海报保留在 `design/readme/posters/` 作为历史素材，不再用于展示当前版本。
 
 ## 从一句话到一次可靠执行
 

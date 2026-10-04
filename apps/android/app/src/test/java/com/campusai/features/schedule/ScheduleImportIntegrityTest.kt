@@ -56,6 +56,6 @@ class ScheduleImportIntegrityTest {
         val withAxis = parseTimetableOcr(lines + OcrLine("08:35-09:20", 0, 100, 80, 140)).single()
         assertEquals(515, withAxis.startMinute)
         assertEquals(560, withAxis.endMinute)
-        assertTrue(withAxis.reviewNote.isNotBlank())
+        assertTrue(withAxis.reviewNote.isBlank())
     }
 }

@@ -54,6 +54,8 @@ class AiHistoryDaoTest {
         title = "HiFresh",
         summary = summary,
         messagesJson = "[]",
+        executionEngine = "MNN",
+        requestId = "test-request",
         createdAt = 50,
         updatedAt = updatedAt,
     )

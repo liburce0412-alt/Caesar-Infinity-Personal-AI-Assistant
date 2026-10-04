@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.map
 private val Context.campusPreferences by preferencesDataStore("campusai_user_preferences")
 
 data class UserPreferences(
+    val timetableEnabled: Boolean = false,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val motionMode: MotionMode = MotionMode.ON,
     val renderQuality: RenderQuality = RenderQuality.AUTO,
@@ -35,6 +36,7 @@ data class UserPreferences(
 
 class UserPreferencesRepository(private val context: Context) {
     private object Keys {
+        val timetableEnabled = booleanPreferencesKey("timetable_enabled")
         val theme = stringPreferencesKey("theme_mode")
         val motion = stringPreferencesKey("motion_mode")
         val quality = stringPreferencesKey("render_quality")
@@ -53,6 +55,7 @@ class UserPreferencesRepository(private val context: Context) {
 
     val preferences: Flow<UserPreferences> = context.campusPreferences.data.map { values ->
         UserPreferences(
+            timetableEnabled = values[Keys.timetableEnabled] ?: false,
             collapsedComponents = values[Keys.collapsedComponents].orEmpty(),
             onboardingCompleted = values[Keys.onboardingCompleted] ?: false,
             themeMode = values[Keys.theme].toEnumOr(ThemeMode.SYSTEM),
@@ -73,6 +76,7 @@ class UserPreferencesRepository(private val context: Context) {
     }
 
     suspend fun setTheme(value: ThemeMode) = context.campusPreferences.edit { it[Keys.theme] = value.name }
+    suspend fun setTimetableEnabled(value: Boolean) = context.campusPreferences.edit { it[Keys.timetableEnabled] = value }
     suspend fun setComponentCollapsed(id: String, collapsed: Boolean) = context.campusPreferences.edit {
         val current = it[Keys.collapsedComponents].orEmpty()
         it[Keys.collapsedComponents] = if (collapsed) current + id else current - id

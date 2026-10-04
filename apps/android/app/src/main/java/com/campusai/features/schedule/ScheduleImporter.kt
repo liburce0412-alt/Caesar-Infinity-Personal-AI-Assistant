@@ -33,11 +33,14 @@ data class CourseDraft(
     val reviewNote: String = "",
     val periodStart: Int? = null,
     val periodEnd: Int? = null,
+    val periodStartTimes: String = "",
 ) {
     fun toCourse() = CourseSchedule(
         name = name.trim(), weekday = weekday.coerceIn(1, 7), startMinute = startMinute, endMinute = endMinute,
         location = location.trim(), teacher = teacher.trim(), weeks = weeks.trim(),
-        sourceHash = stableHash("${name.trim()}|$weekday|$startMinute|$endMinute|${location.trim()}|${weeks.trim()}"),
+        sourceHash = stableHash("${name.trim()}|$weekday|$startMinute|$endMinute|${location.trim()}|${weeks.trim()}" +
+            if (periodStart != null) "|$periodStart|$periodEnd" else ""),
+        periodStart = periodStart ?: 0, periodEnd = periodEnd ?: 0, periodStartTimes = periodStartTimes,
     )
 }
 
@@ -59,18 +62,34 @@ object ScheduleImporter {
                 val prepared = try { prepareCourseCell(crop) } catch (failure: Throwable) { if (crop !== bitmap) crop.recycle(); throw failure }
                 try {
                     val recognized = recognizer.recognize(prepared).ocrLines(cell.left - CELL_PADDING, cell.top - CELL_PADDING)
-                    if (recognized.any { it.text.contains(Regex("[@＠©]")) }) recognized else {
-                        // A faint wrapped separator/title line can disappear after grayscale normalization.
-                        val contrast = prepareCourseCell(crop, hardEdges = true)
-                        try {
-                            val retry = recognizer.recognize(contrast).ocrLines(cell.left - CELL_PADDING, cell.top - CELL_PADDING)
-                            if (retry.any { it.text.contains(Regex("[@＠©]")) }) retry else recognized
-                        } finally { contrast.recycle() }
-                    }
+                    // A second contrast pass recovers faint classroom digits and separators.
+                    val contrast = prepareCourseCell(crop, hardEdges = true)
+                    try {
+                        val retry = recognizer.recognize(contrast).ocrLines(cell.left - CELL_PADDING, cell.top - CELL_PADDING)
+                        val enlarged = Bitmap.createScaledBitmap(prepared, prepared.width * 2, prepared.height * 2, true)
+                        val zoomed = try { recognizer.recognize(enlarged).ocrLines(cell.left - CELL_PADDING, cell.top - CELL_PADDING, scale = 2) }
+                            finally { enlarged.recycle() }
+                        val original = recognizer.recognize(crop).ocrLines(cell.left, cell.top)
+                        listOf(recognized, retry, zoomed, original).maxBy { lines ->
+                            val text = lines.joinToString("") { it.text }
+                            (if (text.contains(Regex("[@＠©]"))) 100 else 0) +
+                                Regex("[A-Z]?[0-9]{3,5}").findAll(text).sumOf { it.value.length * 20 } +
+                                (if (text.contains(']') || text.contains('］')) 50 else 0) + text.length.coerceAtMost(90)
+                        }
+                    } finally { contrast.recycle() }
                 }
                 finally { prepared.recycle(); if (crop !== bitmap) crop.recycle() }
             }
-            val metadata = overview.filter { line -> cells.none { line.x in it.left until it.right && line.y in it.top until it.bottom } }
+            // Read the narrow clock axis separately; whole-image OCR may merge or omit it.
+            val axisLines = if (cells.isEmpty()) emptyList() else {
+                val axisWidth = cells.minOf { it.left }.coerceIn(1, bitmap.width)
+                val axisTop = cells.minOf { it.top }
+                val axisBottom = cells.maxOf { it.bottom }
+                val axisCrop = Bitmap.createBitmap(bitmap, 0, axisTop, axisWidth, axisBottom - axisTop)
+                try { recognizer.recognize(axisCrop).ocrLines(offsetY = axisTop, includeElements = true) }
+                finally { if (axisCrop !== bitmap) axisCrop.recycle() }
+            }
+            val metadata = (overview + axisLines).filter { line -> cells.none { line.x in it.left until it.right && line.y in it.top until it.bottom } }.distinct()
             parseTimetableOcr(if (cells.isEmpty()) overview else metadata + contents, cells)
         } finally { recognizer.close(); bitmap.recycle() }
     }
@@ -149,13 +168,13 @@ private suspend fun TextRecognizer.recognize(bitmap: Bitmap): Text {
     return result
 }
 
-private fun Text.ocrLines(offsetX: Int = 0, offsetY: Int = 0, includeElements: Boolean = false): List<OcrLine> = textBlocks.flatMap { it.lines }.flatMap { line ->
+private fun Text.ocrLines(offsetX: Int = 0, offsetY: Int = 0, includeElements: Boolean = false, scale: Int = 1): List<OcrLine> = textBlocks.flatMap { it.lines }.flatMap { line ->
     buildList {
-        line.boundingBox?.let { add(OcrLine(line.text.trim(), it.left + offsetX, it.top + offsetY, it.right + offsetX, it.bottom + offsetY)) }
+        line.boundingBox?.let { add(OcrLine(line.text.trim(), it.left / scale + offsetX, it.top / scale + offsetY, it.right / scale + offsetX, it.bottom / scale + offsetY)) }
         if (includeElements) line.elements.filter { element ->
-            Regex("^(?:(?:星期|周)[一二三四五六日天]|(?:第)?\\d{1,2}(?:节)?)$").matches(element.text.trim())
+            Regex("^(?:(?:星期|周)[一二三四五六日天]|(?:第)?\\d{1,2}(?:节)?|\\d{1,2}[:：]\\d{2})$").matches(element.text.trim())
         }.forEach { element ->
-            element.boundingBox?.let { add(OcrLine(element.text.trim(), it.left + offsetX, it.top + offsetY, it.right + offsetX, it.bottom + offsetY)) }
+            element.boundingBox?.let { add(OcrLine(element.text.trim(), it.left / scale + offsetX, it.top / scale + offsetY, it.right / scale + offsetX, it.bottom / scale + offsetY)) }
         }
     }
 }.distinct()

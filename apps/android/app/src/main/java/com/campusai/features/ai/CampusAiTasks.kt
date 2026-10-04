@@ -219,6 +219,7 @@ object CampusAiTaskFactory {
         val rows = JSONArray(courses.map { course -> JSONObject()
             .put("name", course.name).put("weekday", course.weekday)
             .put("startMinute", course.startMinute).put("endMinute", course.endMinute)
+                .put("periodStart", course.periodStart).put("periodEnd", course.periodEnd)
             .put("location", course.location).put("teacher", course.teacher).put("weeks", course.weeks)
         })
         val conflicts = JSONArray(com.campusai.features.schedule.potentialCourseOverlaps(courses).map { (first, second) ->

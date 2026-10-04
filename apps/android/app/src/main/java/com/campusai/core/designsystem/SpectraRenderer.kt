@@ -274,7 +274,7 @@ private class SpectraGlRenderer(
             viewWidth = width.toFloat(),
             viewHeight = height.toFloat(),
         )
-        glassAtmospheres.keys.retainAll(regions.map { it.id }.toSet())
+        glassAtmospheres.keys.removeAll { id -> regions.none { it.id == id } }
         if (regions.isEmpty()) return
 
         GLES20.glUseProgram(opticalProgram)
@@ -576,17 +576,17 @@ private class SpectraGlRenderer(
                 );
             }
             vec3 accentPalette(float environment, float index) {
-                vec3 cyan = vec3(0.08, 0.70, 0.78);
-                vec3 violet = vec3(0.38, 0.30, 0.86);
-                vec3 warm = vec3(0.96, 0.56, 0.27);
-                vec3 rose = vec3(0.85, 0.43, 0.62);
+                vec3 cyan = vec3(0.12, 0.76, 0.90);
+                vec3 violet = vec3(0.51, 0.43, 0.91);
+                vec3 warm = vec3(0.98, 0.68, 0.40);
+                vec3 rose = vec3(0.94, 0.59, 0.72);
                 if (environment < 0.5) { if (index < 0.5) return cyan; if (index < 1.5) return violet; return warm; }
-                if (environment < 1.5) { if (index < 0.5) return vec3(0.03, 0.45, 0.60); if (index < 1.5) return cyan; return vec3(0.18, 0.34, 0.78); }
-                if (environment < 2.5) { if (index < 0.5) return vec3(0.22, 0.14, 0.60); if (index < 1.5) return violet; return rose; }
-                if (environment < 3.5) { if (index < 0.5) return vec3(0.73, 0.22, 0.13); if (index < 1.5) return warm; return rose; }
+                if (environment < 1.5) { if (index < 0.5) return vec3(0.03, 0.45, 0.60); if (index < 1.5) return cyan; return vec3(0.45, 0.65, 0.94); }
+                if (environment < 2.5) { if (index < 0.5) return vec3(0.36, 0.32, 0.73); if (index < 1.5) return violet; return rose; }
+                if (environment < 3.5) { if (index < 0.5) return vec3(0.86, 0.39, 0.28); if (index < 1.5) return warm; return rose; }
                 if (index < 0.5) return vec3(0.055, 0.50, 0.32);
                 if (index < 1.5) return vec3(0.20, 0.78, 0.50);
-                return vec3(0.60, 0.82, 0.32);
+                return vec3(0.65, 0.88, 0.67);
             }
             vec3 bodyPalette(float environment) {
                 if (environment < 0.5) return vec3(0.145, 0.165, 0.220);
@@ -853,133 +853,38 @@ private class SpectraGlRenderer(
                 q += normalize(q - pointer + vec2(0.0001)) * pointerWeight * 0.004;
                 return q;
             }
-            vec3 fluidEnvironmentScene(
-                vec2 uv,
-                vec2 p,
-                float aspect,
-                float t,
-                float railT,
-                float thinking,
-                float focusing
-            ) {
-                vec2 baseQ = fluidCoordinates(p, aspect, t);
-                // The main breathing takes about 30 seconds; the counter-flow takes about 41.
-                // Phase modulation prevents a short repeated wallpaper loop without random jumps.
-                float breath = 0.5 + 0.5 * sin(t * 1.03 + 0.35 * sin(t * 0.37));
-                float counterFlow = sin(t * 0.77 + 1.9);
-                float broad = (uQuality < 0.5
-                    ? noise(baseQ * 1.18 + vec2(t * 0.075, -t * 0.055))
-                    : fbm(baseQ * 1.32 + vec2(t * 0.085, -t * 0.060))) - 0.46;
-                float cross = noise(baseQ.yx * vec2(1.42, 1.18) + vec2(-t * 0.052, t * 0.070)) - 0.5;
-                float warpStrength = mix(0.038, 0.070, breath) * (uQuality < 0.5 ? 0.68 : 1.0);
-                vec2 q = baseQ + vec2(broad, cross) * warpStrength;
-                float turnAngle = 0.61 + 0.24 * sin(t * 0.94) + 0.10 * sin(t * 0.59 + 1.3);
-                mat2 turn = mat2(cos(turnAngle), -sin(turnAngle), sin(turnAngle), cos(turnAngle));
-                vec2 r = turn * q;
-
-                // Reuse the warp samples as colour fields: AUTO is three noise evaluations per
-                // pixel (one two-octave fbm plus one noise), HIGH is four, and LOW is two.
-                float flowA = clamp(broad + 0.46, 0.0, 1.0);
-                float flowB = clamp(cross + 0.50, 0.0, 1.0);
-                float flowC = clamp(mix(flowA, flowB, 0.46), 0.0, 1.0);
-
-                // One open fold morphs across three edge-to-edge axes in roughly 28–34 seconds.
-                // Its direction, bend and width evolve on unequal phases, so arriving at the same
-                // axis later retains continuity without repeating the same silhouette.
-                float bendA = sin(r.x * 4.60 - t * 0.85);
-                float bendB = sin(r.y * 4.05 + t * 0.68);
-                float bendC = sin((r.x + r.y) * 3.45 - t * 0.54);
-                float topologyA = r.y + bendA * mix(0.12, 0.22, breath) + (flowA - 0.46) * 0.16;
-                float topologyB = r.x * 0.72 + r.y * (0.18 + counterFlow * 0.10) + bendB * 0.15 +
-                    (flowB - 0.50) * 0.14;
-                float topologyC = r.y * 0.56 - r.x * 0.48 + bendC * 0.14 +
-                    (flowC - 0.48) * 0.18;
-                float macroSegment = fract(t / 5.90 + 0.035 * sin(t * 0.59)) * 3.0;
-                float topologyMorph = smoothstep(0.08, 0.92, fract(macroSegment));
-                float topologyAxis;
-                if (macroSegment < 1.0) {
-                    topologyAxis = mix(topologyA, topologyB, topologyMorph);
-                } else if (macroSegment < 2.0) {
-                    topologyAxis = mix(topologyB, topologyC, topologyMorph);
-                } else {
-                    topologyAxis = mix(topologyC, topologyA, topologyMorph);
-                }
-
-                // Two open waves carry colour through every edge of the viewport. Unlike the
-                // former ellipse field, these contours never close into a ball or focal object.
-                float openSweepA = 0.5 + 0.5 * sin(
-                    r.x * 3.15 + r.y * 1.70 + t * 0.82 + broad * 1.25 + counterFlow * 0.55
-                );
-                float openSweepB = 0.5 + 0.5 * sin(
-                    -r.x * 1.90 + r.y * 2.65 - t * 0.63 + cross * 1.10 - breath * 0.48
-                );
-
-                vec3 base = mix(vec3(0.966, 0.970, 0.982), vec3(0.030, 0.043, 0.071), uDark);
-                vec3 lifted = mix(vec3(0.995, 0.995, 0.999), vec3(0.067, 0.082, 0.125), uDark);
-                float verticalLight = 0.28 + 0.36 * smoothstep(0.0, 1.0, uv.y);
-                vec3 color = mix(base, lifted, verticalLight);
-
-                vec3 pearlNeutral = mix(vec3(0.914, 0.944, 0.985), vec3(0.095, 0.137, 0.220), uDark);
-                vec3 tintA = mix(pearlNeutral, envAccent(0.0), mix(0.66, 0.52, uDark));
-                vec3 tintB = mix(pearlNeutral, envAccent(1.0), mix(0.62, 0.50, uDark));
-                vec3 tintC = mix(pearlNeutral, envAccent(2.0), mix(0.58, 0.48, uDark));
-                vec3 pigment = mix(tintA, tintB, smoothstep(0.16, 0.84, openSweepA));
-                pigment = mix(pigment, tintC, smoothstep(0.20, 0.86, openSweepB) * mix(0.56, 0.72, breath));
-                float zone = smoothstep(-0.24, 0.24, topologyAxis);
-                vec3 zoneTint = mix(tintA, tintC, zone);
-                pigment = mix(pigment, zoneTint, 0.32);
-
-                // Keep the central reading area calm while retaining a continuous fluid field.
-                vec2 readingQ = (q - vec2(0.0, -0.015)) / vec2(0.46, 0.38);
-                float readingQuiet = exp(-dot(readingQ, readingQ) * 1.20);
-                float phaseEnergy = thinking * 0.16 + focusing * 0.08;
-                float pigmentStrength = mix(0.50, 0.40, uDark) *
-                    (0.94 + (flowA - 0.46) * 0.20 + phaseEnergy) *
-                    (1.0 - readingQuiet * 0.12);
-                color = mix(color, pigment, clamp(pigmentStrength, 0.40, 0.58));
-
-                // A broad pearl illumination moves through the field without producing a rim.
-                float pearlLight = (flowA - 0.46) * 0.13 + (flowB - 0.50) * 0.08;
-                pearlLight *= 1.0 - readingQuiet * 0.14;
-                color += pearlLight * mix(vec3(0.80, 0.90, 1.00), vec3(0.38, 0.52, 0.78), uDark);
-
-                // The same morphing open axis carries depth and colour, keeping FLUID a single
-                // connected environment rather than overlapping ribbons or a floating object.
-                float foldAxis = topologyAxis + 0.020 +
-                    sin(r.x * 5.2 + t * 0.61 + flowB * 1.6) * (0.012 + breath * 0.018);
-                float foldWidth = mix(0.86, 1.22, breath);
-                float foldShadow = exp(-pow((foldAxis + 0.055) / (0.105 * foldWidth), 2.0));
-                float foldGlow = exp(-pow((foldAxis - 0.080) / (0.170 * foldWidth), 2.0));
-                // CLASSIC and FLUID deliberately share the exact same rail lifecycle. FLUID only
-                // changes its carrier axis, so switching visual systems never hides the feature.
-                vec2 foldPearl = silverRailMask(r, foldAxis, railT);
-                float foldCalm = 1.0 - readingQuiet * 0.34;
-                vec3 shade = mix(vec3(0.220, 0.280, 0.440), vec3(0.020, 0.055, 0.120), uDark);
-                vec3 glow = mix(vec3(0.995, 0.997, 1.000), vec3(0.250, 0.355, 0.565), uDark);
-                vec3 railReflection = mix(vec3(1.0), envAccent(1.0), mix(0.10, 0.16, uDark));
-                color = mix(color, shade, foldShadow * foldCalm * mix(0.78, 0.58, uDark));
-                color = mix(color, glow, foldGlow * foldCalm * mix(0.34, 0.26, uDark));
-                color = mix(color, railReflection, foldPearl.x * foldCalm * mix(0.68, 0.48, uDark));
-                color = mix(color, vec3(1.0), foldPearl.y * foldCalm * mix(0.30, 0.20, uDark));
-
-                // Caustics stay attached to the open fold, so colour reads as refraction through
-                // the environment instead of a decorative rainbow outline.
-                float cyanCaustic = exp(-pow((foldAxis + 0.155) / 0.052, 2.0)) * foldCalm;
-                float violetCaustic = exp(-pow((foldAxis - 0.145) / 0.060, 2.0)) * foldCalm;
-                float warmCaustic = exp(-pow((foldAxis - 0.235) / 0.085, 2.0)) * foldCalm;
-                color = mix(color, envAccent(0.0), cyanCaustic * 0.18);
-                color = mix(color, envAccent(1.0), violetCaustic * 0.16);
-                color = mix(color, envAccent(2.0), warmCaustic * 0.09);
-
-                // Channel-separated light is tied to the folds, not painted as a rainbow edge.
-                float dispersion = (foldGlow - foldShadow) * foldCalm *
-                    (0.014 + thinking * 0.003);
-                color += vec3(dispersion * 0.42, -abs(dispersion) * 0.08, -dispersion * 0.36);
-                // Lift luminance rather than clamping individual channels. A per-channel floor
-                // flattened the colour field into a uniform lavender sheet on real devices.
+            // Open refractive folds: shared by every glass region, never a separate wallpaper.
+            vec3 fluidFold(vec3 color, float axis, float strength, vec3 cool, vec3 warm) {
+                float valley = exp(-pow((axis + 0.029) / 0.070, 2.0));
+                float shoulder = exp(-pow((axis - 0.026) / 0.042, 2.0));
+                float ridge = exp(-pow((axis - 0.010) / 0.009, 2.0));
+                float echo = exp(-pow((axis + 0.012) / 0.006, 2.0));
+                vec3 shade = mix(cool * 0.65, cool * 0.16, uDark);
+                color = mix(color, shade, valley * strength * 0.30);
+                color = mix(color, mix(vec3(0.985, 0.995, 1.0), cool, uDark * 0.72), shoulder * strength * 0.52);
+                color = mix(color, mix(vec3(1.0), warm, 0.16), ridge * strength * mix(0.76, 0.40, uDark));
+                color = mix(color, warm, echo * strength * mix(0.27, 0.36, uDark));
+                return color;
+            }
+            vec3 fluidEnvironmentScene(vec2 uv, vec2 p, float aspect, float t, float railT, float thinking, float focusing) {
+                vec2 q = fluidCoordinates(p, aspect, t) + 0.5;
+                float breath = 0.5 + 0.5 * sin(t * 0.73 + sin(t * 0.19) * 0.35);
+                float current = t * 0.24;
+                vec3 cool = mix(envAccent(0.0), envAccent(1.0), 0.26 + breath * 0.18);
+                vec3 warm = envAccent(2.0);
+                vec3 paper = mix(vec3(0.92, 0.96, 0.99), vec3(0.025, 0.040, 0.075), uDark);
+                float wash = 0.5 + 0.5 * sin(q.x * 3.4 + q.y * 2.6 + current);
+                vec3 color = mix(paper, cool, mix(0.18, 0.18, uDark) + wash * mix(0.09, 0.07, uDark));
+                color = mix(color, mix(paper, warm, 0.30), smoothstep(0.32, 1.2, q.x + q.y) * 0.28);
+                // Different periods and amplitudes keep the folds evolving without a short loop.
+                float a = q.x - (0.08 + 0.34 * sin(q.y * 4.5 + current));
+                float b = q.y - (0.65 + 0.24 * cos(q.x * 4.0 - current * 0.83)) + q.x * 0.16;
+                float c = q.x + q.y * 0.56 - 1.07 + 0.09 * sin(q.y * 6.0 + current * 0.61);
+                color = fluidFold(color, a, 0.90, cool, warm);
+                color = fluidFold(color, b, 0.76 + breath * 0.12, mix(cool, envAccent(1.0), 0.3), warm);
+                if (uQuality > 0.5) color = fluidFold(color, c, 0.62, cool, warm);
                 float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
-                float lumaFloor = mix(0.545, 0.105, uDark);
-                color += vec3(max(0.0, lumaFloor - luma));
+                color += vec3(max(0.0, mix(0.69, 0.06, uDark) - luma));
                 return clamp(color, 0.0, 1.0);
             }
             void main() {
@@ -1094,7 +999,7 @@ private class SpectraGlRenderer(
                     flowDirection * (0.55 + 0.65 * interior) + vec2(0.0001)
                 );
                 float chromaAmount = 0.12 + 0.65 * curvature;
-                vec2 dispersionWarp = chromaDirection * (uDispersionPx / uSurfaceSize) * chromaAmount * (1.0 - uDark);
+                vec2 dispersionWarp = chromaDirection * (uDispersionPx / uSurfaceSize) * chromaAmount;
                 vec2 sampleUv = clamp(
                     vUv + lensWarp + edgeWarp + foldWarp + flowWarp,
                     vec2(0.001),
@@ -1116,7 +1021,7 @@ private class SpectraGlRenderer(
                 // Desktop LiquidDesktop's single-hue filament curtain and irregular meteors,
                 // adapted to the existing mobile scene texture and touch lifecycle.
                 float energy = clamp(abs(uInteraction), 0.0, 1.0);
-                if (uDark > 0.5 && energy > 0.003) {
+                if (uDark > 0.5 && (uEffects.z > 0.5 || energy > 0.003)) {
                     vec2 a = vec2(local.x, 1.0 - local.y);
                     float t = uTime + uEffectSeed;
                     float wave = 0.57 + sin(a.x * 5.5 + t * 0.38) * 0.16 + sin(a.x * 12.0 - t * 0.28) * 0.055;
@@ -1125,7 +1030,7 @@ private class SpectraGlRenderer(
                     float filaments = 0.38 + 0.62 * pow(0.5 + 0.5 * sin(a.x * 73.0 + sin(a.x * 16.0 - t * 0.6) * 3.0 + t * 0.4), 2.0);
                     float hem = exp(-pow(above * 38.0, 2.0));
                     float veil = (curtain * filaments * 0.34 + hem * 0.28) * (0.65 + 0.35 * sin(a.x * 3.0 + t * 0.25));
-                    glass += uEffects.z * energy * (uAuroraColor < 0.5 ? vec3(0.10, 0.85, 0.49) : vec3(0.95, 0.13, 0.28)) * veil;
+                    glass += uEffects.z * (0.24 + energy * 0.76) * (uAuroraColor < 0.5 ? vec3(0.10, 0.85, 0.49) : vec3(0.95, 0.13, 0.28)) * veil;
                     for (int i = 0; i < 5; i++) {
                         if (uEffects.w > 0.5 && uMeteorHead[i].w > 0.001) {
                             vec2 dir = uMeteorDir[i];
@@ -1144,10 +1049,22 @@ private class SpectraGlRenderer(
                 vec2 edgeCursor = lean / max(max(abs(lean.x), abs(lean.y)), 0.05) * halfSize;
                 vec2 edgeDelta = (p - edgeCursor) / max(min(halfSize.x, halfSize.y), 1.0);
                 float following = exp(-dot(edgeDelta, edgeDelta) * 1.8);
-                float rimFlow = 0.5 + 0.5 * sin((p.x + p.y) * 0.021 - uTime * 1.4);
+                float rimFlow = 0.5 + 0.5 * sin(atan(p.y / halfSize.y, p.x / halfSize.x) * 2.0 - uTime * 1.4);
                 vec3 rimColor = mix(vec3(0.20, 0.88, 1.0), vec3(0.80, 0.43, 1.0), rimFlow);
                 float rimBand = exp(-pow((distanceInside - 2.0) / 1.7, 2.0));
-                glass += uEffects.y * rimColor * following * energy * (rimBand * 0.65 + exp(-distanceInside / 7.0) * 0.12);
+                if (uDark > 0.5) {
+                    // Keep the existing night-time brightness and touch response.
+                    glass += uEffects.y * rimColor * (0.12 + following * energy) * (rimBand * 0.95 + exp(-distanceInside / 9.0) * 0.16);
+                } else {
+                    // On a bright scene additive RGB clips to white. Transmit a saturated
+                    // tint first, then add a narrow highlight so the prism stays visible.
+                    float prismPhase = dot(edgeDelta, vec2(0.9, 1.3)) * 2.0 - uTime * 0.7;
+                    vec3 prism = 0.50 + 0.42 * cos(prismPhase + vec3(0.0, 2.1, 4.2));
+                    float edgeLight = following * energy * (rimBand * 0.40 + exp(-distanceInside / 9.0) * 0.09);
+                    float fingerLight = touchFalloff * energy * 0.08;
+                    glass = mix(glass, prism, clamp(uEffects.y * (edgeLight + fingerLight), 0.0, 0.50));
+                    glass += uEffects.y * vec3(0.08) * rimBand * following * energy;
+                }
 
                 // Quiet inner illumination and a darker contact edge give the lens real thickness.
                 float innerHighlight = (1.0 - smoothstep(0.0, 2.0, distanceInside)) * (1.0 - uDark * 0.35);

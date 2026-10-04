@@ -118,6 +118,15 @@ internal fun parseTimetableOcr(lines: List<OcrLine>, cells: List<TimetableCell> 
     val contentLeft = anchors.first().second.x - columnWidth(anchors) / 2
     val axis = periodAxis(lines, anchors)
     val interval = Regex("^(\\d{1,2})[:：](\\d{2})\\s*[-—–~至]\\s*(\\d{1,2})[:：](\\d{2})$")
+    val clock = Regex("^(\\d{1,2})[:：](\\d{2})$")
+    val periodStarts = if (axis == null) emptyMap() else lines.filter { it.x < contentLeft && it.y > top }.mapNotNull { line ->
+        val match = clock.matchEntire(line.text.replace(" ", "")) ?: return@mapNotNull null
+        val hour = match.groupValues[1].toInt()
+        val minute = match.groupValues[2].toInt()
+        if (hour !in 0..23 || minute !in 0..59) null else axis.periodAt(line.y) to (hour * 60 + minute)
+    }.toMap()
+    val periodTimes = if (periodStarts.isEmpty()) "" else (1..axis!!.last).joinToString(",") { periodStarts[it]?.toString().orEmpty() }
+    val sourceWeek = lines.firstNotNullOfOrNull { Regex("第\\s*(\\d{1,2})\\s*周").find(it.text)?.groupValues?.get(1) }
     val times = lines.filter { it.x < left }.mapNotNull { line ->
         val values = interval.matchEntire(line.text)?.groupValues?.drop(1)?.map(String::toInt) ?: return@mapNotNull null
         val (h1, m1, h2, m2) = values
@@ -126,13 +135,16 @@ internal fun parseTimetableOcr(lines: List<OcrLine>, cells: List<TimetableCell> 
         if (h1 !in 0..23 || h2 !in 0..23 || m1 !in 0..59 || m2 !in 0..59 || end <= start) null else Triple(line, start, end)
     }
     val candidates = lines.filter { it.y > top && it.x >= contentLeft && (axis == null || it.y < axis.bottom) && it.text.isNotBlank() &&
-        !weekdayHeader.matches(it.text) && !Regex("^(?:第?\\d+[节周]?|上午|下午|晚上)$").matches(it.text) }
+        !weekdayHeader.matches(it.text) && (cells.isNotEmpty() || !Regex("^(?:第?\\d+[节周]?|上午|下午|晚上)$").matches(it.text)) }
     if (cells.isNotEmpty()) return cells.mapNotNull { cell ->
         val content = candidates.filter { it.x in cell.left until cell.right && it.y in cell.top until cell.bottom }
         if (content.isEmpty()) return@mapNotNull null
-        val periods = axis?.let { it.periodAt(cell.top + 2) to it.periodAt(cell.bottom - 2) }
+        // Sample row interiors: period numbers may sit above the clock, away from row centres.
+        val periods = axis?.let { it.periodAt((cell.top + it.step / 2).roundToInt()) to it.periodAt((cell.bottom - it.step / 2).roundToInt()) }
         val slots = times.filter { it.first.y in cell.top until cell.bottom }
-        draftFromCell(content, cell.weekday, slots.minOfOrNull { it.second } ?: -1, slots.maxOfOrNull { it.third } ?: -1, periods)
+        draftFromCell(content, cell.weekday, slots.minOfOrNull { it.second } ?: periodStarts[periods?.first] ?: -1,
+            slots.maxOfOrNull { it.third } ?: -1, periods)
+            .copy(periodStartTimes = periodTimes, weeks = sourceWeek?.let { "第${it}周（截图）" }.orEmpty())
     }
     // A monochrome table with a real time axis can still be grouped by that axis.
     // Without cell boundaries or time rows, fail closed instead of importing every wrapped line.
@@ -161,8 +173,7 @@ private fun draftFromCell(lines: List<OcrLine>, day: Int, start: Int, end: Int, 
     return CourseDraft(name = name.ifBlank { "待填写课程名" }, weekday = day, startMinute = start, endMinute = end,
         location = location, periodStart = periods?.first, periodEnd = periods?.second,
         reviewNote = buildString {
-            if (start < 0) append(if (periods != null) "已识别节次，截图未提供钟点；请设置节次时间。" else "截图未提供钟点，请填写课程时间。")
-            if (truncated) append("原图文字已截断（…），请补全课程名或教室。")
-            append("请核对课程内容和授课周次。")
+            if (start < 0) append(if (periods != null) "按原图节次显示。" else "截图未提供钟点。")
+            if (truncated) append("原图文字已截断（…），已保留可见内容。")
         })
 }

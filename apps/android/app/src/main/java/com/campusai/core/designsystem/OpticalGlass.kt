@@ -70,6 +70,13 @@ internal object OpticalGlassRegistry {
     private var routeGeneration = 0L
     private var routeVisitGeneration = 0L
     private var routeKey = INITIAL_ROUTE
+    private var snapshotDirty = true
+    private var snapshotOwner = -1L
+    private var snapshotLeft = Float.NaN
+    private var snapshotTop = Float.NaN
+    private var snapshotWidth = Float.NaN
+    private var snapshotHeight = Float.NaN
+    private var cachedSnapshot: List<OpticalGlassRegion> = emptyList()
 
     private data class ScopedOpticalGlassRegion(
         val scope: OpticalGlassScope,
@@ -85,6 +92,7 @@ internal object OpticalGlassRegistry {
             rendererOwnerId = ownerId
             routeGeneration += 1L
             regions.clear()
+            snapshotDirty = true
         }
         currentScopeLocked()!!
     }
@@ -92,6 +100,7 @@ internal object OpticalGlassRegistry {
     fun releaseRenderer(ownerId: Long) = synchronized(lock) {
         if (rendererOwnerId == ownerId) {
             regions.clear()
+            snapshotDirty = true
             rendererOwnerId = null
             routeGeneration += 1L
         }
@@ -104,6 +113,7 @@ internal object OpticalGlassRegistry {
         routeGeneration += 1L
         routeVisitGeneration += 1L
         regions.clear()
+        snapshotDirty = true
         currentScopeLocked()
     }
 
@@ -115,6 +125,7 @@ internal object OpticalGlassRegistry {
             routeGeneration += 1L
             routeVisitGeneration += 1L
             regions.clear()
+            snapshotDirty = true
         }
         currentScopeLocked()
     }
@@ -123,6 +134,7 @@ internal object OpticalGlassRegistry {
 
     fun update(scope: OpticalGlassScope, region: OpticalGlassRegion): Boolean = synchronized(lock) {
         if (scope != currentScopeLocked()) return@synchronized false
+        if (regions[region.id]?.region != region) snapshotDirty = true
         if (region.boundsInWindow.width < 2f || region.boundsInWindow.height < 2f) {
             regions.remove(region.id)
         } else {
@@ -132,7 +144,7 @@ internal object OpticalGlassRegistry {
     }
 
     fun remove(id: Long): Unit = synchronized(lock) {
-        regions.remove(id)
+        if (regions.remove(id) != null) snapshotDirty = true
         Unit
     }
 
@@ -143,13 +155,15 @@ internal object OpticalGlassRegistry {
         viewWidth: Float,
         viewHeight: Float,
     ): List<OpticalGlassRegion> = synchronized(lock) {
+        if (!snapshotDirty && snapshotOwner == rendererOwnerId && snapshotLeft == viewLeft &&
+            snapshotTop == viewTop && snapshotWidth == viewWidth && snapshotHeight == viewHeight) return@synchronized cachedSnapshot
         val activeScope = currentScopeLocked()
         if (activeScope == null || activeScope.rendererOwnerId != rendererOwnerId) {
             return@synchronized emptyList()
         }
         val viewRight = viewLeft + viewWidth
         val viewBottom = viewTop + viewHeight
-        regions.values
+        val result = regions.values
             .asSequence()
             .filter { it.scope == activeScope }
             .map { it.region }
@@ -166,6 +180,11 @@ internal object OpticalGlassRegistry {
             )
             .take(MAX_HIGH_QUALITY_REGIONS)
             .toList()
+        snapshotOwner = rendererOwnerId
+        snapshotLeft = viewLeft; snapshotTop = viewTop; snapshotWidth = viewWidth; snapshotHeight = viewHeight
+        cachedSnapshot = result
+        snapshotDirty = false
+        result
     }
 
     private fun currentScopeLocked(): OpticalGlassScope? = rendererOwnerId?.let { ownerId ->

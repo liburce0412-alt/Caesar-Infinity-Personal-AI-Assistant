@@ -171,10 +171,13 @@ data class CourseScheduleEntity(
     val syncState: String = "pending",
     val updatedAt: Long = System.currentTimeMillis(),
     val deletedAt: Long? = null,
+    @ColumnInfo(defaultValue = "0") val periodStart: Int = 0,
+    @ColumnInfo(defaultValue = "0") val periodEnd: Int = 0,
+    @ColumnInfo(defaultValue = "''") val periodStartTimes: String = "",
 ) {
-    fun toDomain() = CourseSchedule(id, name, weekday, startMinute, endMinute, location, teacher, weeks, sourceHash)
+    fun toDomain() = CourseSchedule(id, name, weekday, startMinute, endMinute, location, teacher, weeks, sourceHash, periodStart, periodEnd, periodStartTimes)
     companion object {
-        fun fromDomain(value: CourseSchedule, userId: String = "local_user") = CourseScheduleEntity(id=value.id, name=value.name, weekday=value.weekday, startMinute=value.startMinute, endMinute=value.endMinute, location=value.location, teacher=value.teacher, weeks=value.weeks, sourceHash=value.sourceHash, userId=userId)
+        fun fromDomain(value: CourseSchedule, userId: String = "local_user") = CourseScheduleEntity(id=value.id, name=value.name, weekday=value.weekday, startMinute=value.startMinute, endMinute=value.endMinute, location=value.location, teacher=value.teacher, weeks=value.weeks, sourceHash=value.sourceHash, userId=userId, periodStart=value.periodStart, periodEnd=value.periodEnd, periodStartTimes=value.periodStartTimes)
     }
 }
 
@@ -660,7 +663,7 @@ interface CampusDao {
         HealthSummaryCacheEntity::class,
         DailyGoalSnapshotEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = true
 )
 abstract class CampusDatabase : RoomDatabase() {
@@ -856,6 +859,14 @@ abstract class CampusDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE course_schedules ADD COLUMN periodStart INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE course_schedules ADD COLUMN periodEnd INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE course_schedules ADD COLUMN periodStartTimes TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         @Volatile
         private var INSTANCE: CampusDatabase? = null
 
@@ -874,6 +885,7 @@ abstract class CampusDatabase : RoomDatabase() {
                     MIGRATION_6_7,
                     MIGRATION_7_8,
                     MIGRATION_8_9,
+                    MIGRATION_9_10,
                 )
                 .build()
                 INSTANCE = instance

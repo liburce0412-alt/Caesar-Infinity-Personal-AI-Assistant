@@ -33,8 +33,8 @@ internal fun ImportScheduleSourceDialog(onDismiss:()->Unit,onImage:()->Unit,onIc
     SpectraDialog(onDismissRequest=onDismiss) {
         Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement=Arrangement.spacedBy(10.dp)){
             Text("导入课程表", style = MaterialTheme.typography.titleLarge)
-            Text("最省事的方式是截取一张完整课程表。识别结果会先进入可编辑预览。", style=MaterialTheme.typography.bodyMedium)
-            SpectraPrimaryButton("选择课程表截图",onImage,Modifier.fillMaxWidth(),icon=Icons.Rounded.ImageSearch)
+            Text("可一次多选不同周次的截图，自动按“第几周”归档；识别一张，保存一张。", style=MaterialTheme.typography.bodyMedium)
+            SpectraPrimaryButton("批量选择课程表截图",onImage,Modifier.fillMaxWidth(),icon=Icons.Rounded.ImageSearch)
             TextButton(onClick=onIcs,Modifier.fillMaxWidth()){Text("从 .ics 日历文件导入")}
             TextButton(onClick=onManual,Modifier.fillMaxWidth()){Text("手动添加课程")}
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {

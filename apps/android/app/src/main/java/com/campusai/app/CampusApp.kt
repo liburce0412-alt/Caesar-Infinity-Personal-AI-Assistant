@@ -520,6 +520,7 @@ fun CampusApp(
                             destinationState.SaveableStateProvider(selected.savedStateKey(destinationOwner)) {
                             when (selected) {
                             MainDestination.HOME -> HomeScreen(
+                                 environment = preferences.environment,
                                  collapsedComponents = preferences.collapsedComponents,
                                  onExpandComponent = { id -> appScope.launch { preferencesRepository.setComponentCollapsed(id, false) } },
                                  records = records,
@@ -536,6 +537,8 @@ fun CampusApp(
                                 contentPadding = PaddingValues(0.dp),
                             )
                             MainDestination.TIME -> TimeScreen(
+                                timetableExpanded = OptionalComponent.TIMETABLE.name !in preferences.collapsedComponents,
+                                onExpandTimetable = { appScope.launch { preferencesRepository.setComponentCollapsed(OptionalComponent.TIMETABLE.name, false) } },
                                 records = records,
                                 viewModel = timeViewModel,
                                 onStartFocus = { navigateTo(AppSurface.Focus(it, surface.destination)) },

@@ -23,6 +23,24 @@ class DatabaseMigrationRobolectricTest {
     )
 
     @Test
+    fun `v9 to v10 retains courses and time records and adds unknown period defaults`() {
+        val name = "optional-course-migration"
+        helper.createDatabase(name, 9).apply {
+            execSQL("INSERT INTO course_schedules(name,weekday,startMinute,endMinute,location,teacher,weeks,sourceHash,userId,clientId,version,syncState,updatedAt) VALUES('Math',1,480,540,'','','','hash','alice','a',1,'synced',1)")
+            execSQL("INSERT INTO time_records(title,category,startTime,endTime,durationMinutes,remark,userId,clientId,version,syncState,updatedAt) VALUES('Study','learning',1,60001,1,'','alice','t',1,'synced',1)")
+            close()
+        }
+        helper.runMigrationsAndValidate(name, 10, true, CampusDatabase.MIGRATION_9_10).use { db ->
+            db.query("SELECT name,periodStart,periodEnd,periodStartTimes FROM course_schedules").use {
+                assertEquals(true, it.moveToFirst())
+                assertEquals("Math", it.getString(0))
+                assertEquals(0, it.getInt(1)); assertEquals(0, it.getInt(2)); assertEquals("", it.getString(3))
+            }
+            db.query("SELECT COUNT(*) FROM time_records").use { it.moveToFirst(); assertEquals(1, it.getInt(0)) }
+        }
+    }
+
+    @Test
     fun `v8 to v9 preserves courses and isolates same hashes by account`() {
         val name = "course-owner-migration"
         helper.createDatabase(name, 8).apply {

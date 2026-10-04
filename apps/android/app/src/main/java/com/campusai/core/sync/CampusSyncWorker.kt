@@ -16,6 +16,7 @@ import com.campusai.core.database.CampusDatabase
 import com.campusai.core.database.CourseScheduleEntity
 import com.campusai.core.database.TimeRecordEntity
 import com.campusai.core.network.SupabaseClient
+import kotlinx.coroutines.flow.first
 import org.json.JSONObject
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -143,6 +144,11 @@ class CampusSyncWorker(appContext: Context, params: WorkerParameters) : Coroutin
                             .put("course_teacher", local.teacher)
                             .put("course_weeks", local.weeks)
                             .put("course_source_hash", local.sourceHash)
+                            .apply { if (local.periodStart > 0) {
+                                put("course_period_start", local.periodStart)
+                                put("course_period_end", local.periodEnd)
+                                put("course_period_start_times", local.periodStartTimes)
+                            } }
                             .put("client_version", local.version)
                             .put("client_updated_at", Instant.ofEpochMilli(local.updatedAt).toString()),
                     ).getOrThrow()
@@ -225,6 +231,9 @@ class CampusSyncWorker(appContext: Context, params: WorkerParameters) : Coroutin
         teacher = item.optString("teacher"),
         weeks = item.optString("weeks"),
         sourceHash = item.getString("source_hash"),
+        periodStart = item.optInt("period_start"),
+        periodEnd = item.optInt("period_end"),
+        periodStartTimes = item.optString("period_start_times", ""),
         userId = userId,
         clientId = item.getString("client_id"),
         remoteId = item.getString("id"),

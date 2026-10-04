@@ -24,12 +24,16 @@ import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Login
 import androidx.compose.material.icons.automirrored.rounded.Logout
@@ -81,6 +85,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -223,7 +228,7 @@ fun ProfileScreen(
             }
         }
         item {
-            GlassPanel(Modifier.fillMaxWidth().heightIn(min = 86.dp), radius = cardRadius, shadowed = !SpectraTheme.isFluid) {
+            Box(Modifier.fillMaxWidth().heightIn(min = 86.dp)) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 18.dp), verticalAlignment = Alignment.CenterVertically) {
                     StatCell("$totalHours", "累计小时", Modifier.weight(1f))
                     VerticalRule()
@@ -253,7 +258,7 @@ fun ProfileScreen(
         }
         item { Text("快捷入口", style = MaterialTheme.typography.titleLarge) }
         item {
-            GlassPanel(Modifier.fillMaxWidth(), radius = cardRadius, shadowed = !SpectraTheme.isFluid) {
+            Box(Modifier.fillMaxWidth()) {
                 Column {
                     SettingLink(Icons.Rounded.Edit, "编辑资料", "头像、名称、简介与背景") { if (authState.signedIn) sheet = ProfileSheet.EDIT else onLogin() }
                     DividerInset()
@@ -271,7 +276,7 @@ fun ProfileScreen(
                         healthAutomationEntrySubtitle(healthAutomationConfig),
                     ) { sheet = ProfileSheet.HEALTH_AUTOMATION }
                     DividerInset()
-                    SettingLink(Icons.Rounded.Palette, "组件与内容", "折叠暂时用不上的首页卡片") { sheet = ProfileSheet.COMPONENTS }
+                    SettingLink(Icons.Rounded.Palette, "组件与内容", "首页内容、课程表的折叠与展开") { sheet = ProfileSheet.COMPONENTS }
                     DividerInset()
                     SettingLink(Icons.Rounded.Palette, "外观与体验", environmentLabel(preferences.environment)) { sheet = ProfileSheet.APPEARANCE }
                     DividerInset()
@@ -539,7 +544,7 @@ private fun AppearanceSettings(preferences: UserPreferences, repository: UserPre
             DividerInset()
             Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Text("玻璃交互", style = MaterialTheme.typography.titleMedium)
-                Text("各项可独立选择。极光和流星只在暗色模式下响应触摸；关闭总动效时，所有动画停止。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(.65f))
+                Text("各项可独立选择。暗色极光会缓缓流动，触摸时增强并唤起流星；关闭总动效时，所有动画停止。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(.65f))
             }
             SettingSwitch(Icons.Rounded.MotionPhotosOff, "玻璃形变", preferences.glassEffects.deformation) { scope.launch { repository.setGlassDeformation(it) } }
             SettingSwitch(Icons.Rounded.Palette, "跟手边框光", preferences.glassEffects.rimLight) { scope.launch { repository.setGlassRimLight(it) } }
@@ -547,6 +552,7 @@ private fun AppearanceSettings(preferences: UserPreferences, repository: UserPre
             SettingSwitch(Icons.Rounded.GraphicEq, "流星 · 仅暗色", preferences.glassEffects.meteors) { scope.launch { repository.setGlassMeteors(it) } }
             DividerInset()
             SettingSwitch(Icons.Rounded.GraphicEq, "计时完成声音", preferences.soundEnabled) { onFeedback(); scope.launch { repository.setSound(it) } }
+
         }
     }
 }
@@ -716,7 +722,7 @@ private fun AnnualContributionCard(
 }
 
 @Composable
-private fun ContributionGrid(
+internal fun ContributionGrid(
     selectedYear: Int,
     gridStart: LocalDate,
     weeks: List<List<DailyContribution?>>,
@@ -726,14 +732,11 @@ private fun ContributionGrid(
 ) {
     val cellSize = 13.dp
     val gap = 3.dp
-    val step = cellSize + gap
-    val gridWidth = step * weeks.size - gap
-    val scrollState = rememberScrollState()
-    val maxScroll = scrollState.maxValue
-    LaunchedEffect(selectedYear, maxScroll) {
-        // The current year opens near today; past years start at January for predictable review.
-        if (selectedYear == today.year) scrollState.scrollTo(maxScroll) else scrollState.scrollTo(0)
-    }
+    val initialWeek = if (selectedYear == today.year) {
+        (ChronoUnit.WEEKS.between(gridStart, today).toInt() - 12).coerceIn(0, weeks.lastIndex)
+    } else 0
+    val scrollState = rememberLazyListState(initialFirstVisibleItemIndex = initialWeek)
+    LaunchedEffect(selectedYear) { scrollState.scrollToItem(initialWeek) }
     Row(Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(top = 20.dp, end = 7.dp),
@@ -745,25 +748,17 @@ private fun ContributionGrid(
                 }
             }
         }
-        Column(Modifier.horizontalScroll(scrollState)) {
-            Box(Modifier.width(gridWidth).height(20.dp)) {
-                (1..12).forEach { month ->
-                    val monthStart = LocalDate.of(selectedYear, month, 1)
-                    val monthWeek = ChronoUnit.WEEKS.between(
-                        gridStart,
-                        monthStart.with(TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY)),
-                    ).toInt()
-                    Text(
-                        "$month 月",
-                        modifier = Modifier.offset(x = step * monthWeek).requiredWidth(30.dp),
-                        fontSize = 9.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(.50f),
-                        maxLines = 1,
-                    )
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
-                weeks.forEach { week ->
+        // Compose only visible weeks; building all 365 interactive cells delays tab entry.
+        LazyRow(Modifier.weight(1f).testTag("contribution-weeks"), state = scrollState,
+            horizontalArrangement = Arrangement.spacedBy(gap)) {
+            itemsIndexed(weeks, key = { index, _ -> "$selectedYear-$index" }) { _, week ->
+                Column {
+                    Box(Modifier.width(cellSize).height(20.dp)) {
+                        week.filterNotNull().firstOrNull { it.date.dayOfMonth == 1 }?.let { firstDay ->
+                            Text("${firstDay.date.monthValue} 月", Modifier.wrapContentWidth(Alignment.Start, unbounded = true).requiredWidth(30.dp),
+                                fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurface.copy(.50f), maxLines = 1)
+                        }
+                    }
                     Column(verticalArrangement = Arrangement.spacedBy(gap)) {
                         week.forEach { day ->
                             if (day == null) {

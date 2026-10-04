@@ -22,7 +22,7 @@ import com.campusai.core.preferences.UserPreferencesRepository
 import kotlinx.coroutines.launch
 
 internal enum class OptionalComponent(val title: String) {
-    TODAY("今日进度"), HEALTH("今日健康"), STREAK("连续记录"), INSIGHTS("AI 洞察"), ANNOUNCEMENTS("公告消息"),
+    TODAY("今日进度"), HEALTH("今日健康"), STREAK("连续记录"), INSIGHTS("AI 洞察"), ANNOUNCEMENTS("公告消息"), TIMETABLE("课程表"),
 }
 
 @Composable
@@ -47,7 +47,7 @@ internal fun CollapsibleComponent(
 internal fun ComponentSettings(preferences: UserPreferences, repository: UserPreferencesRepository) {
     val scope = rememberCoroutineScope()
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("把暂时用不上的首页卡片收起来，需要时轻点标题就能展开。折叠不会停止健康自动化，也不会删除记录。", style = MaterialTheme.typography.bodyMedium)
+        Text("把首页内容或时间页的课程表收起来，需要时轻点标题就能展开。折叠只影响显示，不会停止同步或删除记录。", style = MaterialTheme.typography.bodyMedium)
         GlassPanel(Modifier.fillMaxWidth(), radius = 24) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OptionalComponent.entries.forEach { component ->

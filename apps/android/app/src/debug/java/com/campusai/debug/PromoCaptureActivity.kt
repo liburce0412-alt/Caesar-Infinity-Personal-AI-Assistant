@@ -12,11 +12,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.*
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -150,14 +153,27 @@ class PromoCaptureActivity : ComponentActivity() {
                     CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
                     Box(Modifier.fillMaxSize()) {
                         SpectraBackdrop(captureEnvironment, quality, if (motion) MotionMode.ON else MotionMode.OFF)
-                        val padding = PaddingValues(top = 30.dp, bottom = 112.dp)
+                        val padding = PaddingValues(0.dp)
                         val state = CampusRemoteState(
                             postsScope = postsScope, listingsScope = wishesScope,
                             posts = UiState.Data(demoPosts(postsScope)), listings = UiState.Data(demoWishes(wishesScope)), listingsHasSynced = true,
                         )
+                        Scaffold(
+                            containerColor = Color.Transparent,
+                            contentWindowInsets = WindowInsets.safeDrawing,
+                            bottomBar = {
+                                if (screen in listOf("home", "health", "time", "tree", "wish", "profile", "automation")) {
+                                    SpectraDock(when (screen) { "time" -> MainDestination.TIME; "tree" -> MainDestination.CAMPUS; "wish" -> MainDestination.MARKET; "profile" -> MainDestination.PROFILE; else -> MainDestination.HOME }, motion) {
+                                        screen = when (it) { MainDestination.HOME -> "home"; MainDestination.TIME -> "time"; MainDestination.CAMPUS -> "tree"; MainDestination.MARKET -> "wish"; MainDestination.PROFILE -> "profile" }
+                                    }
+                                }
+                            },
+                        ) { insets -> Box(Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets).clipToBounds()) {
                         when (screen) {
-                            "home", "health" -> HomeScreen(records, "小夏", "", "把今天，过成自己喜欢的样子。", UiState.Empty, {}, { screen = "time" }, { screen = "ai" }, health, {}, {}, padding, savedPreferences.collapsedComponents, { id -> lifecycleScope.launch { preferences.setComponentCollapsed(id, false) } })
-                            "time" -> TimeScreen(records, time, { screen = "focus" }, { _, _ -> SnackbarResult.Dismissed }, padding)
+                            "home", "health" -> HomeScreen(records, "小夏", "", "把今天，过成自己喜欢的样子。", UiState.Empty, {}, { screen = "time" }, { screen = "ai" }, health, {}, {}, padding, savedPreferences.collapsedComponents, { id -> lifecycleScope.launch { preferences.setComponentCollapsed(id, false) } }, environment = captureEnvironment)
+                            "time" -> TimeScreen(records, time, { screen = "focus" }, { _, _ -> SnackbarResult.Dismissed }, padding,
+                                timetableExpanded = OptionalComponent.TIMETABLE.name !in savedPreferences.collapsedComponents,
+                                onExpandTimetable = { lifecycleScope.launch { preferences.setComponentCollapsed(OptionalComponent.TIMETABLE.name, false) } })
                             "focus" -> FocusSessionScreen(50, motion, false, { screen = "time" }, { screen = "time" })
                             "tree" -> CampusScreen(state, true, "self", "小夏", community, {}, padding, { postsScope = it })
                             "wish" -> MarketScreen(state, true, "self", community, {}, {}, padding, { wishesScope = it })
@@ -187,13 +203,8 @@ class PromoCaptureActivity : ComponentActivity() {
                             )
                             "ai", "ai-welcome", "daily" -> AiScreen(ai, AiContextSnapshot(displayName = "小夏", records = records), motion, style, {}, { screen = "home" })
                         }
-                        if (screen in listOf("home", "health", "time", "tree", "wish", "profile", "automation")) {
-                            Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 28.dp)) {
-                                SpectraDock(when (screen) { "time" -> MainDestination.TIME; "tree" -> MainDestination.CAMPUS; "wish" -> MainDestination.MARKET; "profile" -> MainDestination.PROFILE; else -> MainDestination.HOME }, motion) {
-                                    screen = when (it) { MainDestination.HOME -> "home"; MainDestination.TIME -> "time"; MainDestination.CAMPUS -> "tree"; MainDestination.MARKET -> "wish"; MainDestination.PROFILE -> "profile" }
-                                }
-                            }
-                        }
+                        } }
+
                     } }
                 } }
             }

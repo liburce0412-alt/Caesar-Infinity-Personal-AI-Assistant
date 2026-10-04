@@ -1,0 +1,122 @@
+[
+  {
+    "name": "Java程...",
+    "weekday": 1,
+    "periodStart": 6,
+    "periodEnd": 7,
+    "startMinute": 840,
+    "endMinute": -1,
+    "location": "麦庐园枝区数字经济实训大楼[数字经济..",
+    "reviewNote": "原图文字已截断（…），已保留可见内容。",
+    "periodStartTimes": "480,530,595,645,695,840,890,955,1005,1120,1170,1220",
+    "weeks": "第5周（截图）"
+  },
+  {
+    "name": "体育3",
+    "weekday": 1,
+    "periodStart": 8,
+    "periodEnd": 9,
+    "startMinute": 955,
+    "endMinute": -1,
+    "location": "麦庐园校区休育馆[表网球场T032]",
+    "reviewNote": "",
+    "periodStartTimes": "480,530,595,645,695,840,890,955,1005,1120,1170,1220",
+    "weeks": "第5周（截图）"
+  },
+  {
+    "name": "英语视听说",
+    "weekday": 2,
+    "periodStart": 3,
+    "periodEnd": 4,
+    "startMinute": 595,
+    "endMinute": -1,
+    "location": "麦庐园枝区三教楼[麦三教3208]",
+    "reviewNote": "",
+    "periodStartTimes": "480,530,595,645,695,840,890,955,1005,1120,1170,1220",
+    "weeks": "第5周（截图）"
+  },
+  {
+    "name": "数据库系统...",
+    "weekday": 2,
+    "periodStart": 6,
+    "periodEnd": 8,
+    "startMinute": 840,
+    "endMinute": -1,
+    "location": "麦庐园校区三教楼[麦三教敦3107]",
+    "reviewNote": "原图文字已截断（…），已保留可见内容。",
+    "periodStartTimes": "480,530,595,645,695,840,890,955,1005,1120,1170,1220",
+    "weeks": "第5周（截图）"
+  },
+  {
+    "name": "Pytho..",
+    "weekday": 2,
+    "periodStart": 10,
+    "periodEnd": 12,
+    "startMinute": 1120,
+    "endMinute": -1,
+    "location": "麦庐园枝区数字经济实训大楼[数字经济实训大楼S402]",
+    "reviewNote": "原图文字已截断（…），已保留可见内容。",
+    "periodStartTimes": "480,530,595,645,695,840,890,955,1005,1120,1170,1220",
+    "weeks": "第5周（截图）"
+  },
+  {
+    "name": "Java程..",
+    "weekday": 3,
+    "periodStart": 1,
+    "periodEnd": 2,
+    "startMinute": 480,
+    "endMinute": -1,
+    "location": "麦庐园枝区數字经济实训大楼[数字经济...",
+    "reviewNote": "原图文字已截断（…），已保留可见内容。",
+    "periodStartTimes": "480,530,595,645,695,840,890,955,1005,1120,1170,1220",
+    "weeks": "第5周（截图）"
+  },
+  {
+    "name": "软件工程经...",
+    "weekday": 4,
+    "periodStart": 1,
+    "periodEnd": 2,
+    "startMinute": 480,
+    "endMinute": -1,
+    "location": "麦庐园校区三款楼[表三教3206]",
+    "reviewNote": "原图文字已截断（…），已保留可见内容。",
+    "periodStartTimes": "480,530,595,645,695,840,890,955,1005,1120,1170,1220",
+    "weeks": "第5周（截图）"
+  },
+  {
+    "name": "软件工程",
+    "weekday": 4,
+    "periodStart": 6,
+    "periodEnd": 7,
+    "startMinute": 840,
+    "endMinute": -1,
+    "location": "表庐园校区数字经济实训大楼[数數字经济...",
+    "reviewNote": "原图文字已截断（…），已保留可见内容。",
+    "periodStartTimes": "480,530,595,645,695,840,890,955,1005,1120,1170,1220",
+    "weeks": "第5周（截图）"
+  },
+  {
+    "name": "会计学",
+    "weekday": 4,
+    "periodStart": 8,
+    "periodEnd": 9,
+    "startMinute": 955,
+    "endMinute": -1,
+    "location": "麦庐园校区三教楼[麦三3201]",
+    "reviewNote": "",
+    "periodStartTimes": "480,530,595,645,695,840,890,955,1005,1120,1170,1220",
+    "weeks": "第5周（截图）"
+  },
+  {
+    "name": "概率论",
+    "weekday": 5,
+    "periodStart": 6,
+    "periodEnd": 8,
+    "startMinute": 840,
+    "endMinute": -1,
+    "location": "麦庐园校区三敦楼[麦三教3114]",
+    "reviewNote": "",
+    "periodStartTimes": "480,530,595,645,695,840,890,955,1005,1120,1170,1220",
+    "weeks": "第5周（截图）"
+  }
+]

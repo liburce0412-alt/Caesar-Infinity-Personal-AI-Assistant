@@ -62,8 +62,9 @@ class TimeViewModel(private val dao: CampusDao, private val appContext: Context,
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
-    val courses: StateFlow<List<CourseSchedule>> = activeUser.flatMapLatest { userId -> dao.getCourseSchedulesFlow(userId, userId != "local_user") }
-        .map { list -> list.map { it.toDomain() } }
+    val courses: StateFlow<List<CourseSchedule>> = activeUser.flatMapLatest { userId ->
+        dao.getCourseSchedulesFlow(userId, userId != "local_user")
+    }.map { rows -> rows.map { it.toDomain() } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _isInserting = MutableStateFlow(false)

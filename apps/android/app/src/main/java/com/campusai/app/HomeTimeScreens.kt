@@ -87,6 +87,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.setValue
@@ -97,6 +98,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.material3.LocalContentColor
+import com.campusai.core.model.SpectraEnvironment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -173,6 +178,7 @@ fun HomeScreen(
     contentPadding: PaddingValues,
     collapsedComponents: Set<String> = emptySet(),
     onExpandComponent: (String) -> Unit = {},
+    environment: SpectraEnvironment = SpectraEnvironment.ORIGINAL,
 ) {
     val context = LocalContext.current
     val layout = SpectraTheme.layout
@@ -182,6 +188,14 @@ fun HomeScreen(
     val todayRecords = TimeRecordCalendar.inRange(records, "日")
     val totalMinutes = todayRecords.sumOf { it.durationMinutes }
     val goalMinutes = 240L
+    val dark = MaterialTheme.colorScheme.background.luminance() < .35f
+    val goalColor = when (environment) {
+        SpectraEnvironment.ORIGINAL -> if (dark) Color(0xFFC2D5ED) else Color(0xFF435D7B)
+        SpectraEnvironment.OCEAN -> if (dark) Color(0xFF7EDDEB) else Color(0xFF126375)
+        SpectraEnvironment.ULTRAVIOLET -> if (dark) Color(0xFFD2B5FF) else Color(0xFF694496)
+        SpectraEnvironment.EMBER -> if (dark) Color(0xFFFFBC93) else Color(0xFF974B27)
+        SpectraEnvironment.AURORA -> if (dark) SpectraColors.AuroraLight else SpectraColors.Aurora
+    }
     val streak = remember(records) { calculateStreak(records) }
     val categories = todayRecords.map { it.category }.filter(String::isNotBlank).distinct().take(3)
     val topCategory = todayRecords
@@ -239,34 +253,25 @@ fun HomeScreen(
         }
         item {
             CollapsibleComponent(OptionalComponent.TODAY, OptionalComponent.TODAY.name in collapsedComponents, { onExpandComponent(OptionalComponent.TODAY.name) }) {
-            SpectraSurface(
-                modifier = Modifier.fillMaxWidth(),
-                mood = PageMood.GROWTH,
-                emphasized = true,
-                contentPadding = PaddingValues(0.dp),
-            ) {
-                Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(primary = goalColor, onSurface = goalColor, onSurfaceVariant = goalColor.copy(alpha = .85f))) {
+            CompositionLocalProvider(LocalContentColor provides goalColor) {
+            Column(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text("今日行动", style = MaterialTheme.typography.titleLarge)
                             Text("目标 ${formatDuration(goalMinutes)}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (LocalDensity.current.fontScale > 1.3f) SpectraStatus("${(totalMinutes * 100 / goalMinutes).coerceAtMost(100)}% 达成", tone = SpectraStatusTone.SUCCESS)
+                            if (LocalDensity.current.fontScale > 1.3f) SpectraStatus("${(totalMinutes * 100 / goalMinutes).coerceAtMost(100)}% 达成", tone = SpectraStatusTone.INFO)
                         }
                         if (LocalDensity.current.fontScale <= 1.3f) SpectraStatus(
                             text = "${(totalMinutes * 100 / goalMinutes).coerceAtMost(100)}% 达成",
-                            tone = SpectraStatusTone.SUCCESS,
+                            tone = SpectraStatusTone.INFO,
                         )
                     }
                     Spacer(Modifier.height(8.dp))
                     SpectraProgress(totalMinutes = totalMinutes, goalMinutes = goalMinutes)
                     Spacer(Modifier.height(12.dp))
-                    if (categories.isEmpty()) {
-                        Text(
-                            "从第一条真实记录开始建立你的节奏",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface.copy(.56f),
-                        )
-                    } else {
+                    if (categories.isNotEmpty()) {
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             items(categories) { category -> SpectraStatus(category, tone = SpectraStatusTone.NEUTRAL) }
                         }
@@ -274,6 +279,8 @@ fun HomeScreen(
                     Spacer(Modifier.height(16.dp))
                     SpectraPrimaryButton("开始记录", onStartRecord, Modifier.fillMaxWidth(), icon = Icons.Rounded.Timer)
                 }
+            }
+            }
             }
             }
         }
@@ -291,11 +298,7 @@ fun HomeScreen(
         }
         item {
             CollapsibleComponent(OptionalComponent.STREAK, OptionalComponent.STREAK.name in collapsedComponents, { onExpandComponent(OptionalComponent.STREAK.name) }) {
-            SpectraSurface(
-                modifier = Modifier.fillMaxWidth(),
-                mood = PageMood.GROWTH,
-                contentPadding = PaddingValues(0.dp),
-            ) {
+            Column(Modifier.fillMaxWidth()) {
                 Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Rounded.LocalFireDepartment, null, tint = SpectraColors.Warm)
                     Column(Modifier.weight(1f)) {
@@ -318,11 +321,7 @@ fun HomeScreen(
         item {
             CollapsibleComponent(OptionalComponent.INSIGHTS, OptionalComponent.INSIGHTS.name in collapsedComponents, { onExpandComponent(OptionalComponent.INSIGHTS.name) }) {
             SectionLabel("AI 洞察", "基于今天 ${todayRecords.size} 条记录")
-            SpectraSurface(
-                modifier = Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onOpenAi),
-                mood = PageMood.GROWTH,
-                contentPadding = PaddingValues(0.dp),
-            ) {
+            Column(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onOpenAi)) {
                 Column(Modifier.padding(16.dp)) {
                     Icon(Icons.Rounded.AutoAwesome, null, tint = SpectraColors.Violet)
                     Spacer(Modifier.height(12.dp))
@@ -376,12 +375,7 @@ fun HomeScreen(
                         is UiState.Offline -> announcements.value
                         else -> emptyList()
                     }
-                    SpectraSurface(
-                        modifier = Modifier.fillMaxWidth(),
-                        mood = PageMood.GROWTH,
-                        shadowed = false,
-                        contentPadding = PaddingValues(0.dp),
-                    ) {
+                    Column(Modifier.fillMaxWidth()) {
                         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
                             if (announcements is UiState.Offline) {
                                 SpectraStatus(
@@ -456,16 +450,8 @@ private fun HealthOverviewCard(
         state.availability is HealthAvailability.MissingPermissions -> SpectraStatusTone.WARNING
         else -> SpectraStatusTone.INFO
     }
-    val summaryMeta = if (hasData) "查看今日健康详情" else "同步后显示今日健康数据"
 
-    GlassPanel(
-        modifier = Modifier.fillMaxWidth(),
-        radius = 24,
-        emphasized = true,
-        shadowed = true,
-        opticalPriority = 5,
-        onClick = { showDetails = true },
-    ) {
+    Box(Modifier.fillMaxWidth().clickable(role = Role.Button) { showDetails = true }) {
         Column(Modifier.fillMaxWidth().padding(18.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.FavoriteBorder, null, tint = MaterialTheme.colorScheme.onSurface.copy(.78f))
@@ -504,14 +490,7 @@ private fun HealthOverviewCard(
             } else {
                 HealthMetricStrip(summaryMetrics)
             }
-            Spacer(Modifier.height(13.dp))
-            Text(
-                summaryMeta,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(.56f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+
         }
     }
 
@@ -993,7 +972,7 @@ private fun SpectraProgress(totalMinutes: Long, goalMinutes: Long) {
         animationSpec = tween(motion.resolve(motion.longMillis)),
         label = "home-goal-progress",
     )
-    Column(Modifier.fillMaxWidth().padding(vertical = 18.dp), horizontalAlignment = Alignment.Start) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalAlignment = Alignment.Start) {
         Text(
             formatDuration(totalMinutes),
             style = MaterialTheme.typography.displaySmall,
@@ -1034,10 +1013,13 @@ fun TimeScreen(
     onStartFocus: (Int) -> Unit,
     onMessage: suspend (String, String?) -> SnackbarResult,
     contentPadding: PaddingValues,
+    timetableExpanded: Boolean = true,
+    onExpandTimetable: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val layout = SpectraTheme.layout
     val scope = rememberCoroutineScope()
+    val enabledNow by rememberUpdatedState(timetableExpanded)
     val courses by viewModel.courses.collectAsState()
     val importOwner by viewModel.activeUserId.collectAsState()
     var range by rememberSaveable { mutableStateOf("日") }
@@ -1050,6 +1032,7 @@ fun TimeScreen(
     var importDrafts by remember { mutableStateOf<List<CourseDraft>?>(null) }
     var importError by remember { mutableStateOf<String?>(null) }
     var importing by remember { mutableStateOf(false) }
+    var importProgress by remember { mutableStateOf("") }
     var importSaving by remember { mutableStateOf(false) }
     var importSaveError by remember { mutableStateOf<String?>(null) }
     var importJob by remember { mutableStateOf<Job?>(null) }
@@ -1061,39 +1044,77 @@ fun TimeScreen(
         importJob = null
         importing = false
     }
-    fun readSchedule(uri: Uri, image: Boolean, owner: String) {
+    fun readImages(uris: List<Uri>, owner: String) {
         cancelRead()
         val request = importRequest
         importing = true
         importError = null
-        importSaveError = null
         importJob = scope.launch {
+            var inserted = 0
+            var duplicates = 0
+            val failures = mutableListOf<Int>()
+            val weeks = mutableSetOf<String>()
             try {
-                val drafts = if (image) ScheduleImporter.fromImage(context, uri)
-                    else withContext(Dispatchers.IO) { ScheduleImporter.fromIcs(context, uri) }
-                if (request == importRequest && owner == viewModel.activeUserId.value) {
-                    if (drafts.isEmpty()) importError = if (image) "没有识别到可靠的课程格，请选择清晰完整的原图。" else "这个日历文件里没有可导入的课程事件。"
-                    else importDrafts = drafts
+                val images = uris.distinct()
+                images.forEachIndexed { index, uri ->
+                    importProgress = "正在识别第 ${index + 1} / ${images.size} 张 · 已保存 $inserted 项"
+                    try {
+                        val drafts = ScheduleImporter.fromImage(context, uri)
+                        if (request != importRequest || owner != viewModel.activeUserId.value || !enabledNow) return@launch
+                        if (drafts.isEmpty()) failures.add(index + 1)
+                        else {
+                            val result = viewModel.importCourses(drafts.map { it.toCourse() }, expectedOwner = owner)
+                            inserted += result.inserted
+                            duplicates += result.duplicates
+                            weeks.addAll(drafts.map { it.weeks }.filter { it.isNotBlank() })
+                        }
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { failures.add(index + 1) }
                 }
-            } catch (cancelled: CancellationException) { throw cancelled }
-            catch (failure: Exception) {
-                if (request == importRequest && owner == viewModel.activeUserId.value) importError = "${if (image) "截图识别" else "日历解析"}失败：${failure.message ?: "文件无法读取"}。可以重新选择文件，或手动添加。"
+                if (request == importRequest && owner == viewModel.activeUserId.value && enabledNow) {
+                    importing = false
+                    if (failures.isNotEmpty()) importError = "已保存 $inserted 项课程。第 ${failures.joinToString("、")} 张未能导入，请重新选择清晰完整的截图。成功的周次已可使用。"
+                    onMessage("已导入 $inserted 项课程" + (if (weeks.isNotEmpty()) " · ${weeks.size} 个周次" else "") +
+                        (if (duplicates > 0) "，跳过 $duplicates 项重复课程" else ""), null)
+                }
             } finally {
                 if (request == importRequest) { importing = false; importJob = null }
             }
         }
     }
-    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+    fun readSchedule(uri: Uri, owner: String) {
+        cancelRead()
+        val request = importRequest
+        importing = true
+        importProgress = "正在读取日历文件"
+        importError = null
+        importSaveError = null
+        importJob = scope.launch {
+            try {
+                val drafts = withContext(Dispatchers.IO) { ScheduleImporter.fromIcs(context, uri) }
+                if (request == importRequest && owner == viewModel.activeUserId.value && enabledNow) {
+                    if (drafts.isEmpty()) importError = "这个日历文件里没有可导入的课程事件。"
+                    else importDrafts = drafts
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                if (request == importRequest && owner == viewModel.activeUserId.value) importError = "日历解析失败：${failure.message ?: "文件无法读取"}。可以重新选择文件，或手动添加。"
+            } finally {
+                if (request == importRequest) { importing = false; importJob = null }
+            }
+        }
+    }
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         val owner = pickerOwner
         pickerOwner = null
-        if (uri != null && owner != null && owner == viewModel.activeUserId.value) readSchedule(uri, image = true, owner = owner)
+        if (uris.isNotEmpty() && owner != null && owner == viewModel.activeUserId.value && enabledNow) readImages(uris, owner)
     }
     val icsPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         val owner = pickerOwner
         pickerOwner = null
-        if (uri != null && owner != null && owner == viewModel.activeUserId.value) readSchedule(uri, image = false, owner = owner)
+        if (uri != null && owner != null && owner == viewModel.activeUserId.value) readSchedule(uri, owner = owner)
     }
-    LaunchedEffect(importOwner) {
+    LaunchedEffect(importOwner, timetableExpanded) {
         cancelRead()
         importDrafts = null
         importSaving = false
@@ -1126,23 +1147,25 @@ fun TimeScreen(
             item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) { Text("时间", style = MaterialTheme.typography.headlineLarge); Text("今天的轨迹，清楚而不嘈杂", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    SpectraIconAction(
+                    if (timetableExpanded) SpectraIconAction(
                         icon = Icons.Rounded.FileOpen,
                         label = "导入课程表",
                         onClick = { showImport = true },
                     )
                 }
             }
-            if (courses.isNotEmpty()) {
+            if (!timetableExpanded) {
+                item { CollapsibleComponent(OptionalComponent.TIMETABLE, true, onExpandTimetable) {} }
+            } else if (courses.isNotEmpty()) {
                 item {
                     CourseTimetable(courses = courses, onRemove = { viewModel.deleteCourse(it.id) }, onImport = { showImport = true })
                 }
-            } else {
+            } else if (timetableExpanded) {
                 item {
                     SpectraStatePane(
                         kind = SpectraStateKind.EMPTY,
                         title = "尚未导入课程表",
-                        detail = "可以读取课程表截图或 .ics 日历，保存前会先让你确认。",
+                        detail = "可一次选择多张截图，自动识别并按周生成课表。",
                         modifier = Modifier.fillMaxWidth(),
                         actionLabel = "导入课程表",
                         onAction = { showImport = true },
@@ -1150,12 +1173,7 @@ fun TimeScreen(
                 }
             }
             item {
-                SpectraSurface(
-                    modifier = Modifier.fillMaxWidth(),
-                    mood = PageMood.FOCUS,
-                    emphasized = true,
-                    contentPadding = PaddingValues(0.dp),
-                ) {
+                Column(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {
                         Text("开始专注", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(12.dp))
@@ -1209,8 +1227,7 @@ fun TimeScreen(
                 }
             } else {
                 items(filtered, key = { "time-${it.id}" }) { record ->
-                    SpectraSurface(modifier = Modifier.fillMaxWidth(), mood = PageMood.FOCUS,
-                        contentPadding = PaddingValues(0.dp)) {
+                    Column(Modifier.fillMaxWidth()) {
                         TimelineRow(record, onEdit = { editing = record },
                             onDelete = { viewModel.deleteTimeRecord(record.id); deleted = record })
                     }
@@ -1255,7 +1272,8 @@ fun TimeScreen(
         Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("正在读取课程表", style = MaterialTheme.typography.titleLarge)
             androidx.compose.material3.LinearProgressIndicator(Modifier.fillMaxWidth())
-            Text("正在分析课程格与文字。识别在本机完成，保存前可逐项核对。")
+            Text(importProgress)
+            Text("自动按截图周次保存；取消时保留已导入的课程。", style = MaterialTheme.typography.bodySmall)
             TextButton(onClick = { cancelRead() }) { Text("取消读取") }
         }
     }
@@ -1285,7 +1303,7 @@ fun TimeScreen(
                 importJob = scope.launch {
                     try {
                         val result = viewModel.importCourses(edited.map { it.toCourse() }, expectedOwner = owner)
-                        if (request == importRequest && owner == viewModel.activeUserId.value) {
+                        if (request == importRequest && owner == viewModel.activeUserId.value && enabledNow) {
                             importDrafts = null
                             onMessage("已导入 ${result.inserted} 门课程${if (result.duplicates > 0) "，跳过 ${result.duplicates} 条重复" else ""}", null)
                         }

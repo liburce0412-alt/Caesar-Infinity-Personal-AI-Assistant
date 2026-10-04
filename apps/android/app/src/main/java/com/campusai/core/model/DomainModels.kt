@@ -159,4 +159,7 @@ data class CourseSchedule(
     val teacher: String = "",
     val weeks: String = "",
     val sourceHash: String,
+    val periodStart: Int = 0,
+    val periodEnd: Int = 0,
+    val periodStartTimes: String = "",
 ) : Serializable

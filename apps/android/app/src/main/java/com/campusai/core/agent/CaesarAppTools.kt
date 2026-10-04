@@ -53,7 +53,7 @@ class CaesarAppTools(
             write("time.delete_record", "软删除时间记录，可撤销", reversible = true, params = listOf(number("id", "记录 ID")), keywords = setOf("删除记录")) { args, ctx -> persisted("time.delete_record", args, ctx) { dao.softDeleteTimeRecord(args.getInt("id")); success(JSONObject().put("deleted", true).put("undoAvailable", true)) } },
             write("time.undo_delete", "撤销时间记录删除", reversible = true, params = listOf(number("id", "记录 ID")), keywords = setOf("撤销", "恢复记录")) { args, ctx -> persisted("time.undo_delete", args, ctx) { dao.undoDeleteTimeRecord(args.getInt("id")); success(JSONObject().put("restored", true)) } },
             read("course.list", "读取课程表", emptyList(), setOf("课程", "课表", "上课")) { _, ctx ->
-                success(JSONArray(dao.getCourseSchedulesFlow(activeUser(ctx), true).first().map { JSONObject().put("id", it.id).put("name", it.name).put("weekday", it.weekday).put("startMinute", it.startMinute).put("endMinute", it.endMinute).put("location", it.location).put("teacher", it.teacher).put("weeks", it.weeks) }))
+                success(JSONArray(dao.getCourseSchedulesFlow(activeUser(ctx), true).first().map { JSONObject().put("id", it.id).put("name", it.name).put("weekday", it.weekday).put("startMinute", it.startMinute).put("endMinute", it.endMinute).put("periodStart", it.periodStart).put("periodEnd", it.periodEnd).put("location", it.location).put("teacher", it.teacher).put("weeks", it.weeks) }))
             },
             write("course.delete", "软删除一条课程", reversible = true, params = listOf(number("id", "课程 ID")), keywords = setOf("删除课程", "移除课程")) { args, ctx -> persisted("course.delete", args, ctx) { dao.softDeleteCourseSchedule(args.getInt("id")); success(JSONObject().put("deleted", true)) } },
 

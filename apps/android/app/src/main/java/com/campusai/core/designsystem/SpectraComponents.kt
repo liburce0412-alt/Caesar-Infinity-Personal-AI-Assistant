@@ -255,9 +255,9 @@ fun SpectraBackdrop(
     LaunchedEffect(surface, quality, phase, lifecycleActive, active) {
         if (!lifecycleActive || !active) return@LaunchedEffect
         val minFrameIntervalNanos = when (quality) {
-            RenderQuality.LOW -> 48_000_000L
-            RenderQuality.AUTO,
-            RenderQuality.HIGH -> if (phase == SpectraPhase.AMBIENT) 32_000_000L else 15_000_000L
+            RenderQuality.LOW -> 32_000_000L
+            RenderQuality.AUTO -> 16_000_000L
+            RenderQuality.HIGH -> 16_000_000L
         }
         var lastRequestedAt = Long.MIN_VALUE
         while (lifecycleActive && active) {
@@ -331,12 +331,11 @@ fun GlassPanel(
     val shape = RoundedCornerShape(radius.dp)
     val dark = MaterialTheme.colorScheme.background.luminance() < .35f
     val motion = SpectraTheme.tokens.motion.enabled
-    // Text needs a stable reading surface even when the live field passes a dark fold.
-    // The shared renderer still supplies refraction beneath this neutral material layer.
+    // Keep the shared scene visible through the material; the scene owns reading contrast.
     val fill = MaterialTheme.colorScheme.surface.copy(alpha = when {
         !motion -> .96f
-        emphasized -> if (dark) .62f else .48f
-        else -> if (dark) .74f else .62f
+        emphasized -> if (dark) .22f else .10f
+        else -> if (dark) .28f else .14f
     })
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
@@ -345,12 +344,13 @@ fun GlassPanel(
     var touch by remember { mutableStateOf(Offset(.5f, .5f)) }
     val press by animateFloatAsState(
         if ((touching || pressed) && motion) 1f else 0f,
-        if (motion) spring(dampingRatio = .52f, stiffness = 380f) else tween(0), label = "liquid-glass-press",
+        if (!motion) tween(0) else if (touching || pressed) spring(dampingRatio = .72f, stiffness = 420f) else spring(dampingRatio = .52f, stiffness = 240f), label = "liquid-glass-press",
     )
     Box(
         modifier = modifier
             // Observe without consuming: nested buttons and scrolling retain their gestures.
-            .pointerInput(motion) {
+            .pointerInput(motion, optical) {
+                if (!motion || !optical) return@pointerInput
                 try {
                     awaitPointerEventScope {
                         while (true) {
@@ -382,7 +382,7 @@ fun GlassPanel(
                 radius = radius.dp,
                 priority = opticalPriority + if (touching || abs(press) > .01f) 100 else 0,
                 refraction = ((if (emphasized) 6f else 4f) + if (effects.deformation) press * 4f else 0f).dp,
-                dispersion = if (dark) 0.dp else if (emphasized) .65.dp else .35.dp,
+                dispersion = if (emphasized) 2.4.dp else 1.5.dp,
                 flow = if (emphasized) 1.4.dp else .8.dp,
                 bodyOpacity = if (emphasized) .095f else .065f,
                 interaction = press,
@@ -432,14 +432,27 @@ fun GlassPanel(
                 val energy = abs(press).coerceIn(0f, 1f)
                 val focus = Offset(touch.x * size.width, touch.y * size.height)
                 val sheen = Brush.radialGradient(
-                    listOf(Color.White.copy(alpha = energy * .22f), Color.Transparent),
+                    if (dark) listOf(Color.White.copy(alpha = energy * .22f), Color.Transparent)
+                    else listOf(
+                        SpectraColors.Violet.copy(alpha = energy * .13f),
+                        SpectraColors.Cyan.copy(alpha = energy * .075f),
+                        Color.Transparent,
+                    ),
                     center = focus,
-                    radius = size.maxDimension.coerceAtLeast(1f) * .65f,
+                    radius = if (dark) size.maxDimension.coerceAtLeast(1f) * .65f
+                    else minOf(size.maxDimension * .42f, size.minDimension * 1.8f).coerceAtLeast(48.dp.toPx()),
                 )
                 val rim = Brush.radialGradient(
-                    listOf(Color.White.copy(alpha = energy * .95f), Color.Transparent),
+                    if (dark) listOf(Color.White.copy(alpha = energy * .95f), Color.Transparent)
+                    else listOf(
+                        SpectraColors.Cyan.copy(alpha = energy * .60f),
+                        SpectraColors.Violet.copy(alpha = energy * .50f),
+                        SpectraColors.Rose.copy(alpha = energy * .30f),
+                        Color.Transparent,
+                    ),
                     center = focus,
-                    radius = size.maxDimension.coerceAtLeast(1f) * .8f,
+                    radius = if (dark) size.maxDimension.coerceAtLeast(1f) * .8f
+                    else minOf(size.maxDimension * .45f, size.minDimension * 2f).coerceAtLeast(48.dp.toPx()),
                 )
                 // Sparse four-point glints belong to dark glass, never to the environment.
                 val stars = if (dark) listOf(
@@ -466,7 +479,7 @@ fun GlassPanel(
                     drawContent()
                     drawRect(sheen)
                     drawRoundRect(edge, cornerRadius = corner, style = Stroke(one))
-                    if (effects.rimLight) drawRoundRect(rim, cornerRadius = corner, style = Stroke(one * (1.2f + energy)))
+                    if (effects.rimLight) drawRoundRect(rim, cornerRadius = corner, style = Stroke(one * (1.2f + energy * if (dark) 1f else .65f)))
                     drawLine(
                         brush = crown,
                         start = Offset(size.width * .08f, one * 1.1f),
@@ -727,10 +740,10 @@ private fun spectraModalGlass(
 ): Color {
     val environmentTint = lerp(surface, accent, if (dark) .10f else .075f)
     val alpha = when {
-        dark && longForm -> .92f
-        dark -> .86f
-        longForm -> .90f
-        else -> .84f
+        dark && longForm -> .76f
+        dark -> .66f
+        longForm -> .64f
+        else -> .52f
     }
     return environmentTint.copy(alpha = alpha)
 }

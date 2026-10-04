@@ -30,6 +30,8 @@ import com.campusai.core.designsystem.PageMood
 import com.campusai.core.designsystem.SpectraDialog
 import com.campusai.core.designsystem.SpectraSurface
 import com.campusai.core.model.CourseSchedule
+import com.campusai.features.schedule.courseTimeLabel
+import com.campusai.features.schedule.hasPeriods
 import com.campusai.features.schedule.courseClock
 import com.campusai.features.schedule.hasTimeOverlap
 import com.campusai.features.schedule.groupDayCourses
@@ -47,34 +49,50 @@ internal fun CourseTimetable(courses: List<CourseSchedule>, onRemove: ((CourseSc
     var overlapSelection by remember { mutableStateOf<List<CourseSchedule>?>(null) }
     var day by rememberSaveable { mutableIntStateOf(LocalDate.now().dayOfWeek.value) }
     var selected by remember { mutableStateOf<CourseSchedule?>(null) }
-    val validCourses = remember(courses) {
-        courses.filter { it.weekday in 1..7 && it.startMinute in 0..1439 && it.endMinute in 1..1440 && it.endMinute > it.startMinute }
+    val sourceWeeks = remember(courses) { courses.map { it.weeks }.filter { it.endsWith("（截图）") }.distinct().sortedBy { Regex("\\d+").find(it)?.value?.toIntOrNull() ?: 0 } }
+    var selectedWeek by rememberSaveable { mutableStateOf("") }
+    val currentWeek = selectedWeek.takeIf { it in sourceWeeks || it == "全部" }
+        ?: courses.filter { it.weeks in sourceWeeks }.maxByOrNull { it.id }?.weeks.orEmpty()
+    val shownCourses = if (currentWeek.isBlank() || currentWeek == "全部") courses else courses.filter { it.weeks == currentWeek }
+    val validCourses = remember(shownCourses) {
+        shownCourses.filter { it.weekday in 1..7 && (it.hasPeriods() || (it.startMinute in 0..1439 && it.endMinute in 1..1440 && it.endMinute > it.startMinute)) }
     }
-    SpectraSurface(modifier = Modifier.fillMaxWidth(), mood = PageMood.FOCUS, contentPadding = PaddingValues(12.dp)) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("课程表", style = MaterialTheme.typography.titleLarge)
-                    Text("${courses.size} 门安排", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${shownCourses.size} 门安排", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 TextButton(onClick = onImport) { Text(if (largeText) "导入" else "添加 / 导入") }
+            }
+            if (sourceWeeks.isNotEmpty()) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                    (sourceWeeks + "全部").forEach { week ->
+                        FilterChip(selected = currentWeek == week, onClick = { selectedWeek = week },
+                            label = { Text(week.removeSuffix("（截图）")) }, modifier = Modifier.padding(end = 6.dp))
+                    }
+                }
             }
             CaesarSlidingSelector(
                 options = listOf("周课表", "按天查看"), selectedIndex = view,
                 onSelected = { view = it }, modifier = Modifier.fillMaxWidth(),
             )
 
-            if (validCourses.size != courses.size) {
+            if (validCourses.size != shownCourses.size) {
                 Text("部分课程的时间不完整，暂未放入课表。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
             if (view == 0) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                if (validCourses.none { it.hasPeriods() }) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("星期概览 · 周次见详情", Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     TextButton(onClick = { showWeekend = !showWeekend }) {
                         Text(if (showWeekend) "收起周末" else "周末 ${validCourses.count { it.weekday >= 6 }} 门")
                     }
                 }
-                WeekCourseGrid(validCourses, showWeekend, onSelect = { selected = it }, onOverlap = { overlapSelection = it })
+                val periodCourses = validCourses.filter { it.hasPeriods() }
+                if (periodCourses.isNotEmpty()) PeriodCourseGrid(periodCourses, onSelect = { selected = it }, onOverlap = { overlapSelection = it })
+                val clockCourses = validCourses.filterNot { it.hasPeriods() }
+                if (clockCourses.isNotEmpty()) WeekCourseGrid(clockCourses, showWeekend, onSelect = { selected = it }, onOverlap = { overlapSelection = it })
             } else {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     (1..7).forEach { weekday ->
@@ -98,8 +116,8 @@ internal fun CourseTimetable(courses: List<CourseSchedule>, onRemove: ((CourseSc
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Column(Modifier.width(IntrinsicSize.Max)) {
-                            Text(courseClock(course.startMinute), style = MaterialTheme.typography.titleSmall, maxLines = 1, softWrap = false)
-                            Text(courseClock(course.endMinute), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(if (course.hasPeriods()) "${course.periodStart}–${course.periodEnd}节" else courseClock(course.startMinute), style = MaterialTheme.typography.titleSmall, maxLines = 1, softWrap = false)
+                            Text(if (course.hasPeriods()) courseClock(course.startMinute) else courseClock(course.endMinute), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(course.name, style = MaterialTheme.typography.titleMedium)
@@ -126,7 +144,7 @@ internal fun CourseTimetable(courses: List<CourseSchedule>, onRemove: ((CourseSc
                         TextButton(onClick = { overlapSelection = null; selected = course }, modifier = Modifier.fillMaxWidth()) {
                             Column(Modifier.fillMaxWidth()) {
                                 Text(course.name, style = MaterialTheme.typography.titleMedium)
-                                Text("${courseClock(course.startMinute)}–${courseClock(course.endMinute)} · ${course.location}", style = MaterialTheme.typography.bodySmall)
+                                Text("${courseTimeLabel(course)} · ${course.location}", style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
@@ -141,7 +159,7 @@ internal fun CourseTimetable(courses: List<CourseSchedule>, onRemove: ((CourseSc
         SpectraDialog(onDismissRequest = { selected = null }) {
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(course.name, style = MaterialTheme.typography.headlineSmall)
-                Text("${weekdayLabel(course.weekday)}  ${courseClock(course.startMinute)}–${courseClock(course.endMinute)}", style = MaterialTheme.typography.titleMedium)
+                Text("${weekdayLabel(course.weekday)}  ${courseTimeLabel(course)}", style = MaterialTheme.typography.titleMedium)
                 Text("教室：${course.location.ifBlank { "未填写" }}")
                 Text("教师：${course.teacher.ifBlank { "未填写" }}")
                 Text("周次：${course.weeks.ifBlank { "未填写，请核对原始课表" }}")
@@ -260,7 +278,7 @@ private fun ManageCoursesDialog(courses: List<CourseSchedule>, onDismiss: () -> 
                         Checkbox(checked = course.id in chosen, onCheckedChange = null)
                         Column(Modifier.weight(1f)) {
                             Text(course.name, style = MaterialTheme.typography.bodyLarge)
-                            Text("${weekdayLabel(course.weekday.coerceIn(1, 7))} · ${courseClock(course.startMinute)}–${courseClock(course.endMinute)}", style = MaterialTheme.typography.bodySmall)
+                            Text("${weekdayLabel(course.weekday.coerceIn(1, 7))} · ${courseTimeLabel(course)}", style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
