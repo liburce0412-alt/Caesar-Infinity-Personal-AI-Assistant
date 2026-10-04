@@ -20,6 +20,8 @@
   <a href="docs/local-ai-architecture.md">架构文档</a>
 </p>
 
+**最新正式版：[v2.1.0 · 下载 APK 与更新说明](https://github.com/liburce0412-alt/Caesar-Infinity-Personal-AI-Assistant/releases/tag/v2.1.0)**
+
 ## 先看使用场景
 
 **适合想围绕健康数据与日常记录继续追问，也愿意自行配置 AI 的 Android 用户。** 你可以先从一次今日健康反馈开始，再体验时间记录和需要你确认的个人记忆。

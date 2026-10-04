@@ -1055,23 +1055,23 @@ private class SpectraGlRenderer(
                 if (uDark > 0.5) {
                     // Keep the existing night-time brightness and touch response.
                     glass += uEffects.y * rimColor * (0.12 + following * energy) * (rimBand * 0.95 + exp(-distanceInside / 9.0) * 0.16);
-                } else {
+                } else if (uEffects.y > 0.5 && energy > 0.003) {
                     // On a bright scene additive RGB clips to white. Transmit a saturated
                     // tint first, then add a narrow highlight so the prism stays visible.
                     float prismPhase = dot(edgeDelta, vec2(0.9, 1.3)) * 2.0 - uTime * 0.7;
                     vec3 prism = 0.50 + 0.42 * cos(prismPhase + vec3(0.0, 2.1, 4.2));
-                    float edgeLight = following * energy * (rimBand * 0.40 + exp(-distanceInside / 9.0) * 0.09);
-                    float fingerLight = touchFalloff * energy * 0.08;
-                    glass = mix(glass, prism, clamp(uEffects.y * (edgeLight + fingerLight), 0.0, 0.50));
+                    float edgeLight = following * energy * (rimBand * 0.55 + exp(-distanceInside / 5.0) * 0.08);
+                    glass = mix(glass, prism, clamp(edgeLight, 0.0, 0.60));
                     glass += uEffects.y * vec3(0.08) * rimBand * following * energy;
                 }
 
                 // Quiet inner illumination and a darker contact edge give the lens real thickness.
                 float innerHighlight = (1.0 - smoothstep(0.0, 2.0, distanceInside)) * (1.0 - uDark * 0.35);
                 float contact = smoothstep(0.0, 8.0, distanceInside) * (1.0 - smoothstep(8.0, 18.0, distanceInside));
-                vec2 lightDirection = normalize(mix(vec2(-0.6, 0.8), (uTouch - 0.5) * 2.0 + vec2(0.001), clamp(abs(uInteraction), 0.0, 1.0)));
+                float rimEnergy = energy * uEffects.y;
+                vec2 lightDirection = normalize(mix(vec2(-0.6, 0.8), (uTouch - 0.5) * 2.0 + vec2(0.001), rimEnergy));
                 float lightFacing = pow(max(dot(normal, lightDirection), 0.0), 3.0);
-                glass += vec3(1.0) * innerHighlight * (0.045 + 0.24 * lightFacing + 0.12 * abs(uInteraction) * touchFalloff);
+                glass += vec3(1.0) * innerHighlight * (0.045 + 0.24 * lightFacing + 0.12 * rimEnergy * touchFalloff);
                 glass *= 1.0 - contact * mix(0.025, 0.05, uDark);
                 gl_FragColor = vec4(glass, 1.0);
             }

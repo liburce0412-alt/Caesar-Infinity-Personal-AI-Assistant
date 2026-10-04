@@ -429,25 +429,19 @@ fun GlassPanel(
                     startX = size.width * .08f,
                     endX = size.width * .72f,
                 )
-                val energy = abs(press).coerceIn(0f, 1f)
+                val energy = if (effects.rimLight) abs(press).coerceIn(0f, 1f) else 0f
                 val focus = Offset(touch.x * size.width, touch.y * size.height)
                 val sheen = Brush.radialGradient(
-                    if (dark) listOf(Color.White.copy(alpha = energy * .22f), Color.Transparent)
-                    else listOf(
-                        SpectraColors.Violet.copy(alpha = energy * .13f),
-                        SpectraColors.Cyan.copy(alpha = energy * .075f),
-                        Color.Transparent,
-                    ),
+                    listOf(Color.White.copy(alpha = energy * .22f), Color.Transparent),
                     center = focus,
-                    radius = if (dark) size.maxDimension.coerceAtLeast(1f) * .65f
-                    else minOf(size.maxDimension * .42f, size.minDimension * 1.8f).coerceAtLeast(48.dp.toPx()),
+                    radius = size.maxDimension.coerceAtLeast(1f) * .65f,
                 )
                 val rim = Brush.radialGradient(
                     if (dark) listOf(Color.White.copy(alpha = energy * .95f), Color.Transparent)
                     else listOf(
-                        SpectraColors.Cyan.copy(alpha = energy * .60f),
-                        SpectraColors.Violet.copy(alpha = energy * .50f),
-                        SpectraColors.Rose.copy(alpha = energy * .30f),
+                        SpectraColors.Cyan.copy(alpha = energy * .70f),
+                        SpectraColors.Violet.copy(alpha = energy * .55f),
+                        SpectraColors.Rose.copy(alpha = energy * .35f),
                         Color.Transparent,
                     ),
                     center = focus,
@@ -477,7 +471,7 @@ fun GlassPanel(
                 } else emptyList()
                 onDrawWithContent {
                     drawContent()
-                    drawRect(sheen)
+                    if (dark) drawRect(sheen)
                     drawRoundRect(edge, cornerRadius = corner, style = Stroke(one))
                     if (effects.rimLight) drawRoundRect(rim, cornerRadius = corner, style = Stroke(one * (1.2f + energy * if (dark) 1f else .65f)))
                     drawLine(
