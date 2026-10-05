@@ -26,7 +26,7 @@ GitHub 元数据：`https://github.com/liburce0412-alt/Caesar-Infinity-Personal-
 
 将 `deploy/alicloud/` 下的 `install-release-mirror.py`、`sync-app-releases.py`、`caesar-release-mirror.service` 和 `.timer` 放在同一目录，由 root 运行安装脚本。脚本仅添加当前 campusai 虚拟主机的静态更新路由，验证 nginx 配置后 reload；不重启 Supabase 或其他站点。原配置备份在 `/opt/campusai/deploy/nginx-before-app-updates.conf`。
 
-镜像程序运行于 www-data，脚本存于 `/usr/local/lib/caesar-updater`，写入范围限制为 `/var/www/campusai-updates`，内存上限 96 MB、CPU 上限 20%，平时不常驻。它读取公开 GitHub Release，不需要把服务器 SSH 密钥交给 GitHub。
+镜像程序运行于 www-data，脚本存于 `/usr/local/lib/caesar-updater`，写入范围限制为 `/var/www/campusai-updates`，内存上限 96 MB、CPU 上限 20%，平时不常驻。它读取公开 GitHub Release，经官方资源 API 跳转 CDN，不需要把服务器 SSH 密钥交给 GitHub。下载任务最长允许 30 分钟，跨境链路慢时不会影响现有版本下载。
 
 服务器保留最近 **3** 个版本。以 v2.1.0 的 43,797,714 字节为例，2 个版本约 83.5 MiB，3 个约 125.3 MiB，多留一个约增加 41.8 MiB；同步期间还需一个新包的临时空间。实机磁盘检查剩余约 26 GB，可容纳此策略。旧 GitHub Release 不自动删除，旧版本可人工下载；Android 默认不允许直接降级。
 
