@@ -38,6 +38,13 @@
 
 本轮支持多张课表截图自动识别周次、直接本地保存并同步云端；在「我的 → 组件与内容」可折叠课程表。浅色触摸彩光只在手指附近的边框及紧邻边缘淡淡出现，深色保留白色追光。见[课表与外观使用说明](docs/timetable-and-appearance.md)和[验证记录](docs/frontend-timetable-20261005.md)。
 
+<p align="center">
+  <a href="design/readme/caesar-achievement-icons.png"><img src="design/readme/caesar-achievement-icons.png" width="31%" alt="16 种成就徽章：实际 Compose 组件演示" /></a>
+  <a href="design/readme/caesar-course-editor.png"><img src="design/readme/caesar-course-editor.png" width="31%" alt="课程编辑：可在导入后填写教室、教师和调整时间" /></a>
+</p>
+
+上方两张 v2.1.1 新图由实际 Compose 组件渲染，使用演示课程与徽章状态；并非生成效果图。它们展示编辑表单和图标细节，完整真机背景以应用为准。
+
 ### 第一次可以这样用
 
 1. **先看数据。** 在 Mi Fitness 完成手环同步，再到 Caesar∞ 手动同步今日健康；检查首页健康卡的数据来源和最近同步时间。
