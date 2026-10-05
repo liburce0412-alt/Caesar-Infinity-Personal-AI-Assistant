@@ -23,6 +23,10 @@ jobs:
           packages: platform-tools
       - run: sdkmanager "ndk;28.2.13676358" "cmake;3.22.1"
       - uses: gradle/actions/setup-gradle@v6
+      - name: Configure isolated client fixtures
+        shell: bash
+        run: |
+          printf 'SUPABASE_URL=https://campusai-ci.invalid\nSUPABASE_ANON_KEY=ci-public-client-fixture\n' > .env
       - name: Create ephemeral debug signing key
         shell: bash
         run: |

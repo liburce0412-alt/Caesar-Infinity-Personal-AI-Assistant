@@ -16,7 +16,10 @@ KEEP = 3
 
 
 def request(url):
-    return urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Caesar-release-mirror", "Accept-Encoding": "identity"}), timeout=30)
+    headers = {"User-Agent": "Caesar-release-mirror", "Accept-Encoding": "identity"}
+    if url.startswith(f"https://api.github.com/repos/{REPO}/releases/assets/"):
+        headers["Accept"] = "application/octet-stream"
+    return urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=30)
 
 
 def get_json(url, maximum=32768):
@@ -49,7 +52,7 @@ def verified(path, manifest):
         return hashlib.file_digest(stream, "sha256").hexdigest() == manifest["sha256"]
 
 
-def publish(manifest, root=ROOT):
+def publish(manifest, root=ROOT, download_url=None):
     tag = "v" + manifest["versionName"]
     validate(manifest, tag)
     root.mkdir(parents=True, exist_ok=True)
@@ -68,7 +71,7 @@ def publish(manifest, root=ROOT):
     partial = folder / "download.part"
     if not verified(apk, manifest):
         try:
-            with request(manifest["githubUrl"]) as response, partial.open("wb") as output:
+            with request(download_url or manifest["githubUrl"]) as response, partial.open("wb") as output:
                 total = 0
                 while chunk := response.read(65536):
                     total += len(chunk)
@@ -119,9 +122,17 @@ def main():
     if not any(asset["name"] == "update.json" for asset in release.get("assets", [])):
         print("Release predates in-app updates; no descriptor yet")
         return
-    manifest = get_json(f"{GITHUB}/download/{tag}/update.json")
+    def asset_url(name):
+        asset = next(a for a in release["assets"] if a["name"] == name)
+        url = asset["url"]
+        if not re.fullmatch(rf"https://api\.github\.com/repos/{re.escape(REPO)}/releases/assets/\d+", url):
+            raise ValueError("Unexpected asset API URL")
+        return url
+    # The public asset API redirects straight to GitHub's CDN; github.com itself
+    # can time out from the mainland host even when API and CDN are reachable.
+    manifest = get_json(asset_url("update.json"))
     validate(manifest, tag)
-    publish(manifest)
+    publish(manifest, download_url=asset_url(f"caesar-{tag}.apk"))
 
 
 if __name__ == "__main__":
