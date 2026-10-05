@@ -27,7 +27,7 @@ data class AuthSignUpResult(
 )
 
 object SupabaseClient {
-    private val client = OkHttpClient.Builder()
+    private var client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
         .writeTimeout(45, TimeUnit.SECONDS)
@@ -47,8 +47,12 @@ object SupabaseClient {
         !supabaseAnonKey.contains("replace-with") &&
         !supabaseAnonKey.contains("your_anon")
 
+    @Volatile var ensureSession: (suspend () -> Boolean)? = null
+        internal set
+    @Volatile private var sessionGeneration = 0L
+
     fun installSession(accessToken: String) { userJwt = accessToken }
-    fun clearSession() { userJwt = "" }
+    fun clearSession() { sessionGeneration++; userJwt = "" }
 
     suspend fun restGet(
         table: String,
@@ -189,9 +193,7 @@ object SupabaseClient {
                     }
                     error(message)
                 }
-                parseSignUpResponse(raw, normalizedEmail).also { result ->
-                    result.session?.let { userJwt = it.accessToken }
-                }
+                parseSignUpResponse(raw, normalizedEmail)
             }
         }
     }
@@ -213,8 +215,7 @@ object SupabaseClient {
             client.newCall(request).execute().use { response ->
                 val raw = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
-                    val detail = runCatching { JSONObject(raw).optString("msg").ifBlank { JSONObject(raw).optString("error_description") } }.getOrDefault("")
-                    error(if (response.code == 400 || response.code == 401) "邮箱或密码不正确。" else detail.ifBlank { "登录服务暂时不可用（${response.code}）。" })
+                    throw authResponseError(grant, response.code, raw)
                 }
                 val json = JSONObject(raw)
                 AuthSession(
@@ -222,17 +223,22 @@ object SupabaseClient {
                     refreshToken = json.getString("refresh_token"),
                     email = json.optJSONObject("user")?.optString("email").orEmpty(),
                     userId = json.optJSONObject("user")?.optString("id").orEmpty(),
-                ).also { userJwt = it.accessToken }
+                )
             }
         }
     }
 
-    private fun authenticatedRequest(
+    private suspend fun authenticatedRequest(
         callTimeoutSeconds: Long? = null,
         sessionToken: String? = null,
         build: () -> Request,
     ): Result<String> {
         if (!isConfigured()) return Result.failure(IllegalStateException("Supabase 尚未配置。"))
+        val generation = sessionGeneration
+        if (ensureSession?.invoke() == false) return Result.failure(IllegalStateException(
+            if (userJwt.isBlank()) "登录已失效，请重新登录。" else "暂时无法续期登录，请检查网络后重试。",
+        ))
+        if (generation != sessionGeneration) return Result.failure(IllegalStateException("登录状态已变化，请重新同步。"))
         val token = sessionToken ?: userJwt
         if (sessionToken != null && sessionToken != userJwt) return Result.failure(IllegalStateException("登录状态已变化，请重新同步。"))
         if (token.isBlank()) return Result.failure(IllegalStateException("请先登录，再读取你的同步数据。"))
@@ -276,4 +282,24 @@ internal fun parseSignUpResponse(raw: String, fallbackEmail: String): AuthSignUp
         userId = userId,
     ) else null
     return AuthSignUpResult(session, email, userId)
+}
+
+internal class RefreshSessionRejectedException : IllegalStateException("登录已失效，请重新登录。")
+
+internal fun authResponseError(grant: String, status: Int, raw: String): Exception {
+    val json = runCatching { JSONObject(raw) }.getOrNull()
+    val code = json?.optString("error_code").orEmpty()
+    val detail = json?.optString("msg").orEmpty()
+        .ifBlank { json?.optString("error_description").orEmpty() }
+        .ifBlank { json?.optString("message").orEmpty() }
+    if (grant == "refresh_token") {
+        val rejected = status in listOf(400, 401, 403) && (
+            code in setOf("refresh_token_not_found", "refresh_token_already_used", "session_not_found", "session_expired", "user_not_found", "user_banned") ||
+                detail.contains("Invalid Refresh Token", ignoreCase = true) ||
+                detail.contains("Session expired", ignoreCase = true))
+        if (rejected) return RefreshSessionRejectedException()
+        return IllegalStateException("登录续期暂未完成（$status），请稍后重试。")
+    }
+    return IllegalStateException(if (status == 400 || status == 401) "邮箱或密码不正确。"
+        else detail.ifBlank { "登录服务暂时不可用（$status）。" })
 }

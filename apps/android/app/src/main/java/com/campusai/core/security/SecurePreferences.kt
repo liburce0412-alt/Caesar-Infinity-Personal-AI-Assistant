@@ -54,34 +54,29 @@ object SecurePreferences {
         }
     }
 
-    // Secret writes must report durable success before the UI claims the Key was saved.
+    // Prepare every encrypted value before one durable commit, so token pairs cannot tear.
+    fun encrypt(context: Context, key: String, plainText: String): Boolean =
+        encryptAll(context, mapOf(key to plainText))
+
     @SuppressLint("ApplySharedPref")
-    fun encrypt(context: Context, key: String, plainText: String): Boolean {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        if (plainText.isEmpty()) {
-            return prefs.edit().remove(key).remove("${key}_iv").commit()
-        }
+    fun encryptAll(context: Context, values: Map<String, String>): Boolean {
         return try {
-            val secretKey = getSecretKey()
-            if (secretKey != null) {
-                val cipher = Cipher.getInstance(TRANSFORMATION)
-                cipher.init(Cipher.ENCRYPT_MODE, secretKey)
-                val iv = cipher.iv
-                val encryptedBytes = cipher.doFinal(plainText.toByteArray(Charsets.UTF_8))
-                
-                val ivString = Base64.encodeToString(iv, Base64.NO_WRAP)
-                val encryptedString = Base64.encodeToString(encryptedBytes, Base64.NO_WRAP)
-                
-                prefs.edit()
-                    .putString("${key}_iv", ivString)
-                    .putString(key, encryptedString)
-                    .commit()
-            } else {
-                Log.e("SecurePrefs", "Android KeyStore unavailable; refusing to persist secret")
-                false
+            val secretKey = if (values.values.any { it.isNotEmpty() }) getSecretKey() ?: return false else null
+            val editor = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+            values.forEach { (key, plainText) ->
+                if (plainText.isEmpty()) {
+                    editor.remove(key).remove("${key}_iv")
+                } else {
+                    val cipher = Cipher.getInstance(TRANSFORMATION)
+                    cipher.init(Cipher.ENCRYPT_MODE, secretKey)
+                    val encrypted = cipher.doFinal(plainText.toByteArray(Charsets.UTF_8))
+                    editor.putString("${key}_iv", Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
+                        .putString(key, Base64.encodeToString(encrypted, Base64.NO_WRAP))
+                }
             }
+            editor.commit()
         } catch (e: Exception) {
-            Log.e("SecurePrefs", "Encryption failed for $key; secret was not persisted", e)
+            Log.e("SecurePrefs", "Encryption failed; secret batch was not persisted", e)
             false
         }
     }

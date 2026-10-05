@@ -274,7 +274,7 @@ fun CampusApp(
             localModelManager.close()
         }
     }
-    val authRepository = remember { AuthRepository(context.applicationContext) }
+    val authRepository = remember { AuthRepository.getInstance(context.applicationContext) }
     val authState by authRepository.state.collectAsState()
     val loadedPreferences by preferencesRepository.preferences.collectAsState(initial = null)
     val preferences = loadedPreferences ?: UserPreferences()
@@ -435,16 +435,16 @@ fun CampusApp(
         }
     }
 
-    LaunchedEffect(authState.signedIn) {
+    LaunchedEffect(authState.requiresSignIn) {
+        if (authState.requiresSignIn) navigateTo(AppSurface.Login(appSurface.returnDestination))
+    }
+
+    LaunchedEffect(lifecycleOwner, authState.signedIn) {
         if (authState.signedIn) {
-            while (true) {
-                delay(45 * 60 * 1_000L)
-                if (authRepository.refresh()) {
-                    val refreshed = authRepository.state.value
-                    profileRepository.load(
-                        userId = refreshed.userId,
-                        fallbackName = refreshed.email.substringBefore('@').ifBlank { "Caesar 用户" },
-                    )
+            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (true) {
+                    authRepository.refresh()
+                    delay(30_000L)
                 }
             }
         }

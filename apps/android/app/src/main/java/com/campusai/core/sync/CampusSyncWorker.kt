@@ -27,9 +27,9 @@ class CampusSyncWorker(appContext: Context, params: WorkerParameters) : Coroutin
 
     override suspend fun doWork(): Result {
         if (!SupabaseClient.isConfigured()) return Result.success()
-        val auth = AuthRepository(applicationContext)
+        val auth = AuthRepository.getInstance(applicationContext)
         if (!auth.state.value.signedIn) return Result.success()
-        auth.refresh()
+        if (!auth.refresh()) return if (auth.state.value.signedIn) Result.retry() else Result.success()
         val userId = auth.state.value.userId
         if (userId.isBlank()) return Result.success()
 
