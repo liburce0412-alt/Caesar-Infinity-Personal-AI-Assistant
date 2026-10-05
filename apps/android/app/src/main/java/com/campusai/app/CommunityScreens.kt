@@ -142,6 +142,9 @@ fun CampusScreen(
     var reportingPost by remember { mutableStateOf<CommunityPost?>(null) }
     var editingPost by remember { mutableStateOf<CommunityPost?>(null) }
     var managingPost by remember { mutableStateOf<CommunityPost?>(null) }
+    LaunchedEffect(signedIn, userId) {
+        if (signedIn) viewModel.refreshPostsOnEntry()
+    }
     SpectraPageScaffold(mood = PageMood.SOCIAL) {
         Box(Modifier.fillMaxSize()) {
             LazyColumn(
@@ -488,10 +491,8 @@ fun MarketScreen(
         is UiState.Offline -> listings.value
         else -> emptyList()
     }
-    LaunchedEffect(signedIn, state.listingsRefreshing, state.listingsHasSynced, state.listingsSyncError) {
-        if (signedIn && !state.listingsRefreshing && !state.listingsHasSynced && state.listingsSyncError == null) {
-            viewModel.refreshListings()
-        }
+    LaunchedEffect(signedIn, userId) {
+        if (signedIn) viewModel.refreshListingsOnEntry()
     }
     SpectraPageScaffold(mood = PageMood.COMMERCE) {
         Box(Modifier.fillMaxSize()) {
@@ -547,7 +548,7 @@ fun MarketScreen(
                     }
                 }
                 is UiState.Error -> item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) { RemoteError(listings.message, signedIn, onLogin, viewModel::refreshListings, PageMood.COMMERCE) }
-                is UiState.Data -> items(listings.value, key = { it.id }, span = { androidx.compose.foundation.lazy.grid.GridItemSpan(if (it.mediaUrl.isBlank()) maxLineSpan else 1) }) { listing -> ListingCardView(listing) { selected = listing; viewModel.openWishComments(listing.id) } }
+                is UiState.Data -> items(listings.value, key = { it.id }, span = { androidx.compose.foundation.lazy.grid.GridItemSpan(if (it.mediaUrl.isBlank() && it.mediaPaths.isEmpty()) maxLineSpan else 1) }) { listing -> ListingCardView(listing) { selected = listing; viewModel.openWishComments(listing.id) } }
                 is UiState.Offline -> {
                     item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                         SpectraStatePane(
@@ -559,7 +560,7 @@ fun MarketScreen(
                             onAction = viewModel::refreshListings,
                         )
                     }
-                    items(listings.value, key = { it.id }, span = { androidx.compose.foundation.lazy.grid.GridItemSpan(if (it.mediaUrl.isBlank()) maxLineSpan else 1) }) { listing -> ListingCardView(listing) { selected = listing; viewModel.openWishComments(listing.id) } }
+                    items(listings.value, key = { it.id }, span = { androidx.compose.foundation.lazy.grid.GridItemSpan(if (it.mediaUrl.isBlank() && it.mediaPaths.isEmpty()) maxLineSpan else 1) }) { listing -> ListingCardView(listing) { selected = listing; viewModel.openWishComments(listing.id) } }
                 }
             }
             }
@@ -623,7 +624,7 @@ fun MarketScreen(
 
 @Composable
 internal fun ListingCardView(listing: MarketplaceListing, onClick: () -> Unit) {
-    val hasImage = listing.mediaUrl.isNotBlank()
+    val hasImage = listing.mediaUrl.isNotBlank() || listing.mediaPaths.isNotEmpty()
     GlassPanel(Modifier.fillMaxWidth(), onClick = onClick) {
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))) {
             if (hasImage) CommunityCardImage(listing.mediaUrl, "心愿图片", 4f / 3f)

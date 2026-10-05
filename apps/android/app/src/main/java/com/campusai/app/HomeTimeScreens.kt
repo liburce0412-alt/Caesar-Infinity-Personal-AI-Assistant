@@ -1028,6 +1028,7 @@ fun TimeScreen(
     var editing by remember(importOwner) { mutableStateOf<TimeRecord?>(null) }
     var recordSaving by remember(importOwner, showAdd, editing?.id) { mutableStateOf(false) }
     var recordSaveError by remember(importOwner, showAdd, editing?.id) { mutableStateOf<String?>(null) }
+    var editingCourse by remember(importOwner) { mutableStateOf<com.campusai.core.model.CourseSchedule?>(null) }
     var showImport by rememberSaveable { mutableStateOf(false) }
     var importDrafts by remember { mutableStateOf<List<CourseDraft>?>(null) }
     var importError by remember { mutableStateOf<String?>(null) }
@@ -1158,7 +1159,7 @@ fun TimeScreen(
                 item { CollapsibleComponent(OptionalComponent.TIMETABLE, true, onExpandTimetable) {} }
             } else if (courses.isNotEmpty()) {
                 item {
-                    CourseTimetable(courses = courses, onRemove = { viewModel.deleteCourse(it.id) }, onImport = { showImport = true })
+                    CourseTimetable(courses = courses, onRemove = { viewModel.deleteCourse(it.id) }, onEdit = { editingCourse = it }, onImport = { showImport = true })
                 }
             } else if (timetableExpanded) {
                 item {
@@ -1236,6 +1237,12 @@ fun TimeScreen(
         }
 
         }
+    }
+    editingCourse?.let { course ->
+        CourseEditDialog(course, onDismiss = { editingCourse = null }, onSave = { updated ->
+            viewModel.editCourse(updated, expectedOwner = importOwner)
+            editingCourse = null
+        })
     }
     fun saveRecord(record: TimeRecord?, title: String, category: String, minutes: Long, note: String) {
         if (recordSaving) return

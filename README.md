@@ -20,7 +20,9 @@
   <a href="docs/local-ai-architecture.md">架构文档</a>
 </p>
 
-**最新正式版：[v2.1.0 · 下载 APK 与更新说明](https://github.com/liburce0412-alt/Caesar-Infinity-Personal-AI-Assistant/releases/tag/v2.1.0)**
+**最新正式版：[v2.1.1 · 下载 APK 与更新说明](https://github.com/liburce0412-alt/Caesar-Infinity-Personal-AI-Assistant/releases/tag/v2.1.1)**
+
+新增应用内更新弹窗与服务器 / GitHub 双下载源；心愿墙、树洞进入时自动刷新；成就扩展至 16 项独立图标；课程支持导入后编辑教室、教师、时间等内容。见[应用更新与发布说明](docs/app-updates.md)。
 
 ## 先看使用场景
 

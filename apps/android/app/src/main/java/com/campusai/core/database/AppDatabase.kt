@@ -352,6 +352,18 @@ interface CampusDao {
     suspend fun courseById(id: Int): CourseScheduleEntity?
 
     @Transaction
+    suspend fun editOwnedCourse(course: CourseSchedule, expectedOwner: String): Boolean {
+        val existing = courseById(course.id) ?: return false
+        if (existing.deletedAt != null || existing.userId !in setOf(expectedOwner, "local_user")) return false
+        updateCourseSchedule(existing.copy(name = course.name, weekday = course.weekday,
+            startMinute = course.startMinute, endMinute = course.endMinute, location = course.location,
+            teacher = course.teacher, weeks = course.weeks, periodStart = course.periodStart,
+            periodEnd = course.periodEnd, periodStartTimes = course.periodStartTimes,
+            version = existing.version + 1, updatedAt = System.currentTimeMillis(), syncState = "pending"))
+        return true
+    }
+
+    @Transaction
     suspend fun importCourseSchedules(entities: List<CourseScheduleEntity>): List<Long> = entities.map { incoming ->
         val previous = getCourseBySourceHash(incoming.sourceHash, incoming.userId)
         if (previous?.deletedAt != null) {

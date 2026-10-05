@@ -59,6 +59,7 @@ data class MarketplaceListing(
     val completedAt: String = "",
     val completionNote: String = "",
     val completionMediaUrl: String = "",
+    val completionMediaPath: String = "",
 )
 
 data class ConversationSummary(
@@ -258,7 +259,7 @@ open class CampusRepository {
                     "limit" to "50",
                 ) + scopeFilters,
                 callTimeoutSeconds = 20,
-            ).mapCatching { rows -> List(rows.length()) { index -> parseListing(rows.getJSONObject(index)) } }
+            ).mapCatching { rows -> List(rows.length()) { index -> parseListing(rows.getJSONObject(index), resolveMedia = false) } }
         }
         val published = SupabaseClient.restGet(
             table = "listings",
@@ -271,7 +272,7 @@ open class CampusRepository {
                 "limit" to "50",
             ),
             callTimeoutSeconds = 20,
-        ).mapCatching { rows -> List(rows.length()) { index -> parseListing(rows.getJSONObject(index)) } }
+        ).mapCatching { rows -> List(rows.length()) { index -> parseListing(rows.getJSONObject(index), resolveMedia = false) } }
             .getOrElse { return Result.failure(it) }
         if (userId.isBlank()) return Result.success(published)
 
@@ -287,7 +288,7 @@ open class CampusRepository {
                 "limit" to "50",
             ),
             callTimeoutSeconds = 20,
-        ).mapCatching { rows -> List(rows.length()) { index -> parseListing(rows.getJSONObject(index)) } }
+        ).mapCatching { rows -> List(rows.length()) { index -> parseListing(rows.getJSONObject(index), resolveMedia = false) } }
             .getOrElse { return Result.failure(it) }
         return Result.success((owned + published).distinctBy(MarketplaceListing::id).sortedByDescending(MarketplaceListing::createdAt))
     }
@@ -488,7 +489,14 @@ open class CampusRepository {
         createdAt = item.optString("created_at"),
     )
 
-    private suspend fun parseListing(item: JSONObject): MarketplaceListing {
+    suspend fun resolveListingMedia(listing: MarketplaceListing): MarketplaceListing = listing.copy(
+        mediaUrl = listing.mediaPaths.firstOrNull()?.takeIf { it.isNotBlank() }
+            ?.let { communityMediaUrl("listing", it, listing.isPublic) }.orEmpty(),
+        completionMediaUrl = listing.completionMediaPath.takeIf { it.isNotBlank() }
+            ?.let { communityMediaUrl("listing", it, listing.isPublic) }.orEmpty(),
+    )
+
+    private suspend fun parseListing(item: JSONObject, resolveMedia: Boolean = true): MarketplaceListing {
         val media = item.optJSONArray("media_paths") ?: JSONArray()
         return MarketplaceListing(
             id = item.optString("id"),
@@ -502,10 +510,11 @@ open class CampusRepository {
             targetDate = item.nullableString("target_date"),
             completedAt = item.nullableString("completed_at"),
             completionNote = item.nullableString("completion_note"),
+            completionMediaPath = item.optJSONArray("completion_media_paths")?.optString(0).orEmpty(),
             completionMediaUrl = item.optJSONArray("completion_media_paths")?.optString(0)?.takeIf { it.isNotBlank() }
-                ?.let { communityMediaUrl("listing", it, item.optBoolean("is_public")) }.orEmpty(),
+                ?.takeIf { resolveMedia }?.let { communityMediaUrl("listing", it, item.optBoolean("is_public")) }.orEmpty(),
             location = item.optString("location"),
-            mediaUrl = media.optString(0).takeIf { it.isNotBlank() }?.let { communityMediaUrl("listing", it, item.optBoolean("is_public")) }.orEmpty(),
+            mediaUrl = media.optString(0).takeIf { it.isNotBlank() }?.takeIf { resolveMedia }?.let { communityMediaUrl("listing", it, item.optBoolean("is_public")) }.orEmpty(),
             status = item.optString("status"),
             moderationStatus = item.optString("moderation_status"),
             createdAt = item.optString("created_at"),

@@ -145,8 +145,11 @@ data class AppUpdate(
     val versionName: String,
     val updateLog: String,
     val apkUrl: String,
-    val isForceUpdate: Boolean,
-    val isGrayUpdate: Boolean = false
+    val isForceUpdate: Boolean = false,
+    val isGrayUpdate: Boolean = false,
+    val sha256: String = "",
+    val sizeBytes: Long = 0,
+    val githubUrl: String = "",
 ) : Serializable
 
 data class CourseSchedule(

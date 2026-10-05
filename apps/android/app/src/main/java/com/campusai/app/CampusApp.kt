@@ -381,6 +381,16 @@ fun CampusApp(
         onAutomationConversationConsumed()
     }
 
+    LaunchedEffect(lifecycleOwner, authState.signedIn, authState.userId) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            if (authState.signedIn) {
+                campusViewModel.refreshListingsOnEntry()
+                campusViewModel.refreshPostsOnEntry()
+            }
+            kotlinx.coroutines.awaitCancellation()
+        }
+    }
+
     LaunchedEffect(foregroundHealthRuntime, lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (isActive) {
@@ -763,6 +773,7 @@ fun CampusApp(
                     )
                 }
             }
+            AppUpdateHost(enabled = appSurface is AppSurface.Main && loadedPreferences?.onboardingCompleted == true)
             if (loadedPreferences?.onboardingCompleted == false) {
                 WelcomeGuide { appScope.launch { preferencesRepository.completeOnboarding() } }
             }

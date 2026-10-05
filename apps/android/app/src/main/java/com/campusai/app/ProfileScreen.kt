@@ -280,6 +280,11 @@ fun ProfileScreen(
                     DividerInset()
                     SettingLink(Icons.Rounded.Palette, "外观与体验", environmentLabel(preferences.environment)) { sheet = ProfileSheet.APPEARANCE }
                     DividerInset()
+                    val updateContext = LocalContext.current
+                    SettingLink(Icons.Rounded.Download, "应用更新", "当前版本 ${com.campusai.BuildConfig.VERSION_NAME}") {
+                        com.campusai.core.update.AppUpdateManager.get(updateContext).open()
+                    }
+                    DividerInset()
                     SettingLink(Icons.Rounded.Forum, if (unreadMessages > 0) "消息 · $unreadMessages 条未读" else "消息", onClick = if (authState.signedIn) onOpenMessages else onLogin)
                     DividerInset()
                     if (authState.signedIn) SettingLink(
@@ -809,52 +814,17 @@ private fun formatContributionDuration(minutes: Long): String = when {
     else -> "${minutes / 60L} 小时 ${minutes % 60L} 分钟"
 }
 
-private data class AchievementUi(val name: String, val description: String, val progress: Int, val target: Int, val colors: List<Color>) { val unlocked get() = progress >= target }
-
-private fun buildAchievements(records: List<TimeRecord>, remoteStreak: Int): List<AchievementUi> {
-    val totalMinutes = records.sumOf { it.durationMinutes }.toInt()
-    val focusCount = records.count { it.category.contains("专注") || it.durationMinutes >= 25 }
-    val categories = records.map { it.category }.filter { it.isNotBlank() }.distinct().size
-    val streak = maxOf(remoteStreak, currentStreak(records))
-    return listOf(
-        AchievementUi("第一束光", "完成第一条时间记录", records.size, 1, listOf(SpectraColors.Cyan, SpectraColors.Focus)),
-        AchievementUi("专注起航", "完成一次 25 分钟专注", focusCount, 1, listOf(SpectraColors.Focus, SpectraColors.Violet)),
-        AchievementUi("稳定节奏", "连续记录 7 天", streak, 7, listOf(SpectraColors.Warm, SpectraColors.Rose)),
-        AchievementUi("深度轨道", "累计投入 10 小时", totalMinutes, 600, listOf(SpectraColors.Violet, SpectraColors.Rose)),
-        AchievementUi("时间建筑师", "完成 25 条记录", records.size, 25, listOf(SpectraColors.Cyan, SpectraColors.Warm)),
-        AchievementUi("完整光谱", "覆盖 5 个学习分类", categories, 5, listOf(SpectraColors.Cyan, SpectraColors.Violet, SpectraColors.Warm)),
-        AchievementUi("百小时节点", "累计投入 100 小时", totalMinutes, 6000, listOf(SpectraColors.Warm, SpectraColors.Violet)),
-    )
-}
-
 private fun currentStreak(records: List<TimeRecord>): Int = com.campusai.core.model.TimeRecordCalendar.streak(records)
 
 @Composable
 private fun AchievementCard(item: AchievementUi, modifier: Modifier = Modifier.width(150.dp)) {
     GlassPanel(modifier.heightIn(min = 148.dp), radius = 16) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            OpticalBadge(item.colors, item.unlocked, item.progress.toFloat() / item.target.coerceAtLeast(1), Modifier.size(48.dp))
+            AchievementBadge(item, Modifier.size(48.dp))
             Column {
                 Text(item.name, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface.copy(if (item.unlocked) 1f else .55f))
                 Text(if (item.unlocked) "已解锁" else "${item.progress.coerceAtMost(item.target)}/${item.target} · ${item.description}", maxLines = 2, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(.56f))
             }
-        }
-    }
-}
-
-@Composable
-private fun OpticalBadge(colors: List<Color>, unlocked: Boolean, progress: Float, modifier: Modifier = Modifier) {
-    Canvas(modifier) {
-        val c = center
-        val r = size.minDimension * .34f
-        val alpha = if (unlocked) 1f else .28f
-        drawArc(Brush.sweepGradient(colors.map { it.copy(alpha) }), 48f, 264f, false, topLeft = androidx.compose.ui.geometry.Offset(c.x - r, c.y - r), size = androidx.compose.ui.geometry.Size(r * 2, r * 2), style = Stroke(size.minDimension * .11f, cap = StrokeCap.Round))
-        val nodes = listOf(310f, 238f, 166f, 94f, 22f)
-        nodes.forEachIndexed { index, degrees ->
-            val rad = Math.toRadians(degrees.toDouble())
-            val x = c.x + kotlin.math.cos(rad).toFloat() * r
-            val y = c.y + kotlin.math.sin(rad).toFloat() * r
-            drawCircle(colors[index % colors.size].copy(if (progress * 5f >= index + 1) alpha else .16f), size.minDimension * .07f, androidx.compose.ui.geometry.Offset(x, y))
         }
     }
 }

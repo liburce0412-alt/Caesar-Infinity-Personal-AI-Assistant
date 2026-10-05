@@ -30,6 +30,26 @@ class SyncIntegrityTest {
         return row.copy(id = dao.insertTimeRecord(row).toInt())
     }
 
+    @Test fun `course editing preserves identity and rejects other owners and deleted rows`() = runBlocking {
+        val original = course("alice").copy(remoteId = "remote-course", version = 4, syncState = "synced")
+        val id = dao.insertCourseSchedules(listOf(original)).single().toInt()
+        val edit = original.toDomain().copy(id = id, name = "Java 程序设计", location = "三教 3206", teacher = "张老师",
+            weekday = 4, weeks = "第5周", periodStart = 1, periodEnd = 2)
+        assertFalse(dao.editOwnedCourse(edit, "bob"))
+        assertTrue(dao.editOwnedCourse(edit, "alice"))
+        val saved = dao.courseById(id)!!
+        assertEquals(edit, saved.toDomain())
+        assertEquals(original.clientId, saved.clientId)
+        assertEquals(original.remoteId, saved.remoteId)
+        assertEquals(original.sourceHash, saved.sourceHash)
+        assertEquals(5, saved.version)
+        assertEquals("pending", saved.syncState)
+        dao.acknowledgeCourse(original.copy(id = id), original.copy(id = id, syncState = "synced"))
+        assertEquals("三教 3206", dao.courseById(id)!!.location)
+        dao.softDeleteCourseSchedule(id)
+        assertFalse(dao.editOwnedCourse(edit, "alice"))
+    }
+
     @Test fun `same course hash belongs independently to two accounts`() = runBlocking {
         val alice = course("alice").copy(syncState = "synced")
         dao.insertCourseSchedules(listOf(alice, course("bob")))

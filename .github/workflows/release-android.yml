@@ -135,6 +135,10 @@ jobs:
         run: |
           mkdir -p dist
           cp apps/android/app/build/outputs/apk/release/app-release.apk "dist/caesar-${RELEASE_TAG}.apk"
+          python3 scripts/create-update-manifest.py \
+            --apk "dist/caesar-${RELEASE_TAG}.apk" \
+            --metadata apps/android/app/build/outputs/apk/release/output-metadata.json \
+            --tag "$RELEASE_TAG" --notes "docs/releases/${RELEASE_TAG}.md" --out dist/update.json
           cd dist
           sha256sum ./*.apk > SHA256SUMS.txt
 
@@ -148,6 +152,7 @@ jobs:
           files: |
             dist/*.apk
             dist/SHA256SUMS.txt
+            dist/update.json
 
       - name: Remove restored client configuration
         if: always()

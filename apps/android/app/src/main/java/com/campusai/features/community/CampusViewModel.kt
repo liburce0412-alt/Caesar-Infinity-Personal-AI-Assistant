@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
 data class CampusRemoteState(
     val postsScope: CommunityFeedScope = CommunityFeedScope.MINE,
@@ -51,7 +53,10 @@ class CampusViewModel(private val repository: CampusRepository = CampusRepositor
     private var currentUserId: String = ""
     private val likingPostIds = mutableSetOf<String>()
     private var listingsJob: Job? = null
+    private var listingMediaJob: Job? = null
+    private var lastListingRefresh = Long.MIN_VALUE
     private var postsJob: Job? = null
+    private var lastPostRefresh = Long.MIN_VALUE
     private var wishCommentsJob: Job? = null
 
     fun setSession(signedIn: Boolean, userId: String) {
@@ -61,6 +66,8 @@ class CampusViewModel(private val repository: CampusRepository = CampusRepositor
         fetchedMessageIds = emptySet()
         listingsJob?.cancel()
         listingsJob = null
+        lastListingRefresh = Long.MIN_VALUE
+        lastPostRefresh = Long.MIN_VALUE
         wishCommentsJob?.cancel()
         currentUserId = if (signedIn) userId else ""
         if (!signedIn) {
@@ -107,18 +114,35 @@ class CampusViewModel(private val repository: CampusRepository = CampusRepositor
         refreshListings()
     }
 
+    fun refreshPostsOnEntry() {
+        if (currentUserId.isBlank() || postsJob?.isActive == true) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (lastPostRefresh != Long.MIN_VALUE && now - lastPostRefresh < 5_000) return
+        refreshPosts()
+    }
+
     fun refreshPosts(): Job {
         postsJob?.cancel()
+        lastPostRefresh = android.os.SystemClock.elapsedRealtime()
         val scope = _state.value.postsScope
         return sessionScope.launch {
-            _state.update { it.copy(posts = UiState.Loading) }
+            _state.update { it.copy(posts = keepVisibleListDuringRefresh(it.posts)) }
             val next = loadListUiState("树洞动态读取失败。") { repository.loadPosts(currentUserId, scope) }
-            if (isActive && _state.value.postsScope == scope) _state.update { it.copy(posts = next) }
+            if (isActive && _state.value.postsScope == scope) _state.update { it.copy(posts = settleVisibleListAfterRefresh(it.posts, next)) }
         }.also { postsJob = it }
+    }
+
+    fun refreshListingsOnEntry() {
+        if (currentUserId.isBlank() || listingsJob?.isActive == true) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (lastListingRefresh != Long.MIN_VALUE && now - lastListingRefresh < 5_000) return
+        refreshListings()
     }
 
     fun refreshListings(): Job {
         listingsJob?.cancel()
+        listingMediaJob?.cancel()
+        lastListingRefresh = android.os.SystemClock.elapsedRealtime()
         val scope = _state.value.listingsScope
         return sessionScope.launch {
             _state.update { current ->
@@ -137,6 +161,22 @@ class CampusViewModel(private val repository: CampusRepository = CampusRepositor
                     listingsHasSynced = current.listingsHasSynced || next !is UiState.Error,
                     listingsSyncError = (next as? UiState.Error)?.message,
                 )
+            }
+            if (next is UiState.Data) listingMediaJob = sessionScope.launch {
+                val permits = Semaphore(4)
+                next.value.filter { it.mediaPaths.isNotEmpty() || it.completionMediaPath.isNotBlank() }.forEach { listing ->
+                    launch {
+                        val resolved = try { permits.withPermit { repository.resolveListingMedia(listing) } }
+                            catch (cancelled: CancellationException) { throw cancelled }
+                            catch (_: Exception) { return@launch }
+                        if (isActive && _state.value.listingsScope == scope) _state.update { current ->
+                            val visible = current.listings
+                            if (visible is UiState.Data) current.copy(listings = UiState.Data(visible.value.map {
+                                if (it.id == resolved.id) resolved else it
+                            })) else current
+                        }
+                    }
+                }
             }
         }.also { listingsJob = it }
     }

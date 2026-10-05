@@ -41,7 +41,7 @@ private fun weekdayLabel(day: Int) = "周${"一二三四五六日"[day - 1]}"
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
-internal fun CourseTimetable(courses: List<CourseSchedule>, onRemove: ((CourseSchedule) -> Unit)? = null, onImport: () -> Unit) {
+internal fun CourseTimetable(courses: List<CourseSchedule>, onRemove: ((CourseSchedule) -> Unit)? = null, onEdit: ((CourseSchedule) -> Unit)? = null, onImport: () -> Unit) {
     val largeText = LocalDensity.current.fontScale > 1.4f
     var view by rememberSaveable { mutableIntStateOf(if (largeText) 1 else 0) }
     var showWeekend by rememberSaveable { mutableStateOf(false) }
@@ -49,10 +49,10 @@ internal fun CourseTimetable(courses: List<CourseSchedule>, onRemove: ((CourseSc
     var overlapSelection by remember { mutableStateOf<List<CourseSchedule>?>(null) }
     var day by rememberSaveable { mutableIntStateOf(LocalDate.now().dayOfWeek.value) }
     var selected by remember { mutableStateOf<CourseSchedule?>(null) }
-    val sourceWeeks = remember(courses) { courses.map { it.weeks }.filter { it.endsWith("（截图）") }.distinct().sortedBy { Regex("\\d+").find(it)?.value?.toIntOrNull() ?: 0 } }
+    val sourceWeeks = remember(courses) { courses.map { it.weeks }.filter { it.isNotBlank() }.distinct().sortedBy { Regex("\\d+").find(it)?.value?.toIntOrNull() ?: 0 } }
     var selectedWeek by rememberSaveable { mutableStateOf("") }
     val currentWeek = selectedWeek.takeIf { it in sourceWeeks || it == "全部" }
-        ?: courses.filter { it.weeks in sourceWeeks }.maxByOrNull { it.id }?.weeks.orEmpty()
+        ?: courses.filter { it.weeks.endsWith("（截图）") }.maxByOrNull { it.id }?.weeks ?: "全部"
     val shownCourses = if (currentWeek.isBlank() || currentWeek == "全部") courses else courses.filter { it.weeks == currentWeek }
     val validCourses = remember(shownCourses) {
         shownCourses.filter { it.weekday in 1..7 && (it.hasPeriods() || (it.startMinute in 0..1439 && it.endMinute in 1..1440 && it.endMinute > it.startMinute)) }
@@ -166,6 +166,7 @@ internal fun CourseTimetable(courses: List<CourseSchedule>, onRemove: ((CourseSc
                 if (course.hasTimeOverlap(validCourses)) Text("与同一天的其他课程时间重叠，请确认是否属于不同教学周。", color = MaterialTheme.colorScheme.error)
                 FlowRow(Modifier.align(Alignment.End), horizontalArrangement = Arrangement.End,
                     maxItemsInEachRow = if (largeText) 1 else 2) {
+                    if (onEdit != null) TextButton(onClick = { selected = null; onEdit(course) }) { Text("编辑课程") }
                     if (onRemove != null) TextButton(onClick = {
                         if (confirmRemoval) { onRemove(course); selected = null } else confirmRemoval = true
                     }) { Text(if (confirmRemoval) "确认删除课程" else "删除课程", color = MaterialTheme.colorScheme.error) }

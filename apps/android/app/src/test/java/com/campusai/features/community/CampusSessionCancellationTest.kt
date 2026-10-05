@@ -14,6 +14,26 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class CampusSessionCancellationTest {
+    @Test fun `entering page coalesces startup request and signed out entry never fetches`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val vm = CampusViewModel()
+            val field = CampusViewModel::class.java.getDeclaredField("listingsJob").apply { isAccessible = true }
+            vm.refreshListingsOnEntry()
+            assertNull(field.get(vm))
+            vm.setSession(true, "alice")
+            val startup = field.get(vm) as kotlinx.coroutines.Job
+            repeat(3) { vm.refreshListingsOnEntry() }
+            assertSame(startup, field.get(vm))
+            assertFalse(startup.isCancelled)
+            vm.setSession(false, "")
+            advanceUntilIdle()
+            assertTrue(startup.isCancelled)
+            vm.refreshListingsOnEntry()
+            assertNull(field.get(vm))
+        } finally { Dispatchers.resetMain() }
+    }
+
     @Test fun `signout cancels queued edits and reads before they touch the next session`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {

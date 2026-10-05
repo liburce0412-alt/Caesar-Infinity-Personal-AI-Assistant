@@ -152,6 +152,13 @@ class TimeViewModel(private val dao: CampusDao, private val appContext: Context,
         }
     }
 
+    suspend fun editCourse(course: CourseSchedule, expectedOwner: String) {
+        check(expectedOwner == activeUser.value) { "账号已切换，请重新打开课程" }
+        com.campusai.features.schedule.validateCourseEdit(course)
+        check(dao.editOwnedCourse(course, expectedOwner)) { "课程已不可用，请重新打开后再试" }
+        runCatching { CampusSyncScheduler.enqueue(appContext) }
+    }
+
     suspend fun importCourses(courses: List<CourseSchedule>, expectedOwner: String): CourseImportResult {
         check(expectedOwner == activeUser.value) { "账号已切换，请重新导入课程表" }
         val results = dao.importCourseSchedules(courses.map { CourseScheduleEntity.fromDomain(it, expectedOwner) })
