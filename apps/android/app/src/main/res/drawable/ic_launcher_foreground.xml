@@ -1,11 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
+        <inset android:inset="18%">
         <bitmap
             android:antialias="true"
             android:dither="true"
             android:filter="true"
             android:gravity="fill"
-            android:src="@drawable/campusai_infinity_icon" />
+            android:src="@drawable/caesar_brand_pearl" />
+        </inset>
     </item>
 </layer-list>

@@ -41,7 +41,8 @@ private fun weekdayLabel(day: Int) = "周${"一二三四五六日"[day - 1]}"
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
-internal fun CourseTimetable(courses: List<CourseSchedule>, onRemove: ((CourseSchedule) -> Unit)? = null, onEdit: ((CourseSchedule) -> Unit)? = null, onImport: () -> Unit) {
+internal fun CourseTimetable(courses: List<CourseSchedule>, onRemove: ((CourseSchedule) -> Unit)? = null, onEdit: ((CourseSchedule) -> Unit)? = null,
+    semesterMonday: String = "", semesterWeeks: Int = 20, onReminderSettings: (() -> Unit)? = null, initialCourseId: Int? = null, onCourseConsumed: () -> Unit = {}, onImport: () -> Unit) {
     val largeText = LocalDensity.current.fontScale > 1.4f
     var view by rememberSaveable { mutableIntStateOf(if (largeText) 1 else 0) }
     var showWeekend by rememberSaveable { mutableStateOf(false) }
@@ -49,11 +50,24 @@ internal fun CourseTimetable(courses: List<CourseSchedule>, onRemove: ((CourseSc
     var overlapSelection by remember { mutableStateOf<List<CourseSchedule>?>(null) }
     var day by rememberSaveable { mutableIntStateOf(LocalDate.now().dayOfWeek.value) }
     var selected by remember { mutableStateOf<CourseSchedule?>(null) }
-    val sourceWeeks = remember(courses) { courses.map { it.weeks }.filter { it.isNotBlank() }.distinct().sortedBy { Regex("\\d+").find(it)?.value?.toIntOrNull() ?: 0 } }
+    LaunchedEffect(initialCourseId, courses) {
+        if (initialCourseId != null && initialCourseId >= 0) {
+            courses.firstOrNull { it.id == initialCourseId }?.let { selected = it; onCourseConsumed() }
+        }
+    }
+    val semesterStart = remember(semesterMonday) { runCatching { LocalDate.parse(semesterMonday) }.getOrNull()?.takeIf { it.dayOfWeek == java.time.DayOfWeek.MONDAY } }
+    val sourceWeeks = remember(courses, semesterStart, semesterWeeks) {
+        if (semesterStart != null) (1..semesterWeeks).map { "第${it}周" }
+        else courses.map { it.weeks }.filter { it.isNotBlank() }.distinct().sortedBy { Regex("\\d+").find(it)?.value?.toIntOrNull() ?: 0 }
+    }
     var selectedWeek by rememberSaveable { mutableStateOf("") }
+    val todayWeek = semesterStart?.let { (java.time.temporal.ChronoUnit.DAYS.between(it, LocalDate.now()) / 7 + 1).toInt() }
     val currentWeek = selectedWeek.takeIf { it in sourceWeeks || it == "全部" }
+        ?: todayWeek?.takeIf { it in 1..semesterWeeks }?.let { "第${it}周" }
         ?: courses.filter { it.weeks.endsWith("（截图）") }.maxByOrNull { it.id }?.weeks ?: "全部"
-    val shownCourses = if (currentWeek.isBlank() || currentWeek == "全部") courses else courses.filter { it.weeks == currentWeek }
+    val weekMonday = com.campusai.features.schedule.timetableWeekMonday(semesterMonday, currentWeek)
+    val shownCourses = if (weekMonday != null) com.campusai.features.schedule.coursesForTeachingWeek(courses, semesterStart!!, weekMonday, semesterWeeks)
+        else if (currentWeek.isBlank() || currentWeek == "全部") courses else courses.filter { it.weeks == currentWeek }
     val validCourses = remember(shownCourses) {
         shownCourses.filter { it.weekday in 1..7 && (it.hasPeriods() || (it.startMinute in 0..1439 && it.endMinute in 1..1440 && it.endMinute > it.startMinute)) }
     }
@@ -66,13 +80,31 @@ internal fun CourseTimetable(courses: List<CourseSchedule>, onRemove: ((CourseSc
                 }
                 TextButton(onClick = onImport) { Text(if (largeText) "导入" else "添加 / 导入") }
             }
-            if (sourceWeeks.isNotEmpty()) {
+            if (semesterStart != null) {
+                var weekMenu by remember { mutableStateOf(false) }
+                val index = sourceWeeks.indexOf(currentWeek)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                    TextButton(onClick = { selectedWeek = sourceWeeks[(index - 1).coerceAtLeast(0)] }, enabled = index > 0) { Text("上一周") }
+                    Box {
+                        TextButton(onClick = { weekMenu = true }) { Text(currentWeek) }
+                        DropdownMenu(weekMenu, onDismissRequest = { weekMenu = false }) {
+                            (sourceWeeks + "全部").forEach { week ->
+                                DropdownMenuItem(text = { Text(week) }, onClick = { selectedWeek = week; weekMenu = false })
+                            }
+                        }
+                    }
+                    TextButton(onClick = { selectedWeek = sourceWeeks[(index + 1).coerceAtMost(sourceWeeks.lastIndex)] }, enabled = index < sourceWeeks.lastIndex) { Text("下一周") }
+                }
+            } else if (sourceWeeks.isNotEmpty()) {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                     (sourceWeeks + "全部").forEach { week ->
                         FilterChip(selected = currentWeek == week, onClick = { selectedWeek = week },
                             label = { Text(week.removeSuffix("（截图）")) }, modifier = Modifier.padding(end = 6.dp))
                     }
                 }
+            }
+            if (onReminderSettings != null) TextButton(onClick = onReminderSettings, modifier = Modifier.align(Alignment.End)) {
+                Text(if (semesterMonday.isBlank()) "设置学期日期与提醒" else "课程提醒")
             }
             CaesarSlidingSelector(
                 options = listOf("周课表", "按天查看"), selectedIndex = view,
@@ -90,9 +122,9 @@ internal fun CourseTimetable(courses: List<CourseSchedule>, onRemove: ((CourseSc
                     }
                 }
                 val periodCourses = validCourses.filter { it.hasPeriods() }
-                if (periodCourses.isNotEmpty()) PeriodCourseGrid(periodCourses, onSelect = { selected = it }, onOverlap = { overlapSelection = it })
+                if (periodCourses.isNotEmpty()) PeriodCourseGrid(periodCourses, onSelect = { selected = it }, onOverlap = { overlapSelection = it }, weekMonday = weekMonday)
                 val clockCourses = validCourses.filterNot { it.hasPeriods() }
-                if (clockCourses.isNotEmpty()) WeekCourseGrid(clockCourses, showWeekend, onSelect = { selected = it }, onOverlap = { overlapSelection = it })
+                if (clockCourses.isNotEmpty()) WeekCourseGrid(clockCourses, showWeekend, onSelect = { selected = it }, onOverlap = { overlapSelection = it }, weekMonday = weekMonday)
             } else {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     (1..7).forEach { weekday ->
@@ -104,6 +136,7 @@ internal fun CourseTimetable(courses: List<CourseSchedule>, onRemove: ((CourseSc
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
                             Text(weekdayLabel(weekday), style = MaterialTheme.typography.labelLarge)
+                            WeekDateLabel(weekMonday, weekday)
                             Text("${validCourses.count { it.weekday == weekday }} 项", style = MaterialTheme.typography.labelSmall)
                         }
                     }
@@ -181,6 +214,7 @@ internal fun CourseTimetable(courses: List<CourseSchedule>, onRemove: ((CourseSc
 private fun WeekCourseGrid(
     courses: List<CourseSchedule>, showWeekend: Boolean,
     onSelect: (CourseSchedule) -> Unit, onOverlap: (List<CourseSchedule>) -> Unit,
+    weekMonday: LocalDate? = null,
 ) {
     val days = if (showWeekend) 1..7 else 1..5
     val groups = remember(courses) { (1..7).associateWith { day -> groupDayCourses(courses.filter { it.weekday == day }, minimumMinutes = 68) } }
@@ -198,7 +232,7 @@ private fun WeekCourseGrid(
         val columnWidth = maxOf((maxWidth - axisWidth) / days.count(), (48 * fontScale).dp)
         Row(Modifier.fillMaxWidth()) {
             Column(Modifier.width(axisWidth)) {
-                Box(Modifier.height(40.dp), contentAlignment = Alignment.CenterStart) { Text("时间", style = MaterialTheme.typography.labelSmall) }
+                Box(Modifier.height(56.dp), contentAlignment = Alignment.CenterStart) { Text("时间", style = MaterialTheme.typography.labelSmall) }
                 Box(Modifier.height(420.dp).verticalScroll(vertical)) {
                     Box(Modifier.height(bodyHeight).fillMaxWidth()) {
                         (startHour..endHour).forEach { hour ->
@@ -211,8 +245,9 @@ private fun WeekCourseGrid(
             Column(Modifier.weight(1f).horizontalScroll(horizontal)) {
                 Row {
                     days.forEach { day ->
-                        Box(Modifier.width(columnWidth).height(40.dp), contentAlignment = Alignment.Center) {
+                        Column(Modifier.width(columnWidth).height(56.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                             Text(weekdayLabel(day), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                            WeekDateLabel(weekMonday, day)
                         }
                     }
                 }
@@ -258,6 +293,14 @@ private fun WeekCourseGrid(
             }
         }
     }
+}
+
+@Composable
+internal fun WeekDateLabel(monday: LocalDate?, day: Int) {
+    val date = monday?.plusDays(day.toLong() - 1)
+    Text(date?.let { "${it.monthValue}/${it.dayOfMonth}" } ?: "—",
+        style = MaterialTheme.typography.labelSmall,
+        color = if (date == LocalDate.now()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 @Composable

@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/course_island_frame"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/course_island_card_frame_dark"
+    android:clipToOutline="true">
+
+    <ProgressBar
+        android:id="@+id/course_island_flow"
+        style="@android:style/Widget.ProgressBar.Horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:padding="0dp"
+        android:indeterminate="true"
+        android:indeterminateOnly="false"
+        android:indeterminateDrawable="@drawable/course_island_prism_flow"
+        android:indeterminateTint="@null"
+        android:importantForAccessibility="no"
+        android:focusable="false" />
+
+    <LinearLayout
+        android:id="@+id/course_island_surface"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="2dp"
+        android:background="@drawable/course_island_card_dark"
+        android:orientation="vertical"
+        android:paddingStart="16dp"
+        android:paddingTop="13dp"
+        android:paddingEnd="16dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="22dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <ImageView
+                android:id="@+id/course_island_icon"
+                android:layout_width="17dp"
+                android:layout_height="17dp"
+                android:src="@drawable/ic_course_notification"
+                android:importantForAccessibility="no" />
+            <TextView
+                android:id="@+id/course_island_stage"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="7dp"
+                android:fontFamily="sans-serif-medium"
+                android:textColor="#C6C7FF"
+                android:textSize="12sp" />
+            <TextView
+                android:id="@+id/course_island_period"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="end"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:textColor="#AEBCD0"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="7dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="12dp"
+                android:orientation="vertical">
+                <TextView
+                    android:id="@+id/course_island_name"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="27dp"
+                    android:gravity="center_vertical"
+                    android:maxLines="2"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:textColor="#F1F3FF"
+                    android:textSize="17sp" />
+                <TextView
+                    android:id="@+id/course_island_room"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:textColor="#AEBCD0"
+                    android:textSize="13sp" />
+            </LinearLayout>
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="end"
+                android:orientation="vertical">
+                <TextView
+                    android:id="@+id/course_island_timer_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="#AEBCD0"
+                    android:textSize="10sp" />
+                <Chronometer
+                    android:id="@+id/course_island_timer"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:fontFamily="sans-serif-medium"
+                    android:fontFeatureSettings="tnum"
+                    android:textColor="#A4E9FF"
+                    android:textSize="27sp"
+                    android:countDown="true" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/course_island_range"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="9dp"
+            android:layout_marginBottom="9dp"
+            android:textColor="#AEBCD0"
+            android:textSize="11sp" />
+        <ImageView
+            android:id="@+id/course_island_divider"
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#20C3D1EF"
+            android:importantForAccessibility="no" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <TextView
+                android:id="@+id/course_island_open"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:background="@drawable/course_island_card_touch"
+                android:fontFamily="sans-serif-medium"
+                android:text="@string/course_island_open"
+                android:textColor="#F1F3FF"
+                android:textSize="13sp" />
+            <TextView
+                android:id="@+id/course_island_dismiss"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:background="@drawable/course_island_card_touch"
+                android:text="@string/course_island_dismiss"
+                android:textColor="#AEBCD0"
+                android:textSize="12sp" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

@@ -10,7 +10,9 @@ plugins {
 // containing non-ASCII path segments. Keep generated build output in an ASCII
 // Gradle cache only on affected Windows workspaces; source and artifacts remain
 // in the repository and CI keeps the default layout.
-if (System.getProperty("os.name").startsWith("Windows") && projectDir.absolutePath.any { it.code > 127 }) {
+if (providers.gradleProperty("campusBuildDir").isPresent) {
+  layout.buildDirectory.set(file(providers.gradleProperty("campusBuildDir").get()))
+} else if (System.getProperty("os.name").startsWith("Windows") && projectDir.absolutePath.any { it.code > 127 }) {
   layout.buildDirectory.set(file("${System.getProperty("user.home")}/.gradle/campusai-build/android-app"))
 }
 
@@ -23,8 +25,8 @@ android {
     applicationId = "com.aistudio.campusai.ywtpzx"
     minSdk = 24
     targetSdk = 36
-    versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 6
-    versionName = System.getenv("VERSION_NAME") ?: "2.1.2"
+    versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 7
+    versionName = System.getenv("VERSION_NAME") ?: "2.2.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     ndk { abiFilters += "arm64-v8a" }
@@ -110,6 +112,8 @@ secrets {
 }
 
 dependencies {
+  implementation("dev.rikka.shizuku:api:13.1.5")
+  implementation("dev.rikka.shizuku:provider:13.1.5")
   implementation(platform(libs.androidx.compose.bom))
   implementation(libs.androidx.activity.compose)
   implementation(libs.androidx.compose.material.icons.core)

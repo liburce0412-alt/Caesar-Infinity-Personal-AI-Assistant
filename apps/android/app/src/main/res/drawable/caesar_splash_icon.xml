@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <inset android:inset="16.67%">
+            <bitmap android:src="@drawable/caesar_brand_metal"
+                android:gravity="fill" android:filter="true" android:antialias="true" />
+        </inset>
+    </item>
+</layer-list>

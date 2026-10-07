@@ -142,6 +142,7 @@ fun SpectraBackdrop(
     modifier: Modifier = Modifier,
     active: Boolean = true,
     phase: SpectraPhase = SpectraPhase.AMBIENT,
+    foregroundGlassVisible: Boolean = true,
 ) {
     if (motion == MotionMode.OFF) {
         val background = MaterialTheme.colorScheme.background
@@ -222,7 +223,7 @@ fun SpectraBackdrop(
     }
     AndroidView(
         factory = { context -> SpectraSurfaceView(context).also { surface = it } },
-        update = { it.configure(environment, quality, darkMode, phase, glassEffects) },
+        update = { it.configure(environment, quality, darkMode, phase, glassEffects, foregroundGlassVisible) },
         modifier = modifier.fillMaxSize().pointerInput(surface) {
             awaitPointerEventScope {
                 while (true) {
@@ -1223,7 +1224,7 @@ fun BrandMark(
     contentDescription: String = "Caesar∞ 标识",
 ) {
     Image(
-        painter = painterResource(R.drawable.campusai_brand_mark),
+        painter = painterResource(R.drawable.caesar_brand_metal),
         contentDescription = if (decorative) null else contentDescription,
         modifier = modifier,
         colorFilter = tint?.let { ColorFilter.tint(it) },

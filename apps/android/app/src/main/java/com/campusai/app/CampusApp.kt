@@ -118,6 +118,7 @@ import com.campusai.core.designsystem.OpticalGlassRegistry
 import com.campusai.core.designsystem.ProvideSpectraExperience
 import com.campusai.core.designsystem.ProvideSpectraTokens
 import com.campusai.core.designsystem.SpectraBackdrop
+import com.campusai.core.designsystem.BrandLaunchHost
 import com.campusai.core.designsystem.SpectraColors
 import com.campusai.core.designsystem.SpectraPhase
 import com.campusai.core.designsystem.SpectraTheme
@@ -254,6 +255,11 @@ fun CampusApp(
     onSharedImageConsumed: () -> Unit = {},
     initialAutomationConversationId: String? = null,
     onAutomationConversationConsumed: () -> Unit = {},
+    initialCourseId: Int? = null,
+    onCourseConsumed: () -> Unit = {},
+    brandLaunchVisible: Boolean = false,
+    brandLaunchReady: Boolean = false,
+    onBrandLaunchFinished: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -328,6 +334,12 @@ fun CampusApp(
         appSurface = surface
     }
     val snackbar = remember { SnackbarHostState() }
+    LaunchedEffect(initialCourseId) {
+        if (initialCourseId != null) {
+            preferencesRepository.setComponentCollapsed(OptionalComponent.TIMETABLE.name, false)
+            navigateTo(AppSurface.Main(MainDestination.TIME))
+        }
+    }
     val appScope = rememberCoroutineScope()
     var healthAutomationConfig by remember { mutableStateOf<ScheduledTaskConfig?>(null) }
     var healthAutomationSaving by remember { mutableStateOf(false) }
@@ -484,12 +496,14 @@ fun CampusApp(
                 quality = preferences.renderQuality,
                 motion = preferences.motionMode,
                 active = appSurface !is AppSurface.Login,
+                foregroundGlassVisible = !brandLaunchVisible,
                 phase = when (appSurface) {
                     is AppSurface.Focus -> SpectraPhase.FOCUS
                     is AppSurface.Ai if aiRuntimeState.streaming -> SpectraPhase.THINKING
                     else -> SpectraPhase.AMBIENT
                 },
             )
+            BrandLaunchHost(brandLaunchVisible, brandLaunchReady, onBrandLaunchFinished) {
             when (val surface = appSurface) {
                 is AppSurface.Main -> {
                     Scaffold(
@@ -547,6 +561,8 @@ fun CampusApp(
                                 contentPadding = PaddingValues(0.dp),
                             )
                             MainDestination.TIME -> TimeScreen(
+                                initialCourseId = initialCourseId,
+                                onCourseConsumed = onCourseConsumed,
                                 timetableExpanded = OptionalComponent.TIMETABLE.name !in preferences.collapsedComponents,
                                 onExpandTimetable = { appScope.launch { preferencesRepository.setComponentCollapsed(OptionalComponent.TIMETABLE.name, false) } },
                                 records = records,
@@ -773,9 +789,10 @@ fun CampusApp(
                     )
                 }
             }
-            AppUpdateHost(enabled = appSurface is AppSurface.Main && loadedPreferences?.onboardingCompleted == true)
-            if (loadedPreferences?.onboardingCompleted == false) {
+            AppUpdateHost(enabled = !brandLaunchVisible && appSurface is AppSurface.Main && loadedPreferences?.onboardingCompleted == true)
+            if (!brandLaunchVisible && loadedPreferences?.onboardingCompleted == false) {
                 WelcomeGuide { appScope.launch { preferencesRepository.completeOnboarding() } }
+            }
             }
         }
         }

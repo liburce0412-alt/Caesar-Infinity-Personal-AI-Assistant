@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/course_island_prism_border">
+    <target android:name="halo" android:animation="@animator/course_island_prism_orbit" />
+    <target android:name="highlight" android:animation="@animator/course_island_prism_orbit" />
+</animated-vector>

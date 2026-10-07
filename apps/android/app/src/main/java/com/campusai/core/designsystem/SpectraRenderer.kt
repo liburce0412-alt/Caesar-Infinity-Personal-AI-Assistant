@@ -54,8 +54,8 @@ class SpectraSurfaceView(context: Context) : GLSurfaceView(context) {
         super.onDetachedFromWindow()
     }
 
-    fun configure(environment: SpectraEnvironment, quality: RenderQuality, darkMode: Boolean, phase: SpectraPhase, glassEffects: GlassEffects = GlassEffects()) {
-        queueEvent { spectraRenderer.configure(environment, quality, darkMode, phase, glassEffects) }
+    fun configure(environment: SpectraEnvironment, quality: RenderQuality, darkMode: Boolean, phase: SpectraPhase, glassEffects: GlassEffects = GlassEffects(), foregroundGlassVisible: Boolean = true) {
+        queueEvent { spectraRenderer.configure(environment, quality, darkMode, phase, glassEffects, foregroundGlassVisible) }
     }
 
     fun setPointer(x: Float, y: Float) {
@@ -125,6 +125,7 @@ private class SpectraGlRenderer(
     private var quality = RenderQuality.AUTO
     private var darkMode = false
     private var glassEffects = GlassEffects()
+    private var foregroundGlassVisible = true
     private var phase = SpectraPhase.AMBIENT
     private var pointerX = .62f
     private var pointerY = .45f
@@ -135,7 +136,7 @@ private class SpectraGlRenderer(
     private var windowOriginX = 0f
     private var windowOriginY = 0f
 
-    fun configure(environment: SpectraEnvironment, quality: RenderQuality, darkMode: Boolean, phase: SpectraPhase, glassEffects: GlassEffects) {
+    fun configure(environment: SpectraEnvironment, quality: RenderQuality, darkMode: Boolean, phase: SpectraPhase, glassEffects: GlassEffects, foregroundGlassVisible: Boolean) {
         if (this.environment != environment) {
             previousEnvironment = this.environment
             this.environment = environment
@@ -144,6 +145,7 @@ private class SpectraGlRenderer(
         this.quality = quality
         this.darkMode = darkMode
         this.glassEffects = glassEffects.active(dark = darkMode, motion = true)
+        this.foregroundGlassVisible = foregroundGlassVisible
         this.phase = phase
     }
 
@@ -223,7 +225,7 @@ private class SpectraGlRenderer(
         drawSceneTexture()
 
         // LOW is the explicit solid-glass fallback. AUTO/HIGH get at most three live optics.
-        if (quality != RenderQuality.LOW && opticalHandles != null) {
+        if (foregroundGlassVisible && quality != RenderQuality.LOW && opticalHandles != null) {
             drawOpticalGlassRegions(seconds * speed)
         }
     }

@@ -3,6 +3,7 @@ package com.campusai
 import android.content.Intent
 import android.net.Uri
 import android.opengl.GLSurfaceView
+import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
@@ -12,21 +13,50 @@ import androidx.activity.enableEdgeToEdge
 import com.campusai.app.CampusApp
 import com.campusai.core.automation.HealthTaskNotificationContract
 import com.campusai.core.database.CampusDatabase
+import com.campusai.core.designsystem.BrandLaunchGate
+import com.campusai.core.designsystem.brandLaunchMotionEnabled
 import com.campusai.core.sync.CampusSyncScheduler
 import kotlinx.coroutines.flow.MutableStateFlow
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 
 class MainActivity : ComponentActivity() {
+    private val notificationCourse = MutableStateFlow<Int?>(null)
     private val sharedImage = MutableStateFlow<Uri?>(null)
     private val automationConversation = MutableStateFlow<String?>(null)
     private lateinit var externalIntentConsumption: ExternalIntentConsumptionState
     private var restoreExternalSurfacesOnResume = false
+    private var brandLaunchVisible by mutableStateOf(false)
+    private var brandLaunchReady by mutableStateOf(false)
+    private var releaseSystemSplash: (() -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        brandLaunchVisible = brandLaunchGate.claim(intent, savedInstanceState != null, brandLaunchMotionEnabled(this))
+        brandLaunchReady = Build.VERSION.SDK_INT < Build.VERSION_CODES.S
+        if (brandLaunchVisible && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            splashScreen.setOnExitAnimationListener { splash ->
+                if (!brandLaunchVisible) {
+                    splash.remove()
+                } else {
+                    brandLaunchReady = true
+                    releaseSystemSplash = {
+                        splash.animate().cancel()
+                        splash.remove()
+                    }
+                    splash.animate().alpha(0f).setDuration(100L).withEndAction {
+                        splash.remove()
+                        releaseSystemSplash = null
+                    }.start()
+                }
+            }
+        }
         enableEdgeToEdge()
         CampusSyncScheduler.schedule(applicationContext)
+        com.campusai.features.schedule.CourseReminderRuntime.start(applicationContext)
+        notificationCourse.value = intent.reminderCourseId()
         val dao = CampusDatabase.getDatabase(applicationContext).campusDao()
         externalIntentConsumption = ExternalIntentConsumptionState(savedInstanceState)
         sharedImage.value = intent.sharedImage().takeUnless { externalIntentConsumption.sharedImageConsumed }
@@ -35,22 +65,42 @@ class MainActivity : ComponentActivity() {
         setContent {
             val image by sharedImage.collectAsState()
             val conversationId by automationConversation.collectAsState()
+            val courseId by notificationCourse.collectAsState()
             CampusApp(
                 dao = dao,
+                brandLaunchVisible = brandLaunchVisible,
+                brandLaunchReady = brandLaunchReady,
+                onBrandLaunchFinished = ::dismissBrandLaunch,
                 initialSharedImage = image,
                 onSharedImageConsumed = ::consumeSharedImage,
                 initialAutomationConversationId = conversationId,
                 onAutomationConversationConsumed = ::consumeAutomationConversation,
+                initialCourseId = courseId,
+                onCourseConsumed = {
+                    notificationCourse.value = null
+                    if (intent.action == com.campusai.features.schedule.CourseReminderNotifications.ACTION_OPEN) {
+                        intent.action = null
+                        intent.removeExtra(com.campusai.features.schedule.CourseReminderNotifications.EXTRA_COURSE_ID)
+                    }
+                },
             )
         }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        dismissBrandLaunch()
         externalIntentConsumption.resetForNewIntent()
         setIntent(intent)
         sharedImage.value = intent.sharedImage()
         automationConversation.value = intent.automationConversationId()
+        notificationCourse.value = intent.reminderCourseId()
+    }
+
+    private fun Intent.reminderCourseId(): Int? {
+        if (action != com.campusai.features.schedule.CourseReminderNotifications.ACTION_OPEN) return null
+        if (getStringExtra("owner") != com.campusai.features.schedule.CourseReminderRuntime.owner(applicationContext)) return null
+        return getIntExtra(com.campusai.features.schedule.CourseReminderNotifications.EXTRA_COURSE_ID, -1)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -59,8 +109,21 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        dismissBrandLaunch()
         restoreExternalSurfacesOnResume = true
         super.onStop()
+    }
+
+    private fun dismissBrandLaunch() {
+        brandLaunchVisible = false
+        val release = releaseSystemSplash
+        releaseSystemSplash = null
+        release?.invoke()
+    }
+
+    override fun onDestroy() {
+        dismissBrandLaunch()
+        super.onDestroy()
     }
 
     override fun onPostResume() {
@@ -119,6 +182,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private companion object {
+        val brandLaunchGate = BrandLaunchGate()
         const val GL_SURFACE_SETTLE_MILLIS = 96L
         val AUTOMATION_CONVERSATION_ID = Regex("automation-health-[A-Za-z0-9._-]{1,64}")
     }

@@ -28,6 +28,7 @@ internal fun PeriodCourseGrid(
     courses: List<CourseSchedule>,
     onSelect: (CourseSchedule) -> Unit,
     onOverlap: (List<CourseSchedule>) -> Unit,
+    weekMonday: java.time.LocalDate? = null,
 ) {
     val periods = maxOf(12, courses.maxOfOrNull { it.periodEnd } ?: 12)
     val starts = remember(courses) {
@@ -55,11 +56,12 @@ internal fun PeriodCourseGrid(
         val axis = 34.dp
         val column = (maxWidth - axis) / 7
         Column {
-            Row(Modifier.height(32.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.height(52.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("节次", Modifier.width(axis), style = MaterialTheme.typography.labelSmall)
                 (1..7).forEach { day ->
-                    Box(Modifier.width(column), contentAlignment = Alignment.Center) {
+                    Column(Modifier.width(column), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("周${"一二三四五六日"[day - 1]}", style = MaterialTheme.typography.labelSmall)
+                        WeekDateLabel(weekMonday, day)
                     }
                 }
             }

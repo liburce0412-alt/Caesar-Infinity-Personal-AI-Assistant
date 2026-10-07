@@ -73,6 +73,24 @@ class CourseTimetableUiTest {
         }
     }
 
+    @Test fun `semester headers follow selected week and respect odd weeks`() {
+        val monday = java.time.LocalDate.now().with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
+        compose.setContent { CampusTheme(ThemeMode.LIGHT) {
+            Box(Modifier.fillMaxSize().padding(12.dp)) {
+                CourseTimetable(courses.take(2), semesterMonday = monday.toString(), onImport = {})
+            }
+        } }
+        compose.onNodeWithText("第1周").assertExists()
+        compose.onNodeWithText("${monday.monthValue}/${monday.dayOfMonth}").assertExists()
+        compose.onNodeWithContentDescription("周一，高等数学，08:00至09:40，教学楼 A201").assertExists()
+        compose.onNodeWithText("下一周").performClick()
+        val next = monday.plusWeeks(1)
+        compose.onNodeWithText("第2周").assertExists()
+        compose.onNodeWithText("${next.monthValue}/${next.dayOfMonth}").assertExists()
+        compose.onNodeWithContentDescription("周一，高等数学，08:00至09:40，教学楼 A201").assertDoesNotExist()
+        compose.onNodeWithContentDescription("周二，大学英语，09:00至10:40，外语楼 302").assertExists()
+    }
+
     @Test fun `weekly grid opens complete course details`() {
         show()
         compose.onRoot().captureRoboImage("../../../artifacts/timetable-light.png")

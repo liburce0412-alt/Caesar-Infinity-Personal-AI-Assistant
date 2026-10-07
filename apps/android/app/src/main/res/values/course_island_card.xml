@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="course_island_active">上课中</string>
+    <string name="course_island_upcoming">即将上课</string>
+    <string name="course_island_until_end">距下课</string>
+    <string name="course_island_until_start">距上课</string>
+    <string name="course_island_period">第 %1$d–%2$d 节</string>
+    <string name="course_island_reminder">课程提醒</string>
+    <string name="course_island_open">查看课表</string>
+    <string name="course_island_dismiss">结束本次</string>
+</resources>

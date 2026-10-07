@@ -1015,6 +1015,8 @@ fun TimeScreen(
     contentPadding: PaddingValues,
     timetableExpanded: Boolean = true,
     onExpandTimetable: () -> Unit = {},
+    initialCourseId: Int? = null,
+    onCourseConsumed: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val layout = SpectraTheme.layout
@@ -1022,6 +1024,16 @@ fun TimeScreen(
     val enabledNow by rememberUpdatedState(timetableExpanded)
     val courses by viewModel.courses.collectAsState()
     val importOwner by viewModel.activeUserId.collectAsState()
+    var showReminderSettings by rememberSaveable(importOwner) { mutableStateOf(false) }
+    var reminderConfig by remember(importOwner) { mutableStateOf(com.campusai.features.schedule.CourseReminderStore(context).read(importOwner)) }
+    LaunchedEffect(initialCourseId) {
+        if (initialCourseId == -1) { showReminderSettings = true; onCourseConsumed() }
+    }
+    if (showReminderSettings) CourseReminderSettingsDialog(importOwner, courses,
+        onDismiss = { showReminderSettings = false }, onSaved = {
+            reminderConfig = com.campusai.features.schedule.CourseReminderStore(context).read(importOwner)
+            showReminderSettings = false
+        })
     var range by rememberSaveable { mutableStateOf("日") }
     var focusPreset by rememberSaveable { mutableIntStateOf(50) }
     var showAdd by rememberSaveable(importOwner) { mutableStateOf(false) }
@@ -1159,7 +1171,9 @@ fun TimeScreen(
                 item { CollapsibleComponent(OptionalComponent.TIMETABLE, true, onExpandTimetable) {} }
             } else if (courses.isNotEmpty()) {
                 item {
-                    CourseTimetable(courses = courses, onRemove = { viewModel.deleteCourse(it.id) }, onEdit = { editingCourse = it }, onImport = { showImport = true })
+                    CourseTimetable(courses = courses, onRemove = { viewModel.deleteCourse(it.id) }, onEdit = { editingCourse = it }, onImport = { showImport = true },
+                        semesterMonday = reminderConfig.semesterMonday, semesterWeeks = reminderConfig.semesterWeeks, onReminderSettings = { showReminderSettings = true },
+                        initialCourseId = initialCourseId, onCourseConsumed = onCourseConsumed)
                 }
             } else if (timetableExpanded) {
                 item {
