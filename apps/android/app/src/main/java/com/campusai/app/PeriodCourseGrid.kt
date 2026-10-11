@@ -14,7 +14,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -88,13 +90,18 @@ internal fun PeriodCourseGrid(
                             val ink = Color(0xFF182235)
                             val label = "周${"一二三四五六日"[day - 1]}，${course.name}，${courseTimeLabel(course)}，${course.location}" +
                                 if (group.size > 1) "，另有 ${group.size - 1} 项安排" else ""
+                            val openCourse = { if (group.size == 1) onSelect(course) else onOverlap(group) }
                             Column(
                                 Modifier.offset(x = 1.dp, y = rowHeight * (course.periodStart - 1) + 1.dp)
                                     .width(column - 2.dp).height(rowHeight * span - 2.dp)
                                     .clip(RoundedCornerShape(6.dp)).background(tint.copy(alpha = .88f))
                                     .border(.5.dp, Color.White.copy(alpha = .55f), RoundedCornerShape(6.dp))
-                                    .clickable(role = Role.Button) { if (group.size == 1) onSelect(course) else onOverlap(group) }
-                                    .semantics(mergeDescendants = true) { contentDescription = label }
+                                    .clickable(role = Role.Button, onClick = openCourse)
+                                    .clearAndSetSemantics {
+                                        contentDescription = label
+                                        role = Role.Button
+                                        onClick { openCourse(); true }
+                                    }
                                     .padding(horizontal = 3.dp, vertical = 5.dp),
                                 verticalArrangement = Arrangement.spacedBy(3.dp),
                             ) {

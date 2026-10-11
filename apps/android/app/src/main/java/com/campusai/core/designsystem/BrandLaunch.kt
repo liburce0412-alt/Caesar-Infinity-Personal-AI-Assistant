@@ -14,10 +14,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
@@ -72,6 +74,12 @@ internal fun brandLaunchMotionEnabled(context: Context): Boolean =
         Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f
     }
 
+private val LocalBrandMetal = staticCompositionLocalOf<ImageBitmap?> { null }
+
+@Composable
+internal fun brandMetalBitmap(): ImageBitmap =
+    LocalBrandMetal.current ?: ImageBitmap.imageResource(R.drawable.caesar_brand_metal)
+
 /** Content renders immediately underneath; this is a bounded entrance, never a loading gate. */
 @Composable
 internal fun BrandLaunchHost(
@@ -81,13 +89,18 @@ internal fun BrandLaunchHost(
     content: @Composable () -> Unit,
 ) {
     val progress = remember(visible) { Animatable(0f) }
-    Box(Modifier.fillMaxSize()) {
-        Box(
-            if (visible) Modifier.clearAndSetSemantics { }.graphicsLayer {
-                alpha = launchEase(progress.value * 2_050f, 1_750f, 2_050f)
-            } else Modifier,
-        ) { content() }
-        if (visible) BrandLaunchOverlay(ready, progress, onFinished)
+    // Keep the original pixels alive across route changes and lazy-item disposal. The launch
+    // artwork and in-app marks share this decode instead of decoding on each scroll back.
+    val metal = ImageBitmap.imageResource(R.drawable.caesar_brand_metal)
+    CompositionLocalProvider(LocalBrandMetal provides metal) {
+        Box(Modifier.fillMaxSize()) {
+            Box(
+                if (visible) Modifier.clearAndSetSemantics { }.graphicsLayer {
+                    alpha = launchEase(progress.value * 2_050f, 1_750f, 2_050f)
+                } else Modifier,
+            ) { content() }
+            if (visible) BrandLaunchOverlay(ready, progress, onFinished)
+        }
     }
 }
 
@@ -95,7 +108,7 @@ internal fun BrandLaunchHost(
 private fun BrandLaunchOverlay(ready: Boolean, progress: Animatable<Float, androidx.compose.animation.core.AnimationVector1D>, onFinished: () -> Unit) {
     val finish by rememberUpdatedState(onFinished)
     // The original metal logo is decoded once. The arriving ribbons and signature are paths.
-    val metal = ImageBitmap.imageResource(R.drawable.caesar_brand_metal)
+    val metal = brandMetalBitmap()
     val background = MaterialTheme.colorScheme.background
     BackHandler { finish() }
     LaunchedEffect(ready) {

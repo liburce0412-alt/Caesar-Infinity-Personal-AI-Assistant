@@ -98,6 +98,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -757,7 +760,21 @@ internal fun ContributionGrid(
         LazyRow(Modifier.weight(1f).testTag("contribution-weeks"), state = scrollState,
             horizontalArrangement = Arrangement.spacedBy(gap)) {
             itemsIndexed(weeks, key = { index, _ -> "$selectedYear-$index" }) { _, week ->
-                Column {
+                val descriptions = remember(week, today) {
+                    week.filterNotNull().joinToString("；") { contributionDescription(it, today) }
+                }
+                val dateActions = remember(week, today, onSelect) {
+                    week.filterNotNull().filterNot { it.date.isAfter(today) }.map { day ->
+                        CustomAccessibilityAction(contributionDescription(day, today)) { onSelect(day); true }
+                    }
+                }
+                // A week is one accessible entry with an action for each past/today date.
+                // Keep every cell's touch/ripple and pixels; avoid rebuilding seven independent
+                // accessibility bounds per week whenever the containing page scrolls.
+                Column(Modifier.clearAndSetSemantics {
+                    contentDescription = descriptions
+                    customActions = dateActions
+                }) {
                     Box(Modifier.width(cellSize).height(20.dp)) {
                         week.filterNotNull().firstOrNull { it.date.dayOfMonth == 1 }?.let { firstDay ->
                             Text("${firstDay.date.monthValue} 月", Modifier.wrapContentWidth(Alignment.Start, unbounded = true).requiredWidth(30.dp),
@@ -771,11 +788,6 @@ internal fun ContributionGrid(
                             } else {
                                 val future = day.date.isAfter(today)
                                 val selected = day.date == selectedDate
-                                val description = if (future) {
-                                    "${day.date.monthValue}月${day.date.dayOfMonth}日，未来日期"
-                                } else {
-                                    "${day.date.monthValue}月${day.date.dayOfMonth}日，${day.durationMinutes}分钟，${day.completedCount}条记录"
-                                }
                                 var cellModifier = Modifier
                                     .size(cellSize)
                                     .clip(RoundedCornerShape(3.dp))
@@ -788,9 +800,8 @@ internal fun ContributionGrid(
                                         color = if (selected) SpectraColors.Cyan else Color.White.copy(if (future) .18f else .52f),
                                         shape = RoundedCornerShape(3.dp),
                                     )
-                                    .semantics { contentDescription = description }
                                 if (!future) cellModifier = cellModifier.clickable { onSelect(day) }
-                                Box(cellModifier)
+                                Box(cellModifier.clearAndSetSemantics { })
                             }
                         }
                     }
@@ -799,6 +810,10 @@ internal fun ContributionGrid(
         }
     }
 }
+
+private fun contributionDescription(day: DailyContribution, today: LocalDate): String =
+    if (day.date.isAfter(today)) "${day.date.monthValue}月${day.date.dayOfMonth}日，未来日期"
+    else "${day.date.monthValue}月${day.date.dayOfMonth}日，${day.durationMinutes}分钟，${day.completedCount}条记录"
 
 private fun contributionColor(level: ContributionLevel): Color = when (level) {
     ContributionLevel.NONE -> SpectraColors.Silver.copy(.34f)

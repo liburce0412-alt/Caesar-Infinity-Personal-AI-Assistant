@@ -20,9 +20,9 @@
   <a href="docs/local-ai-architecture.md">架构文档</a>
 </p>
 
-**最新正式版：[v2.1.2 · 下载 APK 与更新说明](https://github.com/liburce0412-alt/Caesar-Infinity-Personal-AI-Assistant/releases/tag/v2.1.2)**
+**最新正式版：[v2.2.1 · 下载 APK 与更新说明](https://github.com/liburce0412-alt/Caesar-Infinity-Personal-AI-Assistant/releases/tag/v2.2.1)**
 
-修复登录凭证自动续期与失效提示，避免心愿墙、树洞因旧凭证反复请求而无法显示。已失效的会话需要重新登录一次，覆盖安装保留本地记录。
+改善“我的”页面与课表的滚动开销，复用原始 logo，解除高质量流光背景约 60 fps 的限制。在支持的屏幕上跟随 90/120 Hz 刷新，保留现有玻璃、折射与动画效果。覆盖安装保留本地记录；[真机性能记录](docs/android-performance-20261011.md)列出了已验证场景和剩余边界。
 
 新增应用内更新弹窗与服务器 / GitHub 双下载源；心愿墙、树洞进入时自动刷新；成就扩展至 16 项独立图标；课程支持导入后编辑教室、教师、时间等内容。见[应用更新与发布说明](docs/app-updates.md)。
 
@@ -76,7 +76,7 @@
 
 ### 下载与开始
 
-1. 前往 [Releases 下载 APK](https://github.com/liburce0412-alt/Caesar-Infinity-Personal-AI-Assistant/releases)，选择适合设备的发布条目，核对该条目的 SHA-256 和签名说明。当前版本基线与变更可查看 [v2.0.1 发布说明](docs/releases/v2.0.1.md)。
+1. 前往 [Releases 下载 APK](https://github.com/liburce0412-alt/Caesar-Infinity-Personal-AI-Assistant/releases)，选择适合设备的发布条目，核对该条目的 SHA-256 和签名说明。当前版本变更可查看 [v2.2.1 发布说明](docs/releases/v2.2.1.md)。
 2. 如需注册账号，添加微信 **`jokerB0906L`** 获取内测邀请码，在注册页填写邮箱、密码、确认密码与邀请码。已有账号可直接登录；本地能力无需登录，树洞等账户功能需要登录。
 3. 在「我的 → AI 运行方式」选择本地模型并完成下载，或配置个人云端 Key 和可用模型。仓库中的默认 Codex 地址属于私人网络配置，体验者需自行配置可访问的兼容服务。
 4. 按上面的[第一次体验步骤](#第一次可以这样用)完成一次数据同步和对话；暂不接入健康数据时，可以先尝试普通对话。
@@ -178,6 +178,8 @@ flowchart LR
 ```
 
 Robolectric 首次运行会下载对应 Android SDK 测试包。在网络受限环境中，可以先运行目标测试类和 `assembleDebug`；不要把依赖下载超时误判成源码失败，也不要在物理手机上运行 `connectedDebugAndroidTest`。
+
+真机性能对比使用 `:apps:android:app:assembleBenchmark`：它沿用 release 配置，关闭调试并允许 shell 性能采样，使用本地调试签名。此 APK 与正式版包名相同，仅签名匹配时才能用 `adb install -r` 保留数据覆盖安装；它不是发布包。以 Perfetto 的实际呈现间隔和超时帧评估流畅度，屏幕显示 120 Hz 不代表应用已达到 120 fps。
 
 ### 构建管理台
 

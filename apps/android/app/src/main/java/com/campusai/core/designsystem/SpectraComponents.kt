@@ -99,7 +99,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.onClick
@@ -128,7 +127,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.campusai.core.model.MotionMode
 import com.campusai.core.model.RenderQuality
 import com.campusai.core.model.SpectraEnvironment
-import com.campusai.R
 import kotlinx.coroutines.launch
 import java.util.WeakHashMap
 import kotlin.math.roundToInt
@@ -257,8 +255,8 @@ fun SpectraBackdrop(
         if (!lifecycleActive || !active) return@LaunchedEffect
         val minFrameIntervalNanos = when (quality) {
             RenderQuality.LOW -> 32_000_000L
-            RenderQuality.AUTO -> 16_000_000L
-            RenderQuality.HIGH -> 16_000_000L
+            // High-quality motion follows every display tick, including 90/120 Hz.
+            RenderQuality.AUTO, RenderQuality.HIGH -> 0L
         }
         var lastRequestedAt = Long.MIN_VALUE
         while (lifecycleActive && active) {
@@ -1224,7 +1222,7 @@ fun BrandMark(
     contentDescription: String = "Caesar∞ 标识",
 ) {
     Image(
-        painter = painterResource(R.drawable.caesar_brand_metal),
+        bitmap = brandMetalBitmap(),
         contentDescription = if (decorative) null else contentDescription,
         modifier = modifier,
         colorFilter = tint?.let { ColorFilter.tint(it) },

@@ -4,7 +4,10 @@ import android.content.Context
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.os.SystemClock
+import android.os.Build
 import android.util.Log
+import android.view.Surface
+import android.view.SurfaceHolder
 import com.campusai.core.model.RenderQuality
 import com.campusai.core.model.SpectraEnvironment
 import java.nio.ByteBuffer
@@ -34,6 +37,10 @@ class SpectraSurfaceView(context: Context) : GLSurfaceView(context) {
     internal val opticalRendererOwnerId: Long = OpticalGlassRegistry.nextRendererOwnerId()
     private val spectraRenderer = SpectraGlRenderer(opticalRendererOwnerId)
     private val locationInWindow = IntArray(2)
+    private var requestedQuality = RenderQuality.AUTO
+    private var sceneActive = true
+    private var resumed = false
+    private var appliedFrameRate = Float.NaN
 
     init {
         setEGLContextClientVersion(2)
@@ -55,6 +62,8 @@ class SpectraSurfaceView(context: Context) : GLSurfaceView(context) {
     }
 
     fun configure(environment: SpectraEnvironment, quality: RenderQuality, darkMode: Boolean, phase: SpectraPhase, glassEffects: GlassEffects = GlassEffects(), foregroundGlassVisible: Boolean = true) {
+        requestedQuality = quality
+        updateFrameRate()
         queueEvent { spectraRenderer.configure(environment, quality, darkMode, phase, glassEffects, foregroundGlassVisible) }
     }
 
@@ -64,6 +73,8 @@ class SpectraSurfaceView(context: Context) : GLSurfaceView(context) {
 
     /** Freezes scene time without pausing/detaching the GL surface itself. */
     fun setSceneActive(value: Boolean) {
+        sceneActive = value
+        updateFrameRate()
         queueEvent { spectraRenderer.setActive(value) }
         if (value) requestRender()
     }
@@ -86,13 +97,47 @@ class SpectraSurfaceView(context: Context) : GLSurfaceView(context) {
     }
 
     override fun onResume() {
+        resumed = true
+        updateFrameRate()
         spectraRenderer.setActive(true)
         super.onResume()
     }
 
     override fun onPause() {
+        resumed = false
+        updateFrameRate()
         spectraRenderer.setActive(false)
         super.onPause()
+    }
+
+    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+        super.surfaceChanged(holder, format, width, height)
+        appliedFrameRate = Float.NaN
+        updateFrameRate()
+    }
+
+    override fun surfaceDestroyed(holder: SurfaceHolder) {
+        appliedFrameRate = Float.NaN
+        super.surfaceDestroyed(holder)
+    }
+
+    private fun updateFrameRate() {
+        if (Build.VERSION.SDK_INT < 30 || !holder.surface.isValid) return
+        val rate = when {
+            !resumed || !sceneActive -> 0f
+            requestedQuality == RenderQuality.LOW -> 30f
+            else -> 120f
+        }
+        if (appliedFrameRate == rate) return
+        // A surface-local hint; respect the device's mode/power policy and avoid black-screen
+        // mode switches. Clear it when a visible scene is paused. No system settings change.
+        if (Build.VERSION.SDK_INT >= 31) {
+            holder.surface.setFrameRate(rate, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT,
+                Surface.CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS)
+        } else {
+            holder.surface.setFrameRate(rate, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
+        }
+        appliedFrameRate = rate
     }
 
 }

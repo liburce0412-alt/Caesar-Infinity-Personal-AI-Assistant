@@ -25,8 +25,8 @@ android {
     applicationId = "com.aistudio.campusai.ywtpzx"
     minSdk = 24
     targetSdk = 36
-    versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 7
-    versionName = System.getenv("VERSION_NAME") ?: "2.2.0"
+    versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 8
+    versionName = System.getenv("VERSION_NAME") ?: "2.2.1"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     ndk { abiFilters += "arm64-v8a" }
@@ -63,6 +63,14 @@ android {
     }
     debug {
       signingConfig = signingConfigs.getByName("debugConfig")
+    }
+    create("benchmark") {
+      initWith(getByName("release"))
+      // Release execution without production signing credentials. Install with -r only;
+      // the device-test guard below still protects the user's private app data.
+      signingConfig = signingConfigs.getByName("debugConfig")
+      matchingFallbacks += "release"
+      isDebuggable = false
     }
   }
   compileOptions {

@@ -3,6 +3,8 @@ package com.campusai.app
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import com.campusai.core.designsystem.CampusTheme
@@ -32,13 +34,24 @@ class ContributionGridUiTest {
                 Box(Modifier.fillMaxWidth()) { ContributionGrid(2026, start, weeks, today, null) { selected = it.date } }
             }
         }
-        assertTrue(compose.onAllNodes(hasContentDescription("分钟", substring = true)).fetchSemanticsNodes().size < 240)
-        compose.onNodeWithContentDescription("10月5日，0分钟，0条记录").performClick()
+        assertTrue(compose.onAllNodes(hasContentDescription("分钟", substring = true)).fetchSemanticsNodes().size < 40)
+        val todayWeek = compose.onNode(hasContentDescription("10月5日，0分钟，0条记录", substring = true))
+        // Monday cell, below the unchanged month-label row. Native cell taps still work.
+        todayWeek.performTouchInput { click(Offset(centerX, height * 26.5f / 129f)) }
         compose.runOnIdle { assertEquals(today, selected) }
         compose.onNodeWithTag("contribution-weeks").performScrollToIndex(0)
-        compose.onNodeWithContentDescription("1月1日，0分钟，0条记录").assertIsDisplayed().performClick()
+        val januaryWeek = compose.onNode(hasContentDescription("1月1日，0分钟，0条记录", substring = true))
+        val januaryActions = januaryWeek.assertIsDisplayed().fetchSemanticsNode().config[SemanticsActions.CustomActions]
+        compose.runOnIdle {
+            assertTrue(januaryActions.first { it.label == "1月1日，0分钟，0条记录" }.action())
+        }
         compose.runOnIdle { assertEquals(LocalDate.of(2026, 1, 1), selected) }
         compose.onNodeWithTag("contribution-weeks").performScrollToIndex(52)
-        compose.onNodeWithContentDescription("12月31日，未来日期").assertIsDisplayed().assertHasNoClickAction()
+        val decemberWeek = compose.onNode(hasContentDescription("12月31日，未来日期", substring = true))
+        decemberWeek.assertIsDisplayed().assertHasNoClickAction()
+        assertTrue(decemberWeek.fetchSemanticsNode().config[SemanticsActions.CustomActions].isEmpty())
+        // Future dates remain informational, with no touch or accessibility action.
+        decemberWeek.performTouchInput { click(Offset(centerX, height * 74.5f / 129f)) }
+        compose.runOnIdle { assertEquals(LocalDate.of(2026, 1, 1), selected) }
     }
 }
