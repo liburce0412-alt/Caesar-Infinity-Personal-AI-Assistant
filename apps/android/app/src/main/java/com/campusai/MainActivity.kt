@@ -23,6 +23,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
 class MainActivity : ComponentActivity() {
+    private val aiStatusRequested = MutableStateFlow(false)
     private val notificationCourse = MutableStateFlow<Int?>(null)
     private val sharedImage = MutableStateFlow<Uri?>(null)
     private val automationConversation = MutableStateFlow<String?>(null)
@@ -56,6 +57,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         CampusSyncScheduler.schedule(applicationContext)
         com.campusai.features.schedule.CourseReminderRuntime.start(applicationContext)
+        aiStatusRequested.value = intent.action == com.campusai.features.ai.AiIslandNotifications.ACTION_OPEN
         notificationCourse.value = intent.reminderCourseId()
         val dao = CampusDatabase.getDatabase(applicationContext).campusDao()
         externalIntentConsumption = ExternalIntentConsumptionState(savedInstanceState)
@@ -63,11 +65,17 @@ class MainActivity : ComponentActivity() {
         automationConversation.value = intent.automationConversationId()
             .takeUnless { externalIntentConsumption.automationConversationConsumed }
         setContent {
+            val aiStatus by aiStatusRequested.collectAsState()
             val image by sharedImage.collectAsState()
             val conversationId by automationConversation.collectAsState()
             val courseId by notificationCourse.collectAsState()
             CampusApp(
                 dao = dao,
+                initialAiStatusRequested = aiStatus,
+                onAiStatusConsumed = {
+                    aiStatusRequested.value = false
+                    if (intent.action == com.campusai.features.ai.AiIslandNotifications.ACTION_OPEN) intent.action = null
+                },
                 brandLaunchVisible = brandLaunchVisible,
                 brandLaunchReady = brandLaunchReady,
                 onBrandLaunchFinished = ::dismissBrandLaunch,
@@ -94,6 +102,7 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         sharedImage.value = intent.sharedImage()
         automationConversation.value = intent.automationConversationId()
+        aiStatusRequested.value = intent.action == com.campusai.features.ai.AiIslandNotifications.ACTION_OPEN
         notificationCourse.value = intent.reminderCourseId()
     }
 

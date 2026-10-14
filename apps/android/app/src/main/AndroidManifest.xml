@@ -52,6 +52,7 @@
             android:authorities="${applicationId}.shizuku" android:multiprocess="false"
             android:enabled="true" android:exported="true"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+        <receiver android:name="com.campusai.features.ai.AiIslandActionReceiver" android:exported="false" />
         <receiver android:name="com.campusai.features.schedule.CourseReminderReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

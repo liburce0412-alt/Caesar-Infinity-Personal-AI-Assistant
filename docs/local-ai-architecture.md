@@ -5,7 +5,8 @@
 ## 边界
 
 - Android 云端：`PersonalDeepSeekAiEngine → PersonalDeepSeekClient → api.deepseek.com`。用户 Key 由 Android Keystore 加密保存，仅在发起固定域名请求时读取；回复仍映射为统一 `Meta/Status/Delta/Done/Error` 事件。
-- 服务端：`supabase/functions/ai-chat` 和原有五类 SSE 协议保留给 Web/服务端场景，但 Android 不调用它，也没有平台额度选项。
+- 免费云端（尚未部署）：`CaesarCloudFreeEngine → /caesar-cloud/v1/chat → Node 中转 → 智谱`。纯文本 GLM-4.7-Flash，当前附图 GLM-4V-Flash，不接 GLM-OCR；登录鉴权和 Key 均在服务端验证/管理，不设每日次数限制。详见 [Caesar cloud free](caesar-cloud-free.md)。
+- 原服务端：`supabase/functions/ai-chat` 和原有五类 SSE 协议保留给 Web/服务端场景，Android 不调用该 Edge Function。
 - 本地：`LocalMnnAiEngine → MnnNativeBridge → MNN 3.6.1 CPU → Qwen3.5-2B MNN 4-bit`。不创建任何网络客户端。
 - 输出边界：`LocalPromptPolicy` 要求直接给出答案但不依赖自定义标签；`LocalOutputGuard` 会流式放行显式最终段，并把没有标签的普通输出暂存在内存中，生成结束后确认其不含思考过程、系统提示、内部约束或结构化私有 JSON 再分段发送。没有安全答案时返回可恢复错误，不显示原始输出。
 - 模板边界：该 MNN 模型的官方 `llm_config.json` 会在生成尾部无条件追加开放的 `<think>`。JNI 在应用 chat template 后，仅把最后一个仍未闭合且尾部只有空白的 generation think 段改写为立即闭合；随后用官方 tokenizer 编码并调用 token-id 入口。历史消息中的完整 think 文本不会被改写，提示词也不会进入日志。

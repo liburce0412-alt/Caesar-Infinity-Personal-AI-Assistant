@@ -61,6 +61,7 @@ import androidx.compose.material.icons.rounded.FileOpen
 import androidx.compose.material.icons.rounded.ImageSearch
 import androidx.compose.material.icons.rounded.Insights
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.LocalFireDepartment
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Pause
@@ -74,6 +75,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import com.campusai.core.designsystem.CaesarGlassOrb
 import com.campusai.core.designsystem.SpectraTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarResult
@@ -116,6 +118,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
 import com.campusai.core.designsystem.BrandMark
+import com.campusai.core.designsystem.BrandWordmark
 import com.campusai.core.designsystem.GlassPanel
 import com.campusai.core.designsystem.PageMood
 import com.campusai.core.designsystem.SpectraAction
@@ -197,6 +200,7 @@ fun HomeScreen(
         SpectraEnvironment.AURORA -> if (dark) SpectraColors.AuroraLight else SpectraColors.Aurora
     }
     val streak = remember(records) { calculateStreak(records) }
+    var announcementsExpanded by rememberSaveable { mutableStateOf(false) }
     val categories = todayRecords.map { it.category }.filter(String::isNotBlank).distinct().take(3)
     val topCategory = todayRecords
         .groupBy { it.category }
@@ -218,60 +222,52 @@ fun HomeScreen(
                 top = contentPadding.calculateTopPadding() + layout.pageTopSpacing,
                 bottom = maxOf(contentPadding.calculateBottomPadding(), layout.pageBottomSpacing),
             ),
-            verticalArrangement = Arrangement.spacedBy(layout.sectionGap),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
         item {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(SimpleDateFormat("M月d日 EEEE", Locale.CHINA).format(Date()), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("${timeGreeting()}，${displayName.ifBlank { "Caesar 用户" }}", style = MaterialTheme.typography.headlineLarge)
-                    Text(
-                        dailyText.ifBlank { "先完成一件最重要的小事" },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                SpectraSurface(
-                    modifier = Modifier.size(48.dp),
-                    mood = PageMood.GROWTH,
-                    shadowed = false,
-                    contentPadding = PaddingValues(0.dp),
-                ) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        BrandMark(Modifier.fillMaxSize().padding(5.dp))
-                        if (avatarUrl.isNotBlank()) {
-                            AsyncImage(
-                                model = avatarUrl,
-                                contentDescription = "头像",
-                                modifier = Modifier.fillMaxSize().padding(3.dp).clip(CircleShape),
-                                contentScale = ContentScale.Crop,
-                            )
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(SimpleDateFormat("M月d日 EEEE", Locale.CHINA).format(Date()), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("${timeGreeting()}，${displayName.ifBlank { "Caesar 用户" }}", style = MaterialTheme.typography.headlineSmall)
+                    }
+                    SpectraSurface(
+                        modifier = Modifier.size(48.dp),
+                        mood = PageMood.GROWTH,
+                        shadowed = false,
+                        contentPadding = PaddingValues(0.dp),
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            BrandMark(Modifier.fillMaxSize().padding(5.dp))
+                            if (avatarUrl.isNotBlank()) {
+                                AsyncImage(
+                                    model = avatarUrl,
+                                    contentDescription = "头像",
+                                    modifier = Modifier.fillMaxSize().padding(3.dp).clip(CircleShape),
+                                    contentScale = ContentScale.Crop,
+                                )
+                            }
                         }
                     }
                 }
+                Text(
+                    dailyText.ifBlank { "先完成一件最重要的小事" },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
         item {
             CollapsibleComponent(OptionalComponent.TODAY, OptionalComponent.TODAY.name in collapsedComponents, { onExpandComponent(OptionalComponent.TODAY.name) }) {
             MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(primary = goalColor, onSurface = goalColor, onSurfaceVariant = goalColor.copy(alpha = .85f))) {
             CompositionLocalProvider(LocalContentColor provides goalColor) {
-            Column(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("今日行动", style = MaterialTheme.typography.titleLarge)
-                            Text("目标 ${formatDuration(goalMinutes)}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (LocalDensity.current.fontScale > 1.3f) SpectraStatus("${(totalMinutes * 100 / goalMinutes).coerceAtMost(100)}% 达成", tone = SpectraStatusTone.INFO)
-                        }
-                        if (LocalDensity.current.fontScale <= 1.3f) SpectraStatus(
-                            text = "${(totalMinutes * 100 / goalMinutes).coerceAtMost(100)}% 达成",
-                            tone = SpectraStatusTone.INFO,
-                        )
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    SpectraProgress(totalMinutes = totalMinutes, goalMinutes = goalMinutes)
+            SpectraSurface(Modifier.fillMaxWidth(), shadowed = false, contentPadding = PaddingValues(16.dp)) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("今日行动", Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(12.dp))
+                    SpectraProgress(totalMinutes = totalMinutes, goalMinutes = goalMinutes)
                     if (categories.isNotEmpty()) {
+                        Spacer(Modifier.height(12.dp))
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             items(categories) { category -> SpectraStatus(category, tone = SpectraStatusTone.NEUTRAL) }
                         }
@@ -298,21 +294,11 @@ fun HomeScreen(
         }
         item {
             CollapsibleComponent(OptionalComponent.STREAK, OptionalComponent.STREAK.name in collapsedComponents, { onExpandComponent(OptionalComponent.STREAK.name) }) {
-            Column(Modifier.fillMaxWidth()) {
-                Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.LocalFireDepartment, null, tint = SpectraColors.Warm)
+            SpectraSurface(Modifier.fillMaxWidth(), shadowed = false, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.LocalFireDepartment, null, tint = SpectraColors.Warm, modifier = Modifier.size(22.dp))
                     Column(Modifier.weight(1f)) {
                         Text("连续 $streak 天", style = MaterialTheme.typography.titleMedium)
-                        Text("再完成一次记录，能量条就会继续生长。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.62f))
-                        Spacer(Modifier.height(9.dp))
-                        Box(Modifier.fillMaxWidth().height(7.dp).clip(CircleShape).background(SpectraColors.Silver.copy(.55f))) {
-                            Box(
-                                Modifier
-                                    .fillMaxWidth((streak / 7f).coerceIn(0f, 1f))
-                                    .fillMaxHeight()
-                                    .background(MaterialTheme.colorScheme.onSurface.copy(.76f)),
-                            )
-                        }
                     }
                 }
             }
@@ -320,33 +306,56 @@ fun HomeScreen(
         }
         item {
             CollapsibleComponent(OptionalComponent.INSIGHTS, OptionalComponent.INSIGHTS.name in collapsedComponents, { onExpandComponent(OptionalComponent.INSIGHTS.name) }) {
-            SectionLabel("AI 洞察", "基于今天 ${todayRecords.size} 条记录")
-            Column(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onOpenAi)) {
-                Column(Modifier.padding(16.dp)) {
-                    Icon(Icons.Rounded.AutoAwesome, null, tint = SpectraColors.Violet)
-                    Spacer(Modifier.height(12.dp))
+            SpectraSurface(Modifier.fillMaxWidth(), shadowed = false, onClick = onOpenAi,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CaesarGlassOrb(size = 48.dp, motionEnabled = SpectraTheme.tokens.motion.enabled)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    BrandWordmark(width = 124.dp)
                     Text(
                         if (todayRecords.isEmpty()) {
-                            "完成第一条记录后，Caesar∞ 会基于实际记录整理今日节奏。"
+                            "聊一聊，理清下一步"
                         } else {
                             buildString {
-                                append("今天已记录 ${todayRecords.size} 条，共 ${formatDuration(totalMinutes)}")
-                                if (topCategory != null) append("；时长最多的分类是“$topCategory”")
-                                append("。")
+                                append("今日 ${todayRecords.size} 条 · ${formatDuration(totalMinutes)}")
+                                if (topCategory != null) append("\n主要投入：$topCategory")
                             }
                         },
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Spacer(Modifier.height(12.dp))
-                    Text("让 Caesar∞ 基于这些记录整理下一步", style = MaterialTheme.typography.labelLarge, color = SpectraColors.Focus)
                 }
+                Icon(Icons.Rounded.KeyboardArrowRight, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             }
             }
         }
         item {
             CollapsibleComponent(OptionalComponent.ANNOUNCEMENTS, OptionalComponent.ANNOUNCEMENTS.name in collapsedComponents, { onExpandComponent(OptionalComponent.ANNOUNCEMENTS.name) }) {
-            SectionLabel("消息", "与你有关")
-            when (announcements) {
+            SpectraSurface(Modifier.fillMaxWidth(), shadowed = false,
+                onClick = { announcementsExpanded = !announcementsExpanded },
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Icon(Icons.Rounded.Campaign, null, Modifier.size(22.dp))
+                    Text("消息", style = MaterialTheme.typography.titleMedium)
+                    val preview = when (announcements) {
+                        UiState.Loading -> "正在读取"
+                        UiState.Empty -> "暂无新消息"
+                        is UiState.Error -> "暂未同步"
+                        is UiState.Data -> announcements.value.firstOrNull()?.title ?: "暂无新消息"
+                        is UiState.Offline -> "离线 · " + (announcements.value.firstOrNull()?.title ?: "暂无缓存")
+                    }
+                    Text(preview, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Icon(if (announcementsExpanded) Icons.Rounded.KeyboardArrowDown else Icons.Rounded.KeyboardArrowRight,
+                        if (announcementsExpanded) "收起消息" else "展开消息", Modifier.size(20.dp))
+                }
+            }
+            if (announcementsExpanded) when (announcements) {
                 UiState.Loading -> SpectraStatePane(
                     kind = SpectraStateKind.LOADING,
                     title = "正在读取最新公告",
@@ -376,7 +385,7 @@ fun HomeScreen(
                         else -> emptyList()
                     }
                     Column(Modifier.fillMaxWidth()) {
-                        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                        Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
                             if (announcements is UiState.Offline) {
                                 SpectraStatus(
                                     text = "离线 · 显示上次同步公告",
@@ -386,8 +395,8 @@ fun HomeScreen(
                             }
                             items.forEachIndexed { index, announcement ->
                                 Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
-                                    Icon(Icons.Rounded.Campaign, null, tint = SpectraColors.Warm, modifier = Modifier.padding(top = 2.dp))
-                                    Column(Modifier.weight(1f)) {
+                                    Icon(Icons.Rounded.Campaign, null, tint = SpectraColors.Warm, modifier = Modifier.padding(top = 2.dp).size(20.dp))
+                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                         Text(announcement.title, style = MaterialTheme.typography.titleMedium)
                                         if (announcement.body.isNotBlank()) Text(announcement.body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.64f))
                                     }
@@ -451,43 +460,38 @@ private fun HealthOverviewCard(
         else -> SpectraStatusTone.INFO
     }
 
-    Box(Modifier.fillMaxWidth().clickable(role = Role.Button) { showDetails = true }) {
-        Column(Modifier.fillMaxWidth().padding(18.dp)) {
+    SpectraSurface(Modifier.fillMaxWidth(), shadowed = false, onClick = { showDetails = true },
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)) {
+        Column(Modifier.fillMaxWidth()) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.FavoriteBorder, null, tint = MaterialTheme.colorScheme.onSurface.copy(.78f))
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(if (cloudConfigured) "Mi Fitness" else "健康数据", style = MaterialTheme.typography.titleLarge)
-                    Text(
-                        if (cloudConfigured) "今日健康" else "Health Connect",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(.52f),
-                    )
-                }
-                if (LocalDensity.current.fontScale <= 1.3f) SpectraStatus(statusText, tone = statusTone)
+                Icon(Icons.Rounded.FavoriteBorder, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurface.copy(.78f))
+                Spacer(Modifier.width(12.dp))
+                Text(if (cloudConfigured) "Mi Fitness" else "健康数据", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                if (LocalDensity.current.fontScale <= 1.3f) Text(statusText, style = MaterialTheme.typography.bodySmall,
+                    color = if (statusTone == SpectraStatusTone.ERROR) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                 Icon(
-                    Icons.Rounded.KeyboardArrowDown,
+                    Icons.Rounded.KeyboardArrowRight,
                     contentDescription = "查看健康数据详情",
                     modifier = Modifier.padding(start = 4.dp).size(20.dp),
                     tint = MaterialTheme.colorScheme.onSurface.copy(.52f),
                 )
             }
-            if (LocalDensity.current.fontScale > 1.3f) SpectraStatus(statusText, tone = statusTone)
-            Spacer(Modifier.height(16.dp))
-            if (summaryMetrics.isEmpty()) {
+            if (LocalDensity.current.fontScale > 1.3f) {
+                Spacer(Modifier.height(8.dp))
+                SpectraStatus(statusText, tone = statusTone)
+            }
+            if (summaryMetrics.isEmpty() && hasData) {
+                Spacer(Modifier.height(10.dp))
                 Text(
-                    if (hasData) "${metrics.size} 项健康数据已同步" else "还没有可展示的健康记录",
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    if (hasData) "点击查看完整的今日健康详情。"
-                    else if (cloudConfigured) "同步后会在这里显示今日健康数据。"
-                    else "请检查 Health Connect 授权与已写入的数据来源。",
+                    if (hasData) "${metrics.size} 项健康数据 · 查看详情"
+                    else if (cloudConfigured) "查看健康详情与同步"
+                    else "查看健康详情与授权",
+                    modifier = Modifier.padding(start = 34.dp),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(.56f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            } else {
+            } else if (summaryMetrics.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
                 HealthMetricStrip(summaryMetrics)
             }
 
@@ -972,19 +976,16 @@ private fun SpectraProgress(totalMinutes: Long, goalMinutes: Long) {
         animationSpec = tween(motion.resolve(motion.longMillis)),
         label = "home-goal-progress",
     )
-    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalAlignment = Alignment.Start) {
-        Text(
-            formatDuration(totalMinutes),
-            style = MaterialTheme.typography.displaySmall,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Spacer(Modifier.height(5.dp))
-        Text("今日累计", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(18.dp))
+    val goalSummary = "目标 ${formatDuration(goalMinutes)} · ${(totalMinutes * 100 / goalMinutes).coerceAtMost(100)}%"
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
+        Text(formatDuration(totalMinutes), style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(6.dp))
+        Text(goalSummary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(16.dp))
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(6.dp)
+                .height(4.dp)
                 .clip(CircleShape)
                 .background(MaterialTheme.colorScheme.onSurface.copy(.10f)),
         ) {
@@ -1001,8 +1002,8 @@ private fun SpectraProgress(totalMinutes: Long, goalMinutes: Long) {
 @Composable
 private fun SectionLabel(title: String, meta: String) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
-        Text(meta, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.55f))
+        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+        if (meta.isNotBlank()) Text(meta, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.55f))
     }
 }
 

@@ -1,0 +1,17 @@
+[Unit]
+Description=Caesar backend with bounded resources and serial startup
+Requires=docker.service campusai.slice
+After=network-online.target docker.service campusai.slice
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/campusai/supabase
+ExecStart=/opt/campusai/deploy/start-bounded.sh
+ExecStop=/usr/bin/docker compose stop -t 30
+TimeoutStartSec=1500
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

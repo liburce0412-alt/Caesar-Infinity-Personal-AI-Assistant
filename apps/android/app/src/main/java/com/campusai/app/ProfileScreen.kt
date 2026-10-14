@@ -109,6 +109,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.campusai.core.designsystem.BrandMark
+import com.campusai.core.designsystem.BrandWordmark
 import com.campusai.core.designsystem.GlassPanel
 import com.campusai.core.designsystem.SpectraColors
 import com.campusai.core.designsystem.SlideConfirm
@@ -848,6 +849,7 @@ private fun AchievementCard(item: AchievementUi, modifier: Modifier = Modifier.w
 @Composable private fun VerticalRule() = Box(Modifier.width(1.dp).height(34.dp).background(SpectraColors.Silver.copy(.62f)))
 
 private fun aiProviderLabel(value: AiProvider) = when (value) {
+    AiProvider.CAESAR_CLOUD_FREE -> "Caesar cloud free"
     AiProvider.AUTO -> "自动 · 本地优先"
     AiProvider.DEEPSEEK -> "DeepSeek · 我的 Key"
     AiProvider.GOOGLE_GEMINI -> "Gemini · 我的 Key"
@@ -1173,7 +1175,10 @@ private fun HealthAutomationSettings(
                 Icon(Icons.Rounded.Notifications, null)
                 Spacer(Modifier.size(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Caesar∞ 日常", style = MaterialTheme.typography.titleMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        BrandWordmark(width = 116.dp)
+                        Text("日常", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                    }
                     Text(
                         if (active) "仅在 CampusAI 前台运行" else "定时任务未启用",
                         style = MaterialTheme.typography.bodyMedium,
@@ -1481,17 +1486,14 @@ private fun LocalAiSettings(
     val largestDownload = localModes.maxOf { manager.manifestFor(it.modelId).totalBytes }
     GlassPanel(Modifier.fillMaxWidth(), radius = 16, emphasized = true) {
         Column {
-            SettingSelector(Icons.Rounded.Cloud, "AI 运行方式", AiProvider.entries, preferences.aiProvider, {
-                when (it) {
-                    AiProvider.AUTO -> "自动"
-                    AiProvider.DEEPSEEK -> "DeepSeek"
-                    AiProvider.GOOGLE_GEMINI -> "Gemini"
-                    AiProvider.CODEX -> "Codex"
-                    AiProvider.LOCAL -> "本地模型"
-                }
-            }) { scope.launch { repository.setAiProvider(it) } }
+            com.campusai.features.ai.AiProviderPicker(
+                preferences.aiProvider,
+                { scope.launch { repository.setAiProvider(it) } },
+                Modifier.padding(12.dp),
+            )
             Text(
                 when (preferences.aiProvider) {
+                    AiProvider.CAESAR_CLOUD_FREE -> "通过 Caesar 服务器连接智谱 GLM-4.7-Flash，无需个人 Key，不设每日次数限制。发送的对话由云端处理。"
                     AiProvider.AUTO -> "优先使用当前本地档位；本地不可用时只展示已配置的云端选项，绝不会自动上传对话。"
                     AiProvider.DEEPSEEK -> "固定使用你自己的 DeepSeek Key，不会自动切换本地，也不会调用任何平台共享额度。"
                     AiProvider.GOOGLE_GEMINI -> "固定使用你自己的 Google AI Studio Key，不会自动切换本地，也不会调用其他云端 Provider。"

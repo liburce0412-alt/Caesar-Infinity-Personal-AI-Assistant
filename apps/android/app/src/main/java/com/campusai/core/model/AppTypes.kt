@@ -9,7 +9,7 @@ enum class RenderQuality { AUTO, LOW, HIGH }
  */
 enum class SpectraEnvironment { ORIGINAL, OCEAN, ULTRAVIOLET, EMBER, AURORA }
 enum class AiMode { FAST, DEEP }
-enum class AiProvider { AUTO, DEEPSEEK, GOOGLE_GEMINI, CODEX, LOCAL }
+enum class AiProvider { AUTO, DEEPSEEK, GOOGLE_GEMINI, CODEX, LOCAL, CAESAR_CLOUD_FREE }
 
 data class LocalImageRef(
     val assetId: String,

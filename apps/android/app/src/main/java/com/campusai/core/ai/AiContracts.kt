@@ -29,6 +29,8 @@ data class AiRequest(
     val imagePaths: List<String> = emptyList(),
     /** Explicit request capability: only the selected Codex provider may encode current-turn JPEGs. */
     val allowCodexImageUpload: Boolean = false,
+    /** Only the selected Caesar cloud free route may upload the explicitly attached current image. */
+    val allowCloudFreeImageUpload: Boolean = false,
     /** Explicit cloud-only capability: permits projection and execution of the read-only web.search tool. */
     val allowWebSearch: Boolean = false,
     /** A compact JSON schema for the tools projected into this turn. */

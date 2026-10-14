@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import androidx.test.core.app.ApplicationProvider
 import com.campusai.core.model.AiConversationMessage
+import com.campusai.core.model.LocalImageRef
 import java.io.File
 import java.io.FileOutputStream
 import kotlinx.coroutines.test.runTest
@@ -36,6 +37,8 @@ class CaesarImageStorageTest {
         ).single()
 
         assertEquals(1, migrated.attachmentRefs.size)
+        assertTrue(migrated.attachmentRefs.single().relativePath.startsWith("ai-conversations/conversation-unit/attachments/"))
+        assertFalse(migrated.attachmentRefs.single().relativePath.contains(".."))
         assertTrue(migrated.attachmentPaths.single().startsWith(context.noBackupFilesDir.canonicalPath))
         assertFalse(AiConversationCodec.encode(listOf(migrated)).contains(legacy.absolutePath))
 
@@ -44,5 +47,20 @@ class CaesarImageStorageTest {
         assertTrue(missing.attachmentPaths.isEmpty())
         assertEquals(1, missing.missingAttachmentCount)
         processor.deleteConversation("conversation-unit")
+    }
+
+    @Test
+    fun `canonical image resolution still rejects files outside conversation storage`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val sha = "a".repeat(64)
+        val outside = File(context.noBackupFilesDir, "$sha.jpg")
+        outside.writeBytes(byteArrayOf(-1, -40, 1, -1, -39))
+        try {
+            val ref = LocalImageRef(sha, "ai-conversations/../$sha.jpg", "image/jpeg", 1, 1, outside.length(), sha)
+            val message = AiConversationMessage("user", "图片", attachmentRefs = listOf(ref))
+            val hydrated = CaesarImageProcessor(context).hydrate(listOf(message)).single()
+            assertTrue(hydrated.attachmentPaths.isEmpty())
+            assertEquals(1, hydrated.missingAttachmentCount)
+        } finally { outside.delete() }
     }
 }

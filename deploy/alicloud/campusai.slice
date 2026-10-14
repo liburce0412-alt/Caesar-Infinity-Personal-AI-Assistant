@@ -1,0 +1,16 @@
+[Unit]
+Description=Caesar backend resource budget on the shared Hangzhou server
+
+[Slice]
+MemoryAccounting=yes
+MemoryHigh=800M
+MemoryMax=900M
+MemorySwapMax=0
+CPUAccounting=yes
+CPUQuota=100%
+IOAccounting=yes
+IOWeight=10
+IOReadBandwidthMax=/dev/vda 20M
+IOWriteBandwidthMax=/dev/vda 10M
+IOReadIOPSMax=/dev/vda 500
+IOWriteIOPSMax=/dev/vda 200

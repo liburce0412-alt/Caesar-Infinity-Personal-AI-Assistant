@@ -30,6 +30,7 @@ internal data class OpticalGlassRegion(
     val priority: Int,
     val interaction: Float = 0f,
     val touch: Offset = Offset(.5f, .5f),
+    val orb: CaesarOrbSignal? = null,
 ) {
     val area: Float get() = boundsInWindow.width * boundsInWindow.height
 }
@@ -163,7 +164,7 @@ internal object OpticalGlassRegistry {
         }
         val viewRight = viewLeft + viewWidth
         val viewBottom = viewTop + viewHeight
-        val result = regions.values
+        val visible = regions.values
             .asSequence()
             .filter { it.scope == activeScope }
             .map { it.region }
@@ -178,8 +179,10 @@ internal object OpticalGlassRegistry {
                     .thenByDescending { it.area }
                     .thenBy { it.id },
             )
-            .take(MAX_HIGH_QUALITY_REGIONS)
             .toList()
+        // A focal orb never evicts existing optical panels from their three-region budget.
+        val result = visible.filter { it.orb == null }.take(MAX_HIGH_QUALITY_REGIONS) +
+            visible.filter { it.orb != null }.take(1)
         snapshotOwner = rendererOwnerId
         snapshotLeft = viewLeft; snapshotTop = viewTop; snapshotWidth = viewWidth; snapshotHeight = viewHeight
         cachedSnapshot = result
@@ -213,6 +216,7 @@ fun Modifier.opticalGlassRegion(
     bodyOpacity: Float = .065f,
     interaction: Float = 0f,
     touch: Offset = Offset(.5f, .5f),
+    orb: CaesarOrbSignal? = null,
 ): Modifier = this.then(
     OpticalGlassElement(
         enabled = enabled,
@@ -224,6 +228,7 @@ fun Modifier.opticalGlassRegion(
         bodyOpacity = bodyOpacity.coerceIn(.06f, .30f),
         interaction = interaction.coerceIn(-.35f, 1.15f),
         touch = touch,
+        orb = orb,
     ),
 )
 
@@ -237,6 +242,7 @@ private data class OpticalGlassElement(
     val bodyOpacity: Float,
     val interaction: Float,
     val touch: Offset,
+    val orb: CaesarOrbSignal?,
 ) : ModifierNodeElement<OpticalGlassModifierNode>() {
     override fun create(): OpticalGlassModifierNode = OpticalGlassModifierNode(
         scope = OpticalGlassRegistry.currentScope(),
@@ -249,10 +255,11 @@ private data class OpticalGlassElement(
         bodyOpacity = bodyOpacity,
         interaction = interaction,
         touch = touch,
+        orb = orb,
     )
 
     override fun update(node: OpticalGlassModifierNode) {
-        node.updateParameters(enabled, radius, priority, refraction, dispersion, flow, bodyOpacity, interaction, touch)
+        node.updateParameters(enabled, radius, priority, refraction, dispersion, flow, bodyOpacity, interaction, touch, orb)
     }
 
     override fun InspectorInfo.inspectableProperties() {
@@ -278,6 +285,7 @@ private class OpticalGlassModifierNode(
     private var bodyOpacity: Float,
     private var interaction: Float,
     private var touch: Offset,
+    private var orb: CaesarOrbSignal?,
 ) : Modifier.Node(), GlobalPositionAwareModifierNode {
     private val id = OpticalGlassRegistry.nextId()
     private var coordinates: LayoutCoordinates? = null
@@ -307,6 +315,7 @@ private class OpticalGlassModifierNode(
         bodyOpacity: Float,
         interaction: Float,
         touch: Offset,
+        orb: CaesarOrbSignal?,
     ) {
         this.enabled = enabled
         this.radius = radius
@@ -317,6 +326,7 @@ private class OpticalGlassModifierNode(
         this.bodyOpacity = bodyOpacity
         this.interaction = interaction
         this.touch = touch
+        this.orb = orb
         if (isAttached) updateRegion()
     }
 
@@ -344,6 +354,7 @@ private class OpticalGlassModifierNode(
                 priority = priority,
                 interaction = interaction,
                 touch = touch,
+                orb = orb,
             ),
         )
     }

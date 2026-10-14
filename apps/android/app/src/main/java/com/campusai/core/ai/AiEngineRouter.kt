@@ -7,7 +7,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import java.util.concurrent.atomic.AtomicReference
 
-enum class AiRoute { PERSONAL_DEEPSEEK, PERSONAL_GOOGLE_GEMINI, PERSONAL_CODEX, LOCAL }
+enum class AiRoute { PERSONAL_DEEPSEEK, PERSONAL_GOOGLE_GEMINI, PERSONAL_CODEX, LOCAL, CAESAR_CLOUD_FREE }
 
 sealed interface AiRouteDecision {
     data class Use(val route: AiRoute) : AiRouteDecision
@@ -23,6 +23,11 @@ fun decideAiRoute(
     geminiKeyAvailable: Boolean = false,
     codexKeyAvailable: Boolean = false,
 ): AiRouteDecision = when (provider) {
+    AiProvider.CAESAR_CLOUD_FREE -> if (online) {
+        AiRouteDecision.Use(AiRoute.CAESAR_CLOUD_FREE)
+    } else {
+        AiRouteDecision.Block("cloud_offline", "Caesar cloud free 需要网络连接，请联网后重试。")
+    }
     AiProvider.AUTO -> when {
         localReady -> AiRouteDecision.Use(AiRoute.LOCAL)
         online && (personalKeyAvailable || geminiKeyAvailable || codexKeyAvailable) -> AiRouteDecision.Block(
@@ -85,6 +90,7 @@ class AiEngineRouter(
     private val geminiKeyAvailable: () -> Boolean = { false },
     private val personalCodex: AiEngine? = null,
     private val codexKeyAvailable: () -> Boolean = { false },
+    private val caesarCloudFree: AiEngine? = null,
 ) : AiEngine {
     private data class ActiveRoute(val engine: AiEngine)
 
@@ -97,7 +103,8 @@ class AiEngineRouter(
             message.attachmentPaths.isNotEmpty() || message.attachmentRefs.isNotEmpty()
         }
         val codexVisionTurn = selectedProvider == AiProvider.CODEX && request.allowCodexImageUpload
-        val decision = if (request.requiresLocal || (hasImages && !codexVisionTurn)) {
+        val cloudFreeVisionTurn = selectedProvider == AiProvider.CAESAR_CLOUD_FREE && request.allowCloudFreeImageUpload
+        val decision = if (request.requiresLocal || (hasImages && !codexVisionTurn && !cloudFreeVisionTurn)) {
             if (selectedLocalState == LocalModelState.Ready) AiRouteDecision.Use(AiRoute.LOCAL)
             else AiRouteDecision.Block("local_required", "本会话锁定的本地模型尚未就绪。请完成该模型下载与校验，或新建会话后选择其他档位。")
         } else decideAiRoute(
@@ -159,6 +166,8 @@ class AiEngineRouter(
 
     private fun engineFor(decision: AiRouteDecision): AiEngine = when (decision) {
         is AiRouteDecision.Use -> when (decision.route) {
+            AiRoute.CAESAR_CLOUD_FREE -> caesarCloudFree
+                ?: throw AiRoutingException("cloud_not_configured", "Caesar cloud free 尚未开放。")
             AiRoute.PERSONAL_DEEPSEEK -> personalDeepSeek
             AiRoute.PERSONAL_GOOGLE_GEMINI -> personalGoogleGemini
                 ?: throw AiRoutingException("gemini_not_configured", "Google Gemini 引擎尚未接入当前运行时。")

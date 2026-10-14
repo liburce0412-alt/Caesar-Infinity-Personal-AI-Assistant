@@ -1,0 +1,28 @@
+[Unit]
+Description=Caesar cloud free streaming relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+WorkingDirectory=/opt/campusai/cloud-free
+EnvironmentFile=/etc/campusai/cloud-free.env
+ExecStart=/usr/local/bin/node --max-old-space-size=96 /opt/campusai/cloud-free/server.mjs
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=135
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+MemoryHigh=128M
+MemoryMax=192M
+MemorySwapMax=0
+CPUQuota=100%
+CPUWeight=50
+TasksMax=32
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

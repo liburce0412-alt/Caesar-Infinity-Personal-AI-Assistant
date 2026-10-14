@@ -1,8 +1,52 @@
 package com.campusai.core.designsystem
 
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.text
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 
 internal const val CAESAR_SIGNATURE_WIDTH = 676f
+
+/** The launch signature at rest, with native brand text for accessibility and no animation loop. */
+@Composable
+fun BrandWordmark(
+    modifier: Modifier = Modifier,
+    width: Dp = 132.dp,
+    color: Color = LocalContentColor.current,
+) {
+    Spacer(
+        modifier.width(width).aspectRatio(CAESAR_SIGNATURE_WIDTH / 144f)
+            .semantics { text = AnnotatedString("Caesar∞") }
+            .drawWithCache {
+                val signature = caesarSignaturePath()
+                val signatureScale = size.width / CAESAR_SIGNATURE_WIDTH
+                val stroke = Stroke(8f, cap = StrokeCap.Square, join = StrokeJoin.Miter)
+                onDrawBehind {
+                    withTransform({
+                        translate(top = 30f * signatureScale)
+                        scale(signatureScale, signatureScale, Offset.Zero)
+                    }) {
+                        drawPath(signature, color, style = stroke)
+                    }
+                }
+            },
+    )
+}
 
 /** Original angular CAESAR infinity signature; hand-authored paths, not a third-party font. */
 internal fun caesarSignaturePath(): Path = Path().apply {

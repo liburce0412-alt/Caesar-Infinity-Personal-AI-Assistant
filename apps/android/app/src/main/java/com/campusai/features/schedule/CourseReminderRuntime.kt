@@ -5,6 +5,7 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.os.Build
 import androidx.work.*
 import com.campusai.core.auth.AuthRepository
@@ -35,6 +36,15 @@ internal class CourseReminderStore(context: Context) {
             .put("monday", value.semesterMonday).put("weeks", value.semesterWeeks)
             .put("lead", value.leadMinutes).put("live", value.live).put("xiaomi", value.xiaomi)
             .put("islandAppearance", value.islandAppearance.name).toString()).commit())
+    }
+
+    fun observe(owner: String, onChanged: (CourseReminderConfig) -> Unit): AutoCloseable {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == null || key == "config:$owner") onChanged(read(owner))
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onChanged(read(owner))
+        return AutoCloseable { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
     fun dismissed(owner: String): Set<String> = prefs.getStringSet("dismissed:$owner", emptySet())!!.toSet()
     fun dismiss(owner: String, key: String) {

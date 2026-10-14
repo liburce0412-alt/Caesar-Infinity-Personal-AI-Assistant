@@ -49,6 +49,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.campusai.core.auth.AuthState
 import com.campusai.core.designsystem.BrandMark
+import com.campusai.core.designsystem.BrandWordmark
 import com.campusai.core.designsystem.GlassPanel
 import com.campusai.core.designsystem.SpectraPrimaryButton
 import com.campusai.core.designsystem.SpectraTheme
@@ -100,7 +101,8 @@ fun AuthScreen(
                     verticalArrangement = Arrangement.spacedBy(if (fluid) 16.dp else 12.dp),
                 ) {
                     BrandMark(Modifier.size(56.dp))
-                    Text(if (mode == AuthMode.SIGN_IN) "登录 Caesar∞" else "创建 Caesar∞ 账号", style = MaterialTheme.typography.headlineMedium)
+                    BrandWordmark(width = 180.dp)
+                    Text(if (mode == AuthMode.SIGN_IN) "登录账号" else "创建账号", style = MaterialTheme.typography.titleLarge)
                     Text(
                         if (mode == AuthMode.SIGN_IN) "登录后可以同步树洞、心愿墙和你的时间记录；本地能力无需登录。"
                         else "使用管理员提供的邀请码注册，创建账号后即可进入应用。",

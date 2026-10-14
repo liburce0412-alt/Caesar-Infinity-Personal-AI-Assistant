@@ -1,6 +1,21 @@
 package com.campusai.features.ai
 
 import android.Manifest
+import android.os.Handler
+import android.os.Looper
+import android.speech.tts.UtteranceProgressListener
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
+import com.campusai.core.designsystem.CaesarGlassOrb
+import com.campusai.core.designsystem.BrandWordmark
+import com.campusai.core.designsystem.CaesarOrbSignal
+import com.campusai.core.designsystem.CaesarOrbMode
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -188,7 +203,7 @@ import kotlin.math.sin
 import java.util.Locale
 import java.util.UUID
 
-private enum class AiVisualPreset(val label: String) {
+internal enum class AiVisualPreset(val label: String) {
     CLASSIC("经典"),
     FLUID("流体"),
 }
@@ -202,6 +217,7 @@ fun AiScreen(
     visualStyle: SpectraVisualStyle,
     onVisualStyleChange: (SpectraVisualStyle) -> Unit,
     onBack: () -> Unit,
+    onOrbInteractionChanged: (CaesarOrbMode?) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
     val selectedLocalModel by viewModel.localModelSelection.collectAsState()
@@ -238,6 +254,25 @@ fun AiScreen(
         viewModel.refreshHealthStatus()
     }
     var listening by remember { mutableStateOf(false) }
+    var transcribing by remember { mutableStateOf(false) }
+    var voiceSessionActive by remember { mutableStateOf(false) }
+    var voiceMessage by remember { mutableStateOf<String?>(null) }
+    val orbSignal = remember { CaesarOrbSignal() }
+    var tts by remember { mutableStateOf<TextToSpeech?>(null) }
+    var ttsReady by remember { mutableStateOf(false) }
+    var speaking by remember { mutableStateOf(false) }
+    var activeUtterance by remember { mutableStateOf<String?>(null) }
+    var playbackMessage by remember { mutableStateOf<String?>(null) }
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    val stopPlayback: () -> Unit = {
+        activeUtterance = null
+        speaking = false
+        tts?.stop()
+    }
+    var orbAnchor by remember { mutableStateOf(Rect.Zero) }
+    var orbRoot by remember { mutableStateOf(Offset.Zero) }
+    val density = LocalDensity.current
+
     var voiceStartRequest by remember { mutableIntStateOf(0) }
     var consumedVoiceStartRequest by remember { mutableIntStateOf(0) }
     var systemSpeechConsentGranted by rememberSaveable { mutableStateOf(false) }
@@ -257,6 +292,8 @@ fun AiScreen(
         systemSpeechActivityRoute = CaesarSpeechFallbackRoute.STANDARD_RECOGNITION_ACTIVITY
         systemSpeechActivityInFlight = false
         listening = false
+        transcribing = false
+        orbSignal.reset()
         if (completedRoute == CaesarSpeechFallbackRoute.XIAOMI_ENGINE_PERMISSION_RECOVERY) {
             scope.launch {
                 snackbarHost.showSnackbar("完成系统语音引擎的麦克风授权后，请返回并再点一次语音。")
@@ -276,6 +313,10 @@ fun AiScreen(
             systemSpeechActivityInFlight = true
             systemSpeechActivityRoute = route
             listening = true
+            voiceMessage = null
+            playbackMessage = null
+            stopPlayback()
+            orbSignal.reset()
             runCatching {
                 val intent = caesarSpeechRecognitionIntent(preferOffline = false).apply {
                     if (route == CaesarSpeechFallbackRoute.XIAOMI_ENGINE_PERMISSION_RECOVERY) {
@@ -346,13 +387,18 @@ fun AiScreen(
     }
     DisposableEffect(speechRecognizer) {
         speechRecognizer?.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) { listening = true }
+            override fun onReadyForSpeech(params: Bundle?) { if (voiceSessionActive && !transcribing) listening = true }
             override fun onBeginningOfSpeech() = Unit
-            override fun onRmsChanged(rmsdB: Float) = Unit
+            override fun onRmsChanged(rmsdB: Float) { if (voiceSessionActive && listening) orbSignal.onRms(rmsdB) }
             override fun onBufferReceived(buffer: ByteArray?) = Unit
-            override fun onEndOfSpeech() { listening = false }
+            override fun onEndOfSpeech() { if (voiceSessionActive) { listening = false; transcribing = true; orbSignal.reset() } }
             override fun onError(error: Int) {
+                if (!voiceSessionActive) return
+                voiceSessionActive = false
                 listening = false
+                transcribing = false
+                orbSignal.reset()
+                voiceMessage = "语音输入未完成 · 请重试"
                 val audioPermissionGranted = ContextCompat.checkSelfPermission(
                     context,
                     Manifest.permission.RECORD_AUDIO,
@@ -406,10 +452,15 @@ fun AiScreen(
                 message?.let { scope.launch { snackbarHost.showSnackbar(it) } }
             }
             override fun onResults(results: Bundle?) {
+                if (!voiceSessionActive) return
+                voiceSessionActive = false
                 listening = false
+                transcribing = false
+                orbSignal.reset()
                 results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.let { prompt = it }
             }
             override fun onPartialResults(partialResults: Bundle?) {
+                if (!voiceSessionActive) return
                 partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.let { prompt = it }
             }
             override fun onEvent(eventType: Int, params: Bundle?) = Unit
@@ -417,11 +468,29 @@ fun AiScreen(
         onDispose { speechRecognizer?.cancel(); speechRecognizer?.destroy() }
     }
     val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(speechRecognizer) {
+        AiIslandNotifications.stopRequests.collect { mode ->
+            if (mode == CaesarOrbMode.SPEAKING && activeUtterance != null) {
+                stopPlayback()
+                playbackMessage = "朗读已停止"
+            } else if (mode in setOf(CaesarOrbMode.LISTENING, CaesarOrbMode.TRANSCRIBING) && voiceSessionActive) {
+                voiceSessionActive = false
+                speechRecognizer?.cancel()
+                listening = false; transcribing = false; orbSignal.reset()
+                voiceMessage = "语音已结束"
+            }
+        }
+    }
     DisposableEffect(lifecycleOwner, speechRecognizer) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                voiceSessionActive = false
                 speechRecognizer?.cancel()
                 listening = false
+                transcribing = false
+                orbSignal.reset()
+                if (activeUtterance != null) playbackMessage = "朗读已停止"
+                stopPlayback()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -431,11 +500,20 @@ fun AiScreen(
         if (voiceStartRequest == 0 || consumedVoiceStartRequest == voiceStartRequest) return@LaunchedEffect
         val recognizer = speechRecognizer ?: return@LaunchedEffect
         consumedVoiceStartRequest = voiceStartRequest
+        voiceSessionActive = true
         listening = true
+        transcribing = false
+        voiceMessage = null
+        playbackMessage = null
+        stopPlayback()
+        orbSignal.reset()
         runCatching {
             recognizer.startListening(caesarSpeechRecognitionIntent(speechPolicy.preferOffline))
         }.onFailure { error ->
+            voiceSessionActive = false
             listening = false
+            transcribing = false
+            voiceMessage = "语音输入无法启动 · 请重试"
             Log.w(SPEECH_LOG_TAG, "Recognizer start failed for ${speechPolicy.recognizerKind}", error)
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                 showMicrophoneSettingsRecovery = true
@@ -444,14 +522,65 @@ fun AiScreen(
             }
         }
     }
-    var tts by remember { mutableStateOf<TextToSpeech?>(null) }
     DisposableEffect(context) {
+        var alive = true
         val engine = TextToSpeech(context) { status ->
-            if (status == TextToSpeech.SUCCESS) tts?.language = Locale.SIMPLIFIED_CHINESE
+            mainHandler.post {
+                if (alive) {
+                    ttsReady = status == TextToSpeech.SUCCESS
+                    if (ttsReady) {
+                        val language = tts?.setLanguage(Locale.SIMPLIFIED_CHINESE)
+                        ttsReady = language != TextToSpeech.LANG_MISSING_DATA && language != TextToSpeech.LANG_NOT_SUPPORTED
+                    }
+                }
+            }
         }
+        engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(id: String?) { mainHandler.post { if (alive && id == activeUtterance) speaking = true } }
+            private fun finish(id: String?, message: String) { mainHandler.post {
+                if (alive && id == activeUtterance) { activeUtterance = null; speaking = false; playbackMessage = message }
+            } }
+            override fun onDone(id: String?) = finish(id, "朗读结束")
+            @Deprecated("Legacy engine callback")
+            override fun onError(id: String?) = finish(id, "朗读失败 · 请重试")
+            override fun onError(id: String?, errorCode: Int) = finish(id, "朗读失败 · 请重试")
+            override fun onStop(id: String?, interrupted: Boolean) = finish(id, "已停止朗读")
+        })
         tts = engine
-        onDispose { engine.stop(); engine.shutdown(); tts = null }
+        onDispose { alive = false; activeUtterance = null; speaking = false; engine.stop(); engine.shutdown(); tts = null }
     }
+    // A service which never returns a final result must not leave the composer stuck forever.
+    LaunchedEffect(transcribing) {
+        if (transcribing) {
+            kotlinx.coroutines.delay(12_000)
+            if (transcribing) {
+                voiceSessionActive = false
+                speechRecognizer?.cancel()
+                transcribing = false
+                voiceMessage = "转写超时 · 请重试"
+            }
+        }
+    }
+    LaunchedEffect(state.streaming, showHistory) {
+        if (state.streaming || showHistory) {
+            voiceSessionActive = false
+            speechRecognizer?.cancel()
+            listening = false; transcribing = false; orbSignal.reset()
+            stopPlayback()
+            playbackMessage = null
+            voiceMessage = null
+        }
+    }
+    val orbPresentation = aiOrbPresentation(state, listening, transcribing, speaking, voiceMessage, playbackMessage)
+    val interactionMode = orbPresentation.mode.takeIf {
+        listening || transcribing || activeUtterance != null || playbackMessage != null || voiceMessage != null
+    }
+    LaunchedEffect(interactionMode) { onOrbInteractionChanged(interactionMode) }
+    DisposableEffect(Unit) { onDispose { onOrbInteractionChanged(null) } }
+    val voiceOrb = listening || transcribing
+    val emptyConversation = state.messages.none { it.content.isNotBlank() || it.attachmentPaths.isNotEmpty() } && state.error == null && !state.streaming
+    val heroOrb = emptyConversation && !voiceOrb && !speaking && voiceMessage == null && playbackMessage == null
+    val captureOrbAnchor: (androidx.compose.ui.layout.LayoutCoordinates) -> Unit = { orbAnchor = it.boundsInWindow() }
 
     LaunchedEffect(showContext, showRuntime) {
         if (showContext || showRuntime) viewModel.refreshHealthStatus()
@@ -469,7 +598,8 @@ fun AiScreen(
                 WindowInsets.ime
                     .union(WindowInsets.navigationBars)
                     .only(WindowInsetsSides.Bottom),
-            ),
+            )
+            .onGloballyPositioned { orbRoot = it.boundsInWindow().topLeft },
     ) {
         Column(Modifier.fillMaxSize()) {
             if (visualPreset == AiVisualPreset.CLASSIC) {
@@ -486,7 +616,11 @@ fun AiScreen(
                     onContext = { showContext = true },
                     onTasks = { showTasks = true },
                     onHistory = { showHistory = !showHistory },
-                    onNewConversation = viewModel::newConversation,
+                    onNewConversation = {
+                        voiceSessionActive = false; speechRecognizer?.cancel(); listening = false; transcribing = false
+                        stopPlayback(); orbSignal.reset(); voiceMessage = null; playbackMessage = null
+                        viewModel.newConversation()
+                    },
                 )
             } else {
                 FluidAiHeader(
@@ -496,10 +630,26 @@ fun AiScreen(
                     onBack = onBack,
                     onRuntime = { showRuntime = true },
                     onHistory = { showHistory = !showHistory },
-                    onNewConversation = viewModel::newConversation,
+                    onNewConversation = {
+                        voiceSessionActive = false; speechRecognizer?.cancel(); listening = false; transcribing = false
+                        stopPlayback(); orbSignal.reset(); voiceMessage = null; playbackMessage = null
+                        viewModel.newConversation()
+                    },
                 )
             }
 
+            if (!showHistory && !heroOrb && !voiceOrb) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = SpectraTheme.layout.pageHorizontalPadding, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Spacer(Modifier.size(44.dp).onGloballyPositioned(captureOrbAnchor))
+                    Text(orbPresentation.label, Modifier.weight(1f).padding(start = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (speaking) TextButton(onClick = { stopPlayback(); playbackMessage = "已停止朗读" }) { Text("停止朗读") }
+                }
+            }
             if (showHistory) {
                 LazyColumn(
                     Modifier.weight(1f).padding(horizontal = SpectraTheme.layout.pageHorizontalPadding),
@@ -553,13 +703,15 @@ fun AiScreen(
                 )
             } else {
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                    if (state.messages.none { it.content.isNotBlank() } && state.error == null && !state.streaming) {
+                    if (emptyConversation) {
                         QuietEmptyState(
                             if (localRouteSelected) localModelStatus(localModel) else selectedCloudProviderStatus(state.provider),
                             motionEnabled,
                             visualPreset,
                             Modifier.fillMaxSize(),
                             headline = "现在，想做什么？",
+                            orbVisible = heroOrb,
+                            onOrbPositioned = captureOrbAnchor,
                         )
                     } else {
                         LazyColumn(
@@ -604,7 +756,21 @@ fun AiScreen(
                                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                                     IconButton(onClick = {
                                                         val engine = tts ?: return@IconButton
-                                                        if (engine.isSpeaking) engine.stop() else engine.speak(plainAiText(message.content), TextToSpeech.QUEUE_FLUSH, null, "caesar-${message.hashCode()}")
+                                                        if (activeUtterance != null) {
+                                                            stopPlayback(); playbackMessage = "已停止朗读"
+                                                        } else if (!ttsReady) {
+                                                            scope.launch { snackbarHost.showSnackbar("朗读引擎尚未就绪或缺少中文语音，请稍后重试。") }
+                                                        } else {
+                                                            voiceSessionActive = false
+                                                            speechRecognizer?.cancel()
+                                                            listening = false; transcribing = false; orbSignal.reset()
+                                                            voiceMessage = null; playbackMessage = "正在准备朗读"
+                                                            val utterance = UUID.randomUUID().toString()
+                                                            activeUtterance = utterance
+                                                            if (engine.speak(plainAiText(message.content), TextToSpeech.QUEUE_FLUSH, null, utterance) == TextToSpeech.ERROR) {
+                                                                activeUtterance = null; playbackMessage = "朗读失败 · 请重试"
+                                                            }
+                                                        }
                                                     }, modifier = Modifier.size(48.dp)) { Icon(Icons.Rounded.VolumeUp, "朗读或停止", modifier = Modifier.size(18.dp)) }
                                                     if (messageIndex == regeneratableAssistantIndex) {
                                                         TextButton(
@@ -622,13 +788,6 @@ fun AiScreen(
                                     }
                                 }
                             }
-                            if (state.streaming) item {
-                                ThinkingStatusVisibility(
-                                    visible = state.messages.lastOrNull()?.content.isNullOrBlank(),
-                                    motionEnabled = motionEnabled,
-                                    preset = visualPreset,
-                                )
-                            }
                             state.error?.let { error -> item { AiErrorCard(state, error, viewModel::useCloudOnce) } }
                         }
                     }
@@ -637,6 +796,22 @@ fun AiScreen(
                     hostState = snackbarHost,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = SpectraTheme.layout.pageHorizontalPadding, vertical = 4.dp),
                 )
+                if (voiceOrb) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center) {
+                        Spacer(Modifier.size(92.dp).onGloballyPositioned(captureOrbAnchor))
+                        Text(orbPresentation.label, Modifier.weight(1f).padding(start = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                            style = MaterialTheme.typography.bodyMedium, maxLines = 2)
+                        if (transcribing) TextButton(onClick = {
+                            voiceSessionActive = false; speechRecognizer?.cancel(); transcribing = false; orbSignal.reset()
+                        }) { Text("取消") }
+                    }
+                }
+                if (state.pendingImages.isNotEmpty() && state.provider == AiProvider.CAESAR_CLOUD_FREE) {
+                    Text("当前图片将发送到 Caesar cloud free · GLM-4V-Flash（每次一张）",
+                        Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 AiComposer(
                     value = prompt,
                     onValueChange = { prompt = it },
@@ -656,7 +831,8 @@ fun AiScreen(
                     onRemoveImage = viewModel::removeImage,
                     listening = listening,
                     onVoice = {
-                        if (listening) { speechRecognizer?.stopListening(); listening = false }
+                        if (listening) { speechRecognizer?.stopListening(); listening = false; transcribing = true; orbSignal.reset() }
+                        else if (transcribing) { voiceSessionActive = false; speechRecognizer?.cancel(); transcribing = false; orbSignal.reset() }
                         else if (speechPolicy.recognizerKind == CaesarSpeechRecognizerKind.UNAVAILABLE) scope.launch {
                             snackbarHost.showSnackbar("当前设备没有可用的语音识别服务。")
                         }
@@ -673,6 +849,10 @@ fun AiScreen(
                     onAction = {
                         if (state.streaming) viewModel.cancel()
                         else if (prompt.isNotBlank() || state.pendingImages.isNotEmpty()) {
+                            voiceSessionActive = false
+                            speechRecognizer?.cancel()
+                            listening = false; transcribing = false; orbSignal.reset()
+                            stopPlayback(); playbackMessage = null; voiceMessage = null
                             val value = prompt.ifBlank { "请分析这些图片。" }
                             prompt = ""
                             viewModel.send(value, snapshot)
@@ -680,6 +860,13 @@ fun AiScreen(
                     },
                 )
             }
+        }
+        if (!showHistory && orbAnchor.width > 0f) {
+            CaesarGlassOrb(
+                modifier = Modifier.offset { IntOffset((orbAnchor.left - orbRoot.x).roundToInt(), (orbAnchor.top - orbRoot.y).roundToInt()) },
+                size = with(density) { orbAnchor.width.toDp() },
+                mode = orbPresentation.mode, motionEnabled = motionEnabled, signal = orbSignal,
+            )
         }
     }
 
@@ -813,7 +1000,13 @@ private fun runtimeSummary(
     provider: AiProvider,
     resolvedModel: String,
     localModel: LocalModelSelection,
-): String = resolvedModel.takeIf(String::isNotBlank) ?: when (provider) {
+): String = if (provider == AiProvider.CAESAR_CLOUD_FREE) when (resolvedModel) {
+    "glm-4-flash-250414" -> "GLM-4-Flash · 免费兜底"
+    "glm-4.7-flash" -> "GLM-4.7-Flash · 免费"
+    "glm-4v-flash" -> "GLM-4V-Flash · 免费"
+    else -> "Caesar cloud free"
+} else resolvedModel.takeIf(String::isNotBlank) ?: when (provider) {
+    AiProvider.CAESAR_CLOUD_FREE -> "Caesar cloud free"
     AiProvider.AUTO -> "自动 · ${localModel.mode.displayLabel()}优先"
     AiProvider.LOCAL -> "本机 · ${localModel.mode.displayLabel()}"
     AiProvider.DEEPSEEK -> "DeepSeek"
@@ -822,6 +1015,7 @@ private fun runtimeSummary(
 }
 
 private val AI_RUNTIME_PROVIDERS = listOf(
+    AiProvider.CAESAR_CLOUD_FREE,
     AiProvider.AUTO,
     AiProvider.LOCAL,
     AiProvider.CODEX,
@@ -830,14 +1024,6 @@ private val AI_RUNTIME_PROVIDERS = listOf(
 )
 
 private fun providerIndex(provider: AiProvider): Int = AI_RUNTIME_PROVIDERS.indexOf(provider).coerceAtLeast(0)
-
-private fun providerSelectorLabel(provider: AiProvider): String = when (provider) {
-    AiProvider.AUTO -> "自动"
-    AiProvider.LOCAL -> "本机"
-    AiProvider.CODEX -> "Codex"
-    AiProvider.DEEPSEEK -> "DeepSeek"
-    AiProvider.GOOGLE_GEMINI -> "Gemini"
-}
 
 private fun selectProvider(index: Int, viewModel: AiViewModel) {
     AI_RUNTIME_PROVIDERS.getOrNull(index)?.let(viewModel::setProvider)
@@ -869,10 +1055,11 @@ private fun FluidAiHeader(
                 .clip(RoundedCornerShape(12.dp))
                 .clickable(enabled = !streaming, role = Role.Button, onClick = onRuntime)
                 .padding(horizontal = 6.dp, vertical = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text("Caesar∞", style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            BrandWordmark(width = 124.dp)
             Text(
-                "流体 · $runtimeLabel",
+                runtimeLabel,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -922,7 +1109,7 @@ private fun ClassicAiChrome(
                     .clickable(enabled = !streaming, role = Role.Button, onClick = onRuntime)
                     .padding(horizontal = 4.dp, vertical = 2.dp),
             ) {
-                Text("Caesar∞", style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                BrandWordmark(width = 136.dp)
                 Text(
                     runtimeLabel,
                     style = MaterialTheme.typography.bodyMedium,
@@ -941,14 +1128,8 @@ private fun ClassicAiChrome(
     }
     if (showHistory) return
 
-    CaesarSlidingSelector(
-        options = AI_RUNTIME_PROVIDERS.map(::providerSelectorLabel),
-        selectedIndex = providerIndex(provider),
-        enabled = !streaming,
-        motionEnabled = motionEnabled,
-        onSelected = onProviderSelected,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = SpectraTheme.layout.pageHorizontalPadding),
-    )
+    AiProviderPicker(provider, { onProviderSelected(providerIndex(it)) },
+        Modifier.fillMaxWidth().padding(horizontal = SpectraTheme.layout.pageHorizontalPadding), enabled = !streaming)
     Row(
         Modifier.fillMaxWidth().padding(horizontal = SpectraTheme.layout.pageHorizontalPadding, vertical = 7.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -965,14 +1146,9 @@ private fun ClassicAiChrome(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                LiquidMetalOrb(active = false, motionEnabled = motionEnabled, size = 34.dp)
+                Icon(Icons.Rounded.AutoAwesome, contentDescription = null, modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
-                    when (provider) {
-                        AiProvider.DEEPSEEK -> "DEEPSEEK"
-                        AiProvider.GOOGLE_GEMINI -> "GEMINI"
-                        AiProvider.CODEX -> "CODEX · TAILSCALE"
-                        AiProvider.AUTO, AiProvider.LOCAL -> "${localModel.mode.displayLabel()} · 本机"
-                    },
+                    "回答与界面设置",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurface.copy(.68f),
                     maxLines = 1,
@@ -1034,37 +1210,14 @@ private fun AiRuntimeSheet(
                 .padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Caesar∞ 界面体系", style = MaterialTheme.typography.headlineSmall)
-            Text(
-                "选择会同步改变整个 App 的背景场、页面留白、卡片体积、导航与转场；模型、图片、语音、健康与手环能力保持一致。",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface.copy(.62f),
-            )
-            Text("全局预设", style = MaterialTheme.typography.labelLarge)
-            CaesarSlidingSelector(
-                options = AiVisualPreset.entries.map(AiVisualPreset::label),
-                selectedIndex = visualPreset.ordinal,
-                enabled = !streaming,
-                motionEnabled = motionEnabled,
-                onSelected = { onPresetSelected(AiVisualPreset.entries[it]) },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            HealthStatus(
-                state = healthState,
-                onRefresh = onRefreshHealth,
-                onCloudRefresh = onSyncMiFitnessSteps,
-                onPermissions = onHealthPermissions,
-            )
-            Text("运行方式", style = MaterialTheme.typography.labelLarge)
-            CaesarSlidingSelector(
-                options = AI_RUNTIME_PROVIDERS.map(::providerSelectorLabel),
-                selectedIndex = providerIndex(provider),
-                enabled = !streaming,
-                motionEnabled = motionEnabled,
-                onSelected = onProviderSelected,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (provider == AiProvider.DEEPSEEK || provider == AiProvider.GOOGLE_GEMINI || provider == AiProvider.CODEX) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                BrandWordmark()
+                Text("AI 与界面", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+            }
+            Text("选择 AI", style = MaterialTheme.typography.labelLarge)
+            AiProviderChoices(provider, !streaming) { onProviderSelected(providerIndex(it)) }
+            if (provider == AiProvider.CAESAR_CLOUD_FREE || provider == AiProvider.DEEPSEEK || provider == AiProvider.GOOGLE_GEMINI || provider == AiProvider.CODEX) {
+                Text("回答方式", style = MaterialTheme.typography.labelLarge)
                 CaesarSlidingSelector(
                     options = listOf("快速", "深度"),
                     selectedIndex = if (mode == AiMode.FAST) 0 else 1,
@@ -1072,6 +1225,10 @@ private fun AiRuntimeSheet(
                     motionEnabled = motionEnabled,
                     onSelected = { onModeSelected(if (it == 0) AiMode.FAST else AiMode.DEEP) },
                     modifier = Modifier.fillMaxWidth(),
+                )
+                if (provider == AiProvider.CAESAR_CLOUD_FREE) Text(
+                    if (mode == AiMode.FAST) "快速 · 优先响应速度；拥堵时使用免费备用模型。" else "深度 · 使用 GLM-4.7-Flash，等待时间更长。",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
                 Text("新会话默认", style = MaterialTheme.typography.labelLarge)
@@ -1093,6 +1250,21 @@ private fun AiRuntimeSheet(
                     color = MaterialTheme.colorScheme.onSurface.copy(.62f),
                 )
             }
+            Text("界面预设", style = MaterialTheme.typography.labelLarge)
+            CaesarSlidingSelector(
+                options = AiVisualPreset.entries.map(AiVisualPreset::label),
+                selectedIndex = visualPreset.ordinal,
+                enabled = !streaming,
+                motionEnabled = motionEnabled,
+                onSelected = { onPresetSelected(AiVisualPreset.entries[it]) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            HealthStatus(
+                state = healthState,
+                onRefresh = onRefreshHealth,
+                onCloudRefresh = onSyncMiFitnessSteps,
+                onPermissions = onHealthPermissions,
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 SpectraAction(
                     text = "对话依据与手环",
@@ -1112,6 +1284,7 @@ private fun AiRuntimeSheet(
 }
 
 private fun providerLabel(provider: AiProvider) = when (provider) {
+    AiProvider.CAESAR_CLOUD_FREE -> "Caesar cloud free"
     AiProvider.LOCAL -> "本地"
     AiProvider.DEEPSEEK -> "DeepSeek"
     AiProvider.GOOGLE_GEMINI -> "Gemini"
@@ -1120,6 +1293,7 @@ private fun providerLabel(provider: AiProvider) = when (provider) {
 }
 
 internal fun selectedCloudProviderStatus(provider: AiProvider): String = when (provider) {
+    AiProvider.CAESAR_CLOUD_FREE -> "Caesar cloud free · 已选择"
     AiProvider.DEEPSEEK -> "DEEPSEEK · 已选择"
     AiProvider.GOOGLE_GEMINI -> "GEMINI · 已选择"
     AiProvider.CODEX -> "CODEX · 已选择"
@@ -1194,7 +1368,8 @@ private fun AnalysisActionCard(presentation: AiTaskPresentation, answer: String)
 private fun CaesarSurfaceCard(surface: CaesarSurface, answer: String, onAction: (String) -> Unit) {
     GlassPanel(Modifier.fillMaxWidth(.96f), radius = 18, shadowed = false) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-            Text(surface.title.ifBlank { "Caesar∞" }, style = MaterialTheme.typography.titleLarge)
+            if (surface.title.isBlank() || surface.title == "Caesar∞") BrandWordmark()
+            else Text(surface.title, style = MaterialTheme.typography.titleLarge)
             val cleanAnswer = plainAiText(answer).trim()
             if (cleanAnswer.isNotBlank()) Text(cleanAnswer, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.68f))
             surface.components.forEach { component ->
@@ -1772,204 +1947,40 @@ private fun SpectraSegmentedControl(
 }
 
 @Composable
-private fun QuietEmptyState(
+internal fun QuietEmptyState(
     label: String,
     motionEnabled: Boolean,
     preset: AiVisualPreset,
     modifier: Modifier = Modifier,
     headline: String? = null,
+    orbVisible: Boolean = false,
+    onOrbPositioned: (androidx.compose.ui.layout.LayoutCoordinates) -> Unit = {},
 ) {
-    if (preset == AiVisualPreset.CLASSIC || headline == null) {
-        Column(modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            LiquidMetalOrb(active = false, motionEnabled = motionEnabled, size = 56.dp)
-            Spacer(Modifier.size(12.dp))
-            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface.copy(.50f))
-        }
+    if (headline == null) {
+        Text(label, modifier.padding(24.dp), style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
         return
     }
-    Column(
-        modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 24.dp),
-        verticalArrangement = Arrangement.Bottom,
-        horizontalAlignment = Alignment.Start,
-    ) {
-        Text(headline, style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.onSurface.copy(.90f))
-        Spacer(Modifier.height(14.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            LiquidMetalOrb(active = false, motionEnabled = motionEnabled, size = 34.dp)
-            Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.56f))
+    BoxWithConstraints(modifier) {
+        val orbSize = minOf(204.dp, maxWidth * .56f, maxHeight * .53f).coerceAtLeast(48.dp)
+        Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.BiasAlignment(0f, if (maxHeight > 400.dp) -.28f else 0f)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+            if (orbVisible) Spacer(Modifier.size(orbSize).onGloballyPositioned(onOrbPositioned))
+            Spacer(Modifier.height(12.dp))
+            Text(headline, style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(.90f))
+            if (preset == AiVisualPreset.CLASSIC) {
+                Spacer(Modifier.height(10.dp))
+                Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         }
     }
 }
 
 @Composable
-private fun StreamingStatus(motionEnabled: Boolean, preset: AiVisualPreset) {
-    Row(
-        modifier = Modifier.padding(vertical = if (preset == AiVisualPreset.FLUID) 4.dp else 0.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        LiquidMetalOrb(
-            active = true,
-            motionEnabled = motionEnabled,
-            size = if (preset == AiVisualPreset.FLUID) 30.dp else 40.dp,
-        )
-        Column {
-            Text(
-                if (preset == AiVisualPreset.FLUID) "Caesar∞ 正在整理" else "思考中",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface.copy(.68f),
-            )
-            ThinkingMarquee(motionEnabled)
-        }
-    }
-}
-
-@Composable
-private fun LiquidMetalOrb(active: Boolean, motionEnabled: Boolean, size: androidx.compose.ui.unit.Dp) {
-    val phase = if (motionEnabled) {
-        val transition = rememberInfiniteTransition(label = "liquid-metal-orb")
-        val animated by transition.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(if (active) 2_200 else 5_200, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart,
-            ),
-            label = "liquid-metal-caustic",
-        )
-        animated
-    } else .114f
-    Canvas(Modifier.size(size)) {
-        val t = phase * PI * 2.0
-        val inset = 1.25.dp.toPx()
-        val radius = (this.size.minDimension * .5f - inset).coerceAtLeast(1f)
-        val cx = center.x
-        val cy = center.y
-        val sphere = Path().apply { addOval(Rect(cx - radius, cy - radius, cx + radius, cy + radius)) }
-        val light = Offset(cx - radius * .35f, cy - radius * .38f)
-        drawCircle(
-            Brush.radialGradient(
-                colorStops = arrayOf(
-                    0f to Color.White,
-                    .18f to Color(0xFFF5F8FC),
-                    .42f to Color(0xFFB8C3D0),
-                    .68f to Color(0xFF6D7B8D),
-                    .86f to Color(0xFFDCE3EB),
-                    1f to Color(0xFF8794A5),
-                ),
-                center = light,
-                radius = radius * 1.72f,
-            ),
-            radius = radius,
-            center = center,
-        )
-        clipPath(sphere) {
-            val bandY = cy + sin(t * .72).toFloat() * radius * .13f
-            val liquid = Path().apply {
-                moveTo(cx - radius * 1.20f, bandY)
-                cubicTo(cx - radius * .70f, bandY - radius * .32f, cx - radius * .08f, bandY + radius * .28f, cx + radius * .36f, bandY - radius * .12f)
-                cubicTo(cx + radius * .72f, bandY - radius * .42f, cx + radius, bandY + radius * .06f, cx + radius * 1.20f, bandY - radius * .08f)
-                lineTo(cx + radius * 1.20f, cy + radius * 1.20f)
-                lineTo(cx - radius * 1.20f, cy + radius * 1.20f)
-                close()
-            }
-            drawPath(
-                liquid,
-                Brush.verticalGradient(
-                    listOf(Color(0xFF657489).copy(.12f), Color(0xFF273548).copy(.34f), Color(0xFFABB8C7).copy(.42f), Color.White.copy(.34f)),
-                    startY = bandY - radius * .20f,
-                    endY = cy + radius,
-                ),
-            )
-            val innerX = cx + sin(t * .77).toFloat() * radius * .25f
-            val innerY = cy + cos(t * .63).toFloat() * radius * .20f
-            drawOval(
-                Brush.radialGradient(
-                    listOf(Color.White.copy(.72f), SpectraColors.Cyan.copy(.30f), SpectraColors.Violet.copy(.28f), Color.Transparent),
-                    center = Offset(innerX - radius * .12f, innerY - radius * .08f),
-                    radius = radius * .62f,
-                ),
-                topLeft = Offset(innerX - radius * .58f, innerY - radius * .34f),
-                size = Size(radius * 1.16f, radius * .68f),
-            )
-            drawOval(
-                Brush.radialGradient(listOf(Color.White.copy(.92f), Color.White.copy(.20f), Color.Transparent), center = light, radius = radius * .48f),
-                topLeft = Offset(light.x - radius * .48f, light.y - radius * .31f),
-                size = Size(radius * .96f, radius * .62f),
-            )
-            val caustic = Path().apply {
-                moveTo(cx - radius * .76f, cy + radius * (.18f + sin(t).toFloat() * .07f))
-                cubicTo(cx - radius * .28f, cy - radius * .10f, cx + radius * .18f, cy + radius * .34f, cx + radius * .76f, cy - radius * .16f)
-            }
-            drawPath(
-                caustic,
-                Brush.horizontalGradient(
-                    listOf(SpectraColors.Cyan.copy(.12f), SpectraColors.Cyan.copy(.86f), Color.White, SpectraColors.Violet.copy(.76f), SpectraColors.Warm.copy(.48f), Color.Transparent),
-                ),
-                style = Stroke(width = (this.size.minDimension * .032f).coerceAtLeast(1.dp.toPx()), cap = StrokeCap.Round),
-            )
-            repeat(if (active) 24 else 16) { index ->
-                val seed = index * 2.399f + t.toFloat() * (.42f + (index % 4) * .035f)
-                val distance = radius * (.12f + (index % 7) * .105f)
-                val point = Offset(cx + cos(seed) * distance, cy + sin(seed * 1.17f) * distance * .78f)
-                drawCircle(
-                    color = when (index % 5) {
-                        0 -> SpectraColors.Cyan.copy(.68f)
-                        1 -> SpectraColors.Violet.copy(.50f)
-                        2 -> SpectraColors.Warm.copy(.34f)
-                        else -> Color.White.copy(.30f + (index % 3) * .12f)
-                    },
-                    radius = (.24f + (index % 3) * .10f).dp.toPx(),
-                    center = point,
-                )
-            }
-        }
-        drawCircle(
-            Brush.linearGradient(listOf(Color.White.copy(.92f), Color(0xFFD7E0EB).copy(.72f), Color(0xFF8593A5).copy(.54f), Color.White.copy(.42f))),
-            radius = radius,
-            center = center,
-            style = Stroke(width = 1.dp.toPx()),
-        )
-    }
-}
-
-@Composable
-private fun ThinkingMarquee(motionEnabled: Boolean) {
-    val trackColor = MaterialTheme.colorScheme.onSurface
-    val phase = if (motionEnabled) {
-        val transition = rememberInfiniteTransition(label = "thinking-silver-signal")
-        val animated by transition.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(1_650, easing = LinearEasing), RepeatMode.Reverse),
-            label = "thinking-silver-signal-phase",
-        )
-        animated
-    } else .5f
-    Canvas(Modifier.width(116.dp).height(10.dp).padding(top = 5.dp)) {
-        val trackHeight = 1.5.dp.toPx()
-        val beadWidth = 30.dp.toPx().coerceAtMost(size.width * .42f)
-        val beadX = (size.width - beadWidth) * phase
-        drawRoundRect(
-            trackColor.copy(.10f),
-            size = Size(size.width, trackHeight),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(trackHeight),
-        )
-        drawRoundRect(
-            Brush.horizontalGradient(
-                listOf(Color.Transparent, Color.White.copy(.86f), SpectraColors.Silver.copy(.72f), Color.Transparent),
-                startX = beadX,
-                endX = beadX + beadWidth,
-            ),
-            topLeft = Offset(beadX, 0f),
-            size = Size(beadWidth, trackHeight),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(trackHeight),
-        )
-    }
-}
-
-@Composable
-private fun AiComposer(
+internal fun AiComposer(
     value: String,
     onValueChange: (String) -> Unit,
     streaming: Boolean,
@@ -2129,7 +2140,6 @@ private fun ClassicAiComposer(
                         },
                     )
                 }
-                ComposerLoaderVisibility(streaming, motionEnabled, Modifier.matchParentSize())
             }
             GlassPanel(
                 Modifier.size(56.dp),
@@ -2214,7 +2224,8 @@ private fun FluidAiComposer(
     callbacks: AiComposerCallbacks,
 ) {
     val dark = MaterialTheme.colorScheme.background.luminance() < .35f
-    Box(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp)) {
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp)) {
+        val compact = maxWidth >= 340.dp && LocalDensity.current.fontScale <= 1.3f
         GlassPanel(
             Modifier.fillMaxWidth(),
             radius = 28,
@@ -2229,6 +2240,29 @@ private fun FluidAiComposer(
                     onRemoveImage = callbacks.onRemoveImage,
                     modifier = Modifier.fillMaxWidth().padding(start = 6.dp, end = 6.dp, bottom = 5.dp),
                 )
+                if (compact) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        ComposerToolAction(Icons.Rounded.Image, "照片", !streaming && !importingImage && images.size < 4, false, callbacks.onPickImage)
+                        BasicTextField(value, callbacks.onValueChange,
+                            modifier = Modifier.weight(1f).heightIn(min = 48.dp, max = 112.dp).padding(vertical = 13.dp, horizontal = 4.dp),
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                            cursorBrush = SolidColor(SpectraColors.Focus), maxLines = 4,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                            keyboardActions = KeyboardActions(onSend = { if (!streaming && value.isNotBlank()) callbacks.onAction() }),
+                            decorationBox = { inner ->
+                                Box { if (value.isEmpty()) Text("想聊些什么？", style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    inner() }
+                            })
+                        ComposerToolAction(Icons.Rounded.CameraAlt, "拍照", !streaming && !importingImage && images.size < 4, false, callbacks.onCamera)
+                        ComposerToolAction(Icons.Rounded.Mic, if (listening) "结束转写" else "语音", !streaming, listening, callbacks.onVoice)
+                        IconButton(onClick = callbacks.onAction, enabled = streaming || value.isNotBlank() || images.isNotEmpty(),
+                            modifier = Modifier.size(48.dp).clip(CircleShape).background(SpectraColors.Focus.copy(if (dark) .34f else .16f))) {
+                            Icon(if (streaming) Icons.Rounded.StopCircle else Icons.AutoMirrored.Rounded.Send,
+                                if (streaming) "停止生成" else "发送")
+                        }
+                    }
+                } else {
                 BasicTextField(
                     value = value,
                     onValueChange = callbacks.onValueChange,
@@ -2290,9 +2324,9 @@ private fun FluidAiComposer(
                         }
                     }
                 }
+                }
             }
         }
-        ComposerLoaderVisibility(streaming, motionEnabled, Modifier.matchParentSize())
     }
 }
 
@@ -2332,67 +2366,6 @@ private fun ComposerToolAction(
                 selected -> SpectraColors.Focus
                 else -> MaterialTheme.colorScheme.onSurface.copy(.78f)
             },
-        )
-    }
-}
-
-@Composable
-private fun ThinkingStatusVisibility(
-    visible: Boolean,
-    motionEnabled: Boolean,
-    preset: AiVisualPreset,
-) {
-    AnimatedVisibility(visible = visible, exit = fadeOut(tween(160))) {
-        StreamingStatus(motionEnabled, preset)
-    }
-}
-
-@Composable
-private fun ComposerLoaderVisibility(
-    visible: Boolean,
-    motionEnabled: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    AnimatedVisibility(modifier = modifier, visible = visible, exit = fadeOut(tween(160))) {
-        ComposerLoaderEdge(motionEnabled, Modifier.fillMaxSize())
-    }
-}
-
-@Composable
-private fun ComposerLoaderEdge(motionEnabled: Boolean, modifier: Modifier = Modifier) {
-    val trackColor = MaterialTheme.colorScheme.onSurface
-    val phase = if (motionEnabled) {
-        val transition = rememberInfiniteTransition(label = "composer-silver-seam")
-        val animated by transition.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(tween(1_800, easing = LinearEasing), RepeatMode.Reverse),
-            label = "composer-silver-seam-phase",
-        )
-        animated
-    } else .5f
-    Canvas(modifier) {
-        val inset = 16.dp.toPx()
-        val seamHeight = 2.dp.toPx()
-        val trackWidth = (size.width - inset * 2f).coerceAtLeast(1f)
-        val beadWidth = (48.dp.toPx()).coerceAtMost(trackWidth * .44f)
-        val beadX = inset + (trackWidth - beadWidth) * phase
-        val y = size.height - 3.dp.toPx()
-        drawRoundRect(
-            trackColor.copy(.08f),
-            topLeft = Offset(inset, y),
-            size = Size(trackWidth, seamHeight),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(seamHeight),
-        )
-        drawRoundRect(
-            Brush.horizontalGradient(
-                listOf(Color.Transparent, Color.White.copy(.94f), SpectraColors.Silver.copy(.78f), Color.Transparent),
-                startX = beadX,
-                endX = beadX + beadWidth,
-            ),
-            topLeft = Offset(beadX, y),
-            size = Size(beadWidth, seamHeight),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(seamHeight),
         )
     }
 }

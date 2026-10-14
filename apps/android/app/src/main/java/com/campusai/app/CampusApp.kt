@@ -251,6 +251,8 @@ internal fun externalImageCompletionDisposition(
 @Composable
 fun CampusApp(
     dao: CampusDao,
+    initialAiStatusRequested: Boolean = false,
+    onAiStatusConsumed: () -> Unit = {},
     initialSharedImage: Uri? = null,
     onSharedImageConsumed: () -> Unit = {},
     initialAutomationConversationId: String? = null,
@@ -298,6 +300,15 @@ fun CampusApp(
         ),
     )
     val aiRuntimeState by aiViewModel.state.collectAsState()
+    var aiOrbInteraction by remember { mutableStateOf<com.campusai.core.designsystem.CaesarOrbMode?>(null) }
+    com.campusai.features.ai.AiIslandStatusHost(aiRuntimeState, aiOrbInteraction)
+    LaunchedEffect(aiViewModel) {
+        com.campusai.features.ai.AiIslandNotifications.stopRequests.collect { mode ->
+            if (mode in setOf(com.campusai.core.designsystem.CaesarOrbMode.THINKING,
+                    com.campusai.core.designsystem.CaesarOrbMode.RESPONDING) && aiViewModel.state.value.streaming) aiViewModel.cancel()
+        }
+    }
+
     val healthState by aiViewModel.healthState.collectAsState()
     val campusViewModel: CampusViewModel = viewModel()
     val campusState by campusViewModel.state.collectAsState()
@@ -382,6 +393,13 @@ fun CampusApp(
         // A completion superseded by a different/non-share Intent is stale. Ack it as well so
         // sharing the same content URI in a future Intent starts a fresh import.
         aiViewModel.acknowledgeExternalImageImport(completed)
+    }
+
+    LaunchedEffect(initialAiStatusRequested) {
+        if (initialAiStatusRequested) {
+            navigateTo(AppSurface.Ai(appSurface.returnDestination))
+            onAiStatusConsumed()
+        }
     }
 
     LaunchedEffect(initialAutomationConversationId, aiHistory, aiRuntimeState.streaming) {
@@ -757,6 +775,7 @@ fun CampusApp(
                 }
                 is AppSurface.Ai -> {
                     AiScreen(
+                        onOrbInteractionChanged = { aiOrbInteraction = it },
                         viewModel = aiViewModel,
                         snapshot = aiSnapshot,
                         motionEnabled = preferences.motionMode == MotionMode.ON,

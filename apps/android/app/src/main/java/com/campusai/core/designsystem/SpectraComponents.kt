@@ -131,6 +131,8 @@ import kotlinx.coroutines.launch
 import java.util.WeakHashMap
 import kotlin.math.roundToInt
 import kotlin.math.abs
+import kotlin.math.sin
+import kotlin.math.cos
 
 @Composable
 fun SpectraBackdrop(
@@ -145,6 +147,47 @@ fun SpectraBackdrop(
     if (motion == MotionMode.OFF) {
         val background = MaterialTheme.colorScheme.background
         val darkMode = background.luminance() < .35f
+        if (SpectraTheme.isFluid) {
+            Box(modifier.fillMaxSize()
+                .background(staticSpectraBackdropBrush(environment, darkMode, background))
+                .drawWithCache {
+                    // A frozen sample of the same three light paths; no frame loop in reduced motion.
+                    val paths = List(3) { index -> Path().apply {
+                        repeat(161) { step ->
+                            val u = step / 160f
+                            val x = when (index) {
+                                0 -> .08f + .34f * sin(u * 4.5f)
+                                1 -> u
+                                else -> 1.07f - u * .56f - .09f * sin(u * 6f)
+                            }
+                            val y = if (index == 1) .65f + .24f * cos(u * 4f) - u * .16f else u
+                            if (step == 0) moveTo(x * size.width, (1f - y) * size.height)
+                            else lineTo(x * size.width, (1f - y) * size.height)
+                        }
+                    } }
+                    val warmPaths = paths.mapIndexed { index, path -> Path().apply {
+                        addPath(path, if (index == 1) Offset(0f, size.height * .022f) else Offset(-size.width * .022f, 0f))
+                    } }
+                    onDrawBehind {
+                        paths.forEachIndexed { index, path ->
+                            for (layer in 8 downTo 1) drawPath(path,
+                                Color(0xFFDCEEFF).copy(alpha = .006f * (9 - layer)),
+                                style = Stroke(size.minDimension * (.07f + layer * .022f)))
+                            for (layer in 10 downTo 1) drawPath(path,
+                                Color.White.copy(alpha = (if (darkMode) .012f else .020f) * (11 - layer)),
+                                style = Stroke(size.minDimension * (.006f + layer * .006f)))
+                            drawPath(path, Color.White.copy(alpha = if (darkMode) .36f else .66f),
+                                style = Stroke(size.minDimension * .0065f))
+                            for (layer in 5 downTo 1) drawPath(warmPaths[index],
+                                Color(0xFFFFCE9C).copy(alpha = .010f * (6 - layer)),
+                                style = Stroke(size.minDimension * (.009f + layer * .009f)))
+                            drawPath(warmPaths[index], Color(0xFFFFDEBD).copy(alpha = .22f),
+                                style = Stroke(size.minDimension * .009f))
+                        }
+                    }
+                })
+            return
+        }
         val railProfile = checkNotNull(SilverRailTimeline.staticRailProfile(motionEnabled = false))
         val railTint = staticSilverRailTint(environment)
         Box(

@@ -49,6 +49,7 @@ import com.campusai.core.model.AiProvider
 import com.campusai.core.model.AiReport
 import com.campusai.core.model.DailyGreeting
 import com.campusai.core.network.PersonalCloudClient
+import com.campusai.core.network.CaesarCloudFreeEngine
 import com.campusai.core.preferences.UserPreferencesRepository
 import com.campusai.core.security.PersonalAiProviderStore
 import com.campusai.core.profile.ProfileRepository
@@ -76,7 +77,7 @@ import org.json.JSONObject
 
 data class AiUiState(
     val mode: AiMode = AiMode.FAST,
-    val provider: AiProvider = AiProvider.AUTO,
+    val provider: AiProvider = AiProvider.CAESAR_CLOUD_FREE,
     val resolvedProvider: AiProvider? = null,
     val execution: ResolvedExecution? = null,
     val messages: List<AiConversationMessage> = emptyList(),
@@ -156,7 +157,7 @@ class AiViewModel(
     ),
 ) : ViewModel() {
     private val appContext = context.applicationContext
-    private val provider = AtomicReference(AiProvider.AUTO)
+    private val provider = AtomicReference(AiProvider.CAESAR_CLOUD_FREE)
     private val network = NetworkAvailability(appContext)
     private val imageProcessor = CaesarImageProcessor(appContext)
     private val memoryStore = CaesarMemoryStore(dao)
@@ -175,6 +176,7 @@ class AiViewModel(
         geminiKeyAvailable = { personalProviderStore.hasCredential(CloudAiProvider.GOOGLE_GEMINI) },
         personalCodex = personalCodexEngine,
         codexKeyAvailable = { personalProviderStore.hasCredential(CloudAiProvider.CODEX) },
+        caesarCloudFree = CaesarCloudFreeEngine(),
     )
     private val caesarEngine = CaesarAgentEngine(
         delegate = router,
@@ -895,7 +897,7 @@ class AiViewModel(
             }
             val fallback = DailyGreetingPolicy.fallback(snapshot.displayName, date)
             _dailyGreeting.value = DailyGreeting(date.toString(), fallback, AiProvider.LOCAL, System.currentTimeMillis())
-            if (_state.value.streaming) {
+            if (_state.value.streaming || provider.get() == AiProvider.CAESAR_CLOUD_FREE) {
                 greetingJob = null
                 return@launch
             }
@@ -1059,6 +1061,7 @@ class AiViewModel(
             localModelId = localModelId,
             cloudOnce = cloudOnce,
             allowCodexImageUpload = !cloudOnce && provider.get() == AiProvider.CODEX,
+            allowCloudFreeImageUpload = !cloudOnce && provider.get() == AiProvider.CAESAR_CLOUD_FREE,
         ).withCloudHealthDisclosure(cloudHealthDisclosure).copy(allowWebSearch = allowWebSearch)
         activeGenerationRollback = {
             val failed = _state.value

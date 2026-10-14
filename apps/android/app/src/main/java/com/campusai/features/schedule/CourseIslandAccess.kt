@@ -18,10 +18,14 @@ internal object CourseIslandAccess {
     }
     fun requestPermission() { if (running()) Shizuku.requestPermission(7410) }
 
-    fun publish(post: (Boolean) -> Unit) = synchronized(lock) {
+    fun publish(post: (Boolean) -> Unit) = publish(post, isCurrent = { true })
+
+    fun publish(post: (Boolean) -> Unit, isCurrent: () -> Boolean) = synchronized(lock) {
+        // Check after acquiring the shared lock: a request may have been cancelled while queued.
+        if (!isCurrent()) return@synchronized
         if (!ready()) { post(false); return@synchronized }
         val lease = runCatching { acquire() }.onFailure { Log.w("CourseIsland", "Native island access unavailable", it) }.getOrNull()
-        deliver(lease, post) { Log.w("CourseIsland", "Network lease recovery failed", it) }
+        deliver(lease, { native -> if (isCurrent()) post(native) }) { Log.w("CourseIsland", "Network lease recovery failed", it) }
     }
 
     internal fun deliver(lease: AutoCloseable?, post: (Boolean) -> Unit, recoveryFailed: (Exception) -> Unit) {

@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.res.Configuration
 import android.graphics.drawable.Icon
 import android.os.Bundle
+import com.campusai.core.designsystem.CaesarOrbArtwork
 import com.campusai.R
 import org.json.JSONObject
 import java.time.Instant
@@ -87,8 +88,8 @@ internal object CourseIslandStyle {
         val dark = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
         notification.extras.putString("miui.focus.param", params(item, now, dark, leadMinutes).toString())
         notification.extras.putBundle("miui.focus.pics", Bundle().apply {
-            putParcelable(PICTURE, Icon.createWithResource(context, R.drawable.ic_course_notification))
-            putParcelable(PICTURE_LIGHT, Icon.createWithResource(context, R.drawable.ic_course_notification).setTint(0xff243746.toInt()))
+            putParcelable(PICTURE, Icon.createWithBitmap(CaesarOrbArtwork.bitmap(true)))
+            putParcelable(PICTURE_LIGHT, Icon.createWithBitmap(CaesarOrbArtwork.bitmap(false)))
         })
         notification.extras.putBundle("miui.focus.actions", Bundle().apply {
             putParcelable(OPEN, Notification.Action.Builder(null, "查看课表", notification.contentIntent).build())

@@ -35,7 +35,9 @@ object SpectraVisualStyleController {
 
 class SpectraSurfaceView(context: Context) : GLSurfaceView(context) {
     internal val opticalRendererOwnerId: Long = OpticalGlassRegistry.nextRendererOwnerId()
-    private val spectraRenderer = SpectraGlRenderer(opticalRendererOwnerId)
+    private val spectraRenderer = SpectraGlRenderer(opticalRendererOwnerId) { available ->
+        post { if (OpticalGlassRegistry.currentScope()?.rendererOwnerId == opticalRendererOwnerId) CaesarOrbAvailability.available = available }
+    }
     private val locationInWindow = IntArray(2)
     private var requestedQuality = RenderQuality.AUTO
     private var sceneActive = true
@@ -57,6 +59,7 @@ class SpectraSurfaceView(context: Context) : GLSurfaceView(context) {
     }
 
     override fun onDetachedFromWindow() {
+        if (OpticalGlassRegistry.currentScope()?.rendererOwnerId == opticalRendererOwnerId) CaesarOrbAvailability.available = false
         OpticalGlassRegistry.releaseRenderer(opticalRendererOwnerId)
         super.onDetachedFromWindow()
     }
@@ -144,6 +147,7 @@ class SpectraSurfaceView(context: Context) : GLSurfaceView(context) {
 
 private class SpectraGlRenderer(
     private val opticalRendererOwnerId: Long,
+    private val orbAvailability: (Boolean) -> Unit,
 ) : GLSurfaceView.Renderer {
     private val vertices: FloatBuffer = ByteBuffer.allocateDirect(8 * 4)
         .order(ByteOrder.nativeOrder()).asFloatBuffer().apply {
@@ -152,6 +156,14 @@ private class SpectraGlRenderer(
     private var sceneProgram = 0
     private var blitProgram = 0
     private var opticalProgram = 0
+    private var orbProgram = 0
+    private var orbHandles: OrbHandles? = null
+    private var lastOrbAvailable = false
+    private var orbId = -1L
+    private val orbBounds = FloatArray(4)
+    private val orbVelocity = FloatArray(4)
+    private var orbEnergy = 0f
+    private var orbActivity = 0f
     private var sceneHandles: SceneHandles? = null
     private var blitHandles: BlitHandles? = null
     private var opticalHandles: OpticalHandles? = null
@@ -213,6 +225,9 @@ private class SpectraGlRenderer(
         sceneProgram = linkProgram(VERTEX_SHADER, SCENE_FRAGMENT_SHADER)
         blitProgram = linkProgram(VERTEX_SHADER, BLIT_FRAGMENT_SHADER)
         opticalProgram = linkProgram(VERTEX_SHADER, OPTICAL_FRAGMENT_SHADER)
+        orbProgram = linkProgram(VERTEX_SHADER, CAESAR_ORB_FRAGMENT_SHADER)
+        orbHandles = orbProgram.takeIf { it != 0 }?.let(::OrbHandles)
+        orbId = -1L
         sceneHandles = sceneProgram.takeIf { it != 0 }?.let(::SceneHandles)
         blitHandles = blitProgram.takeIf { it != 0 }?.let(::BlitHandles)
         opticalHandles = opticalProgram.takeIf { it != 0 }?.let(::OpticalHandles)
@@ -233,6 +248,8 @@ private class SpectraGlRenderer(
     }
 
     override fun onDrawFrame(gl: GL10?) {
+        val orbAvailable = sceneProgram != 0 && sceneFramebufferReady && blitHandles != null && opticalHandles != null && orbHandles != null && quality != RenderQuality.LOW
+        if (lastOrbAvailable != orbAvailable) { lastOrbAvailable = orbAvailable; orbAvailability(orbAvailable) }
         if (sceneProgram == 0) {
             val fallback = fallbackColor()
             GLES20.glClearColor(fallback[0], fallback[1], fallback[2], 1f)
@@ -271,7 +288,7 @@ private class SpectraGlRenderer(
 
         // LOW is the explicit solid-glass fallback. AUTO/HIGH get at most three live optics.
         if (foregroundGlassVisible && quality != RenderQuality.LOW && opticalHandles != null) {
-            drawOpticalGlassRegions(seconds * speed)
+            drawOpticalGlassRegions(seconds * speed, deltaSeconds)
         }
     }
 
@@ -312,7 +329,7 @@ private class SpectraGlRenderer(
         GLES20.glDisableVertexAttribArray(handles.position)
     }
 
-    private fun drawOpticalGlassRegions(seconds: Float) {
+    private fun drawOpticalGlassRegions(seconds: Float, delta: Float) {
         val handles = opticalHandles ?: return
         val regions = OpticalGlassRegistry.snapshot(
             rendererOwnerId = opticalRendererOwnerId,
@@ -336,6 +353,7 @@ private class SpectraGlRenderer(
         GLES20.glEnable(GLES20.GL_SCISSOR_TEST)
 
         regions.forEach { region ->
+            if (region.orb != null) return@forEach
             val rawLeft = region.boundsInWindow.left - windowOriginX
             val rawTop = region.boundsInWindow.top - windowOriginY
             val rawRight = region.boundsInWindow.right - windowOriginX
@@ -385,9 +403,75 @@ private class SpectraGlRenderer(
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
         }
 
+        regions.firstOrNull { it.orb != null }?.let { drawOrb(it, seconds, delta) }
+        if (regions.none { it.orb != null }) orbId = -1L
         GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
         GLES20.glDisableVertexAttribArray(handles.position)
+    }
+
+    private fun drawOrb(region: OpticalGlassRegion, seconds: Float, delta: Float) {
+        val handles = orbHandles ?: return
+        val signal = region.orb ?: return
+        val bounds = region.boundsInWindow
+        val dt = delta.coerceIn(0f, .032f)
+        for (i in 0..3) {
+            val target = when (i) {
+                0 -> bounds.left - windowOriginX
+                1 -> height - bounds.bottom + windowOriginY
+                2 -> bounds.width
+                else -> bounds.height
+            }
+            if (orbId != region.id) { orbBounds[i] = target; orbVelocity[i] = 0f }
+            else {
+                // Critically damped travel and a slight spring in size, interruptible from live velocity.
+                val damping = if (i < 2) 32f else 27f
+                orbVelocity[i] += (256f * (target - orbBounds[i]) - damping * orbVelocity[i]) * dt
+                orbBounds[i] += orbVelocity[i] * dt
+            }
+        }
+        orbId = region.id
+        val level = signal.amplitude(SystemClock.elapsedRealtime())
+        orbEnergy += (level - orbEnergy) * (1f - kotlin.math.exp(-dt * if (level > orbEnergy) 22f else 7f))
+        val activity = when (signal.mode) {
+            CaesarOrbMode.THINKING, CaesarOrbMode.TRANSCRIBING -> .6f
+            CaesarOrbMode.RESPONDING -> .8f
+            CaesarOrbMode.SPEAKING -> 1f // State-driven breathing, not measured speech audio.
+            else -> 0f
+        }
+        orbActivity += (activity - orbActivity) * (1f - kotlin.math.exp(-dt * 9f))
+        val left = orbBounds[0].coerceIn(0f, width.toFloat()).toInt()
+        val bottom = orbBounds[1].coerceIn(0f, height.toFloat()).toInt()
+        val right = kotlin.math.ceil((orbBounds[0] + orbBounds[2]).toDouble()).toInt().coerceIn(left, width)
+        val top = kotlin.math.ceil((orbBounds[1] + orbBounds[3]).toDouble()).toInt().coerceIn(bottom, height)
+        GLES20.glScissor(left, bottom, right - left, top - bottom)
+        GLES20.glUseProgram(orbProgram)
+        bindFullscreenVertices(handles.position)
+        GLES20.glUniform1i(handles.scene, 0)
+        GLES20.glUniform2f(handles.surfaceSize, width.toFloat(), height.toFloat())
+        GLES20.glUniform4f(handles.region, orbBounds[0] / width, orbBounds[1] / height, orbBounds[2] / width, orbBounds[3] / height)
+        GLES20.glUniform1f(handles.time, seconds)
+        GLES20.glUniform1f(handles.dark, if (darkMode) 1f else 0f)
+        GLES20.glUniform1f(handles.energy, orbEnergy)
+        GLES20.glUniform1f(handles.activity, orbActivity)
+        GLES20.glUniform1f(handles.listening, if (signal.mode == CaesarOrbMode.LISTENING) 1f else 0f)
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        GLES20.glDisable(GLES20.GL_BLEND)
+        GLES20.glDisableVertexAttribArray(handles.position)
+    }
+
+    private class OrbHandles(program: Int) {
+        val position = GLES20.glGetAttribLocation(program, "aPosition")
+        val scene = GLES20.glGetUniformLocation(program, "uScene")
+        val surfaceSize = GLES20.glGetUniformLocation(program, "uSurfaceSize")
+        val region = GLES20.glGetUniformLocation(program, "uRegion")
+        val time = GLES20.glGetUniformLocation(program, "uTime")
+        val dark = GLES20.glGetUniformLocation(program, "uDark")
+        val energy = GLES20.glGetUniformLocation(program, "uEnergy")
+        val activity = GLES20.glGetUniformLocation(program, "uActivity")
+        val listening = GLES20.glGetUniformLocation(program, "uListening")
     }
 
     private fun bindFullscreenVertices(position: Int) {
@@ -900,17 +984,24 @@ private class SpectraGlRenderer(
                 q += normalize(q - pointer + vec2(0.0001)) * pointerWeight * 0.004;
                 return q;
             }
-            // Open refractive folds: shared by every glass region, never a separate wallpaper.
-            vec3 fluidFold(vec3 color, float axis, float strength, vec3 cool, vec3 warm) {
-                float valley = exp(-pow((axis + 0.029) / 0.070, 2.0));
-                float shoulder = exp(-pow((axis - 0.026) / 0.042, 2.0));
-                float ridge = exp(-pow((axis - 0.010) / 0.009, 2.0));
-                float echo = exp(-pow((axis + 0.012) / 0.006, 2.0));
-                vec3 shade = mix(cool * 0.65, cool * 0.16, uDark);
-                color = mix(color, shade, valley * strength * 0.30);
-                color = mix(color, mix(vec3(0.985, 0.995, 1.0), cool, uDark * 0.72), shoulder * strength * 0.52);
-                color = mix(color, mix(vec3(1.0), warm, 0.16), ridge * strength * mix(0.76, 0.40, uDark));
-                color = mix(color, warm, echo * strength * mix(0.27, 0.36, uDark));
+            // Emissive light with a broad faint halo and parallel warm echo, no bloom pass.
+            vec3 fluidFold(vec3 color, float axis, float along, float phase, float strength, vec3 cool, vec3 warm) {
+                float pulse = sin(uRailTime * 0.83 + phase);
+                float width = 1.0 + pulse * 0.08;
+                float energy = strength * (1.0 + pulse * 0.10) * (0.92 + 0.08 * sin(along * 5.1 + phase));
+                float core = exp(-pow(axis / (0.0065 * width), 2.0));
+                float nearGlow = exp(-pow(axis / (0.027 * width), 2.0));
+                float aura = exp(-pow(axis / (0.073 * width), 2.0));
+                float outerAura = exp(-pow(axis / (0.155 * width), 2.0));
+                float pearl = exp(-pow(axis / (0.014 * width), 2.0));
+                float warmCore = exp(-pow((axis + 0.022) / (0.009 * width), 2.0));
+                float warmGlow = exp(-pow((axis + 0.022) / (0.033 * width), 2.0));
+                vec3 haloColor = mix(cool, vec3(0.78, 0.88, 1.0), 0.56);
+                vec3 light = haloColor * (outerAura * 0.035 + aura * 0.065 + nearGlow * 0.23);
+                light += mix(vec3(1.0), warm, 0.10) * (pearl * 0.14 + core * 0.66);
+                light += mix(vec3(1.0, 0.63, 0.28), warm, 0.20) * (warmCore * 0.26 + warmGlow * 0.065);
+                // Screen blending keeps a continuous luminous falloff without a dark valley.
+                color = 1.0 - (1.0 - color) * (1.0 - clamp(light * energy * mix(1.0, 0.48, uDark), 0.0, 0.94));
                 return color;
             }
             vec3 fluidEnvironmentScene(vec2 uv, vec2 p, float aspect, float t, float railT, float thinking, float focusing) {
@@ -921,15 +1012,15 @@ private class SpectraGlRenderer(
                 vec3 warm = envAccent(2.0);
                 vec3 paper = mix(vec3(0.92, 0.96, 0.99), vec3(0.025, 0.040, 0.075), uDark);
                 float wash = 0.5 + 0.5 * sin(q.x * 3.4 + q.y * 2.6 + current);
-                vec3 color = mix(paper, cool, mix(0.18, 0.18, uDark) + wash * mix(0.09, 0.07, uDark));
+                vec3 color = mix(paper, cool, mix(0.12, 0.18, uDark) + wash * mix(0.055, 0.07, uDark));
                 color = mix(color, mix(paper, warm, 0.30), smoothstep(0.32, 1.2, q.x + q.y) * 0.28);
                 // Different periods and amplitudes keep the folds evolving without a short loop.
                 float a = q.x - (0.08 + 0.34 * sin(q.y * 4.5 + current));
                 float b = q.y - (0.65 + 0.24 * cos(q.x * 4.0 - current * 0.83)) + q.x * 0.16;
                 float c = q.x + q.y * 0.56 - 1.07 + 0.09 * sin(q.y * 6.0 + current * 0.61);
-                color = fluidFold(color, a, 0.90, cool, warm);
-                color = fluidFold(color, b, 0.76 + breath * 0.12, mix(cool, envAccent(1.0), 0.3), warm);
-                if (uQuality > 0.5) color = fluidFold(color, c, 0.62, cool, warm);
+                color = fluidFold(color, a, q.y, 0.0, 0.90, cool, warm);
+                color = fluidFold(color, b, q.x, 2.1, 0.76 + breath * 0.12, mix(cool, envAccent(1.0), 0.3), warm);
+                if (uQuality > 0.5) color = fluidFold(color, c, q.y, 4.2, 0.62, cool, warm);
                 float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
                 color += vec3(max(0.0, mix(0.69, 0.06, uDark) - luma));
                 return clamp(color, 0.0, 1.0);

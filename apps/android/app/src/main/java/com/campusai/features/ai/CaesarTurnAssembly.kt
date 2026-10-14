@@ -21,6 +21,7 @@ internal fun assembleCaesarTurnRequest(
     localModelId: String,
     cloudOnce: Boolean = false,
     allowCodexImageUpload: Boolean = false,
+    allowCloudFreeImageUpload: Boolean = false,
 ): AiRequest {
     val context = JSONObject(structuredContext.toString()).put("locale", "zh-CN")
     val ocr = attachments.mapIndexedNotNull { index, image ->
@@ -44,22 +45,23 @@ internal fun assembleCaesarTurnRequest(
         userPrompt = displayPrompt.trim(),
         requiresLocal = !cloudOnce && CaesarLocalityPolicy.requiresLocal(
             prompt = displayPrompt,
-            hasImages = attachments.isNotEmpty() && !allowCodexImageUpload,
+            hasImages = attachments.isNotEmpty() && !allowCodexImageUpload && !allowCloudFreeImageUpload,
         ),
         localModelId = localModelId,
         imagePaths = attachments.map(CaesarImageAttachment::localPath),
         allowCodexImageUpload = allowCodexImageUpload,
+        allowCloudFreeImageUpload = allowCloudFreeImageUpload,
     )
 }
 
-/** Health summaries remain consent-gated; current-turn images may cross only on the explicit Codex path. */
+/** Health summaries remain consent-gated; images may cross only on explicitly selected vision routes. */
 internal fun AiRequest.withCloudHealthDisclosure(disclosure: CloudHealthDisclosure): AiRequest {
     val hasImages = imagePaths.isNotEmpty() || messages.any { message ->
         message.attachmentPaths.isNotEmpty() || message.attachmentRefs.isNotEmpty()
     }
     return copy(
         cloudHealthDisclosure = disclosure,
-        requiresLocal = (hasImages && !allowCodexImageUpload) ||
+        requiresLocal = (hasImages && !allowCodexImageUpload && !allowCloudFreeImageUpload) ||
             (requiresLocal && disclosure !is CloudHealthDisclosure.Included),
     )
 }

@@ -7,6 +7,21 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OpticalGlassRegistryTest {
+    @Test fun focalOrbPreservesThreeOpticalPanelsAndIsRemovedOnRouteChange() {
+        val owner = OpticalGlassRegistry.nextRendererOwnerId()
+        val scope = OpticalGlassRegistry.claimRenderer(owner)
+        try {
+            repeat(4) { OpticalGlassRegistry.update(scope, region(OpticalGlassRegistry.nextId(), it)) }
+            repeat(2) { OpticalGlassRegistry.update(scope, region(OpticalGlassRegistry.nextId()).copy(orb = CaesarOrbSignal())) }
+            val visible = OpticalGlassRegistry.snapshot(owner, 0f, 0f, 500f, 500f)
+            assertEquals(3, visible.count { it.orb == null })
+            assertEquals(1, visible.count { it.orb != null })
+            assertEquals(listOf(3, 2, 1), visible.filter { it.orb == null }.map { it.priority })
+            OpticalGlassRegistry.switchRouteScope("test:orb-leave")
+            assertTrue(OpticalGlassRegistry.snapshot(owner, 0f, 0f, 500f, 500f).isEmpty())
+        } finally { OpticalGlassRegistry.releaseRenderer(owner) }
+    }
+
     @Test
     fun routeSwitchClearsRegionsAndRejectsLateUpdates() {
         val owner = OpticalGlassRegistry.nextRendererOwnerId()

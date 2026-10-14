@@ -33,7 +33,10 @@ data class CaesarImageAttachment(
 
 class CaesarImageProcessor(context: Context) {
     private val appContext = context.applicationContext
-    private val storageRoot = File(appContext.noBackupFilesDir, "ai-conversations")
+    // Android may expose /data/user/0 through an alias of /data/data. Use one base
+    // for both relative references and resolution, including after canonicalizing a target.
+    private val storageBase = appContext.noBackupFilesDir.canonicalFile
+    private val storageRoot = File(storageBase, "ai-conversations")
 
     suspend fun import(uri: Uri, conversationId: String): CaesarImageAttachment = withContext(Dispatchers.IO) {
         cleanupAbandonedTemps()
@@ -166,7 +169,7 @@ class CaesarImageProcessor(context: Context) {
         }
         return LocalImageRef(
             assetId = sha256,
-            relativePath = target.relativeTo(appContext.noBackupFilesDir).invariantSeparatorsPath,
+            relativePath = target.relativeTo(storageBase).invariantSeparatorsPath,
             mimeType = "image/jpeg",
             width = boundsWidth,
             height = boundsHeight,
@@ -197,7 +200,7 @@ class CaesarImageProcessor(context: Context) {
 
     private fun resolve(ref: LocalImageRef): File? = runCatching {
         if (!SHA256.matches(ref.sha256) || ref.assetId != ref.sha256 || ref.mimeType != "image/jpeg") return@runCatching null
-        val candidate = File(appContext.noBackupFilesDir, ref.relativePath).canonicalFile
+        val candidate = File(storageBase, ref.relativePath).canonicalFile
         if (!isInsideStorage(candidate) || candidate.name != "${ref.sha256}.jpg" || !candidate.isFile) null else candidate
     }.getOrNull()
 

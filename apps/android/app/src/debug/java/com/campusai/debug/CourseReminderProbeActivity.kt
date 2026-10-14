@@ -26,6 +26,12 @@ class CourseReminderProbeActivity : Activity() {
                 val database = CampusDatabase.getDatabase(app)
                 val dao = database.campusDao()
                 when (intent.getStringExtra("operation")) {
+                    "preview-ai-island" -> {
+                        val mode = com.campusai.core.designsystem.CaesarOrbMode.valueOf(
+                            intent.getStringExtra("mode") ?: "RESPONDING")
+                        com.campusai.features.ai.AiIslandNotifications.publish(app, mode)
+                    }
+                    "cancel-ai-preview" -> com.campusai.features.ai.AiIslandNotifications.cancel(app)
                     "request-island-access" -> withContext(Dispatchers.Main) { CourseIslandAccess.requestPermission() }
                     "test-island-recovery" -> {
                         check(CourseIslandAccess.ready())

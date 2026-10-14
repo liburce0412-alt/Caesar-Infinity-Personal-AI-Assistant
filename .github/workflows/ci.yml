@@ -9,6 +9,15 @@ permissions:
   contents: read
 
 jobs:
+  cloud-free:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - run: node --test --test-timeout=12000 apps/cloud-free/relay.test.mjs
+
   android:
     runs-on: ubuntu-latest
     steps:

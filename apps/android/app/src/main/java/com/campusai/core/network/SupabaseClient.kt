@@ -54,6 +54,23 @@ object SupabaseClient {
     fun installSession(accessToken: String) { userJwt = accessToken }
     fun clearSession() { sessionGeneration++; userJwt = "" }
 
+    /** Pin the verified app session to the owner of this AI turn, including during refresh. */
+    internal suspend fun aiSessionToken(ownerUserId: String): String {
+        val generation = sessionGeneration
+        if (!isConfigured() || ensureSession?.invoke() == false || generation != sessionGeneration) {
+            throw com.campusai.core.ai.AiRoutingException("authentication_required", "请先登录 Caesar 后重试。")
+        }
+        val token = userJwt
+        val subject = runCatching {
+            val payload = android.util.Base64.decode(token.split('.')[1], android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP)
+            JSONObject(String(payload, Charsets.UTF_8)).getString("sub")
+        }.getOrDefault("")
+        if (ownerUserId.isBlank() || subject != ownerUserId || token.isBlank() || token != userJwt) {
+            throw com.campusai.core.ai.AiRoutingException("authentication_required", "登录状态已变化，请重新打开对话。")
+        }
+        return token
+    }
+
     suspend fun restGet(
         table: String,
         parameters: Map<String, String>,

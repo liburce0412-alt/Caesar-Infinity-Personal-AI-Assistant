@@ -1,8 +1,12 @@
 # Alibaba Cloud Supabase migration
 
-## Current status — Hong Kong cutover, 2026-09-08
+## Current status — Hangzhou cutover, 2026-09-26
 
-The active deployment is **47.243.49.228**, Hong Kong, Ubuntu 22.04, 2 vCPU / 4 GiB, at `/opt/campusai/supabase`. DNS-only `campusai.campus3ai.xyz` now resolves to this host. Earlier notes below are chronological evidence, not current instructions.
+`campusai.campus3ai.xyz` now resolves to **120.55.14.0**, the Hangzhou lightweight server. Seven core Supabase services run within a 900 MiB memory boundary; Studio/Meta are maintenance-only. Activation remains on its independent service on this host. The final restore and 92 post-cutover checks passed, original media hashes matched, TLS renewal passed, and independent backups were verified. Hong Kong is retired from production and the user authorized its cleanup before releasing the instance. See [the current migration record](caesar-hangzhou-migration-20260926.md) and [deployment operations](../deploy/alicloud/README.md).
+
+## Historical status — Hong Kong cutover, 2026-09-08
+
+On September 8, the active deployment became **47.243.49.228**, Hong Kong, Ubuntu 22.04, 2 vCPU / 4 GiB, at `/opt/campusai/supabase`. DNS-only `campusai.campus3ai.xyz` resolved to that host until the September 26 cutover above. Notes below are chronological evidence, not current instructions.
 
 **2026-09-08 evening follow-up:** Explicit user authorization deployed community visibility/media migration `20260908123909` and restored omitted client column ACLs with `20260908125410` to this Hong Kong host only. Actual new-post API testing exposed the catalog restore omission (HTTP 403); profile/post/wish writes and protected-field denial now pass. All 65 HTTPS/API/Storage checks passed and temporary fixtures were removed. Backup: `/opt/campusai/backups/20260908T124954Z`. See `outputs/candidates/20260908-experience/deploy-hongkong/DEPLOYMENT.md`. Community buckets are now private: previous permanent public media checks are historical and must not be used as current acceptance criteria. The component folding, peace animation and onboarding are implemented in the new local Android candidate, with emulator verification; this candidate has not been installed on a physical phone.
 

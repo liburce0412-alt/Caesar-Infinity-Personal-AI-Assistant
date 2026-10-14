@@ -25,7 +25,7 @@ data class UserPreferences(
     val renderQuality: RenderQuality = RenderQuality.AUTO,
     val environment: SpectraEnvironment = SpectraEnvironment.ORIGINAL,
     val soundEnabled: Boolean = true,
-    val aiProvider: AiProvider = AiProvider.AUTO,
+    val aiProvider: AiProvider = AiProvider.CAESAR_CLOUD_FREE,
     val localModelWifiOnly: Boolean = true,
     /** Selects the complete Caesar visual system, not only the renderer background. */
     val visualStyle: SpectraVisualStyle = SpectraVisualStyle.CLASSIC,
@@ -63,7 +63,7 @@ class UserPreferencesRepository(private val context: Context) {
             renderQuality = values[Keys.quality].toEnumOr(RenderQuality.AUTO),
             environment = values[Keys.environment].toEnumOr(SpectraEnvironment.ORIGINAL),
             soundEnabled = values[Keys.sound] ?: true,
-            aiProvider = values[Keys.aiProvider].toEnumOr(AiProvider.AUTO),
+            aiProvider = initialAiProvider(values[Keys.aiProvider], values[Keys.onboardingCompleted] ?: false),
             localModelWifiOnly = values[Keys.localModelWifiOnly] ?: true,
             visualStyle = values[Keys.visualStyle].toEnumOr(SpectraVisualStyle.CLASSIC),
             glassEffects = GlassEffects(
@@ -97,3 +97,6 @@ class UserPreferencesRepository(private val context: Context) {
 
 private inline fun <reified T : Enum<T>> String?.toEnumOr(fallback: T): T =
     this?.let { raw -> enumValues<T>().firstOrNull { it.name == raw } } ?: fallback
+
+internal fun initialAiProvider(saved: String?, onboardingCompleted: Boolean): AiProvider =
+    saved.toEnumOr(if (onboardingCompleted) AiProvider.AUTO else AiProvider.CAESAR_CLOUD_FREE)

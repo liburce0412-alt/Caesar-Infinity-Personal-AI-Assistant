@@ -1,41 +1,56 @@
 # CampusAI Alibaba deployment
 
-Active server: **Hong Kong ECS 47.243.49.228**, Ubuntu 22.04, 2 vCPU / 4 GiB. Public admin/API hostname: `https://campusai.campus3ai.xyz`, using a DNS-only Cloudflare A record. Hangzhou ECS `121.41.52.217` is a stopped-stack rollback copy; its VM has not been released. The separate 2 GiB Hangzhou light server is not deployed and shares the mainland filing restriction that blocked the earlier destination.
+Active production: **Hangzhou lightweight 120.55.14.0**, Ubuntu 24.04, 2 vCPU / nominal 2 GiB (1,613 MiB usable). Admin/API: **https://campusai.campus3ai.xyz**, Cloudflare DNS-only A record. Cutover completed September 26, 2026. The independent activation site `activate-test.campus3ai.xyz` shares the host and must remain available.
 
-Supabase is pinned to `self-hosted/v0.8.0`, with all nine image versions locked to source image digests. It lives at `/opt/campusai/supabase`. The gateway binds to `127.0.0.1:8000`; nginx exposes HTTPS Auth, REST, Storage and Realtime. Database and Studio remain private. Certbot renewal uses webroot `/var/www/campusai-acme` and a deploy hook to reload nginx.
+Hong Kong **47.243.49.228** is retired from production; the user authorized cleanup before releasing it. Do not restore stale database data as a live writer. See [the migration record](../../docs/caesar-hangzhou-migration-20260926.md) for backup and retirement evidence. September 8 deployment notes are historical.
 
-## Client configuration and verification
+## Runtime and limits
 
-Root `.env`, admin `.env.local`/`.env.production.local`, and the two existing GitHub client secrets now point to Hong Kong. Clients receive only the anon key. Never include service-role keys, signing secrets, SSH keys or database passwords. Existing passwords/account IDs are preserved; users must sign in again because hosted-platform sessions were not transferred. Already-installed APKs need an update to change their compiled endpoint.
+Supabase lives at `/opt/campusai/supabase`, retaining the source image digests. The gateway binds only to `127.0.0.1:8000`; nginx exposes HTTPS Auth, REST, Storage and Realtime. PostgreSQL and Studio remain private. Admin assets: `/var/www/campusai-admin`.
 
-The admin bundle is at `/var/www/campusai-admin`. A candidate can use the alternate ignored environment file:
+Seven core services run: db, rest, auth, imgproxy, api-gw, storage and realtime. Studio/Meta remain installed under the `maintenance` profile and stopped; the public CampusAI admin application is independent. Do not enable maintenance services without checking memory headroom.
 
-```powershell
-.\gradlew.bat :apps:android:app:assembleDebug '-PcampusBackendConfig=.env.alicloud.local' --console=plain
+`campusai.slice` bounds core containers to 900 MiB memory (800 MiB high), no swap, one CPU core and limited disk bandwidth/IOPS. These bounds protect activation. They are merged into the active main compose file because `.env` sets `COMPOSE_FILE=docker-compose.yml`; an implicit override is ineffective.
+
+The enabled `campusai-backend.service` requires Docker and the slice, and calls `/opt/campusai/deploy/start-bounded.sh`. The script verifies limits/service membership, starts sequentially and stops the stack on startup failure. Manage the complete stack through this unit:
+
+```sh
+systemctl status campusai-backend.service
+systemctl restart campusai-backend.service
+cat /sys/fs/cgroup/campusai.slice/memory.events
+cd /opt/campusai/supabase && docker compose ps
 ```
 
-The APK at `artifacts/alicloud-migration-20260908/CampusAI-alicloud-candidate.apk` passed Android AuthFlowTest checks. Admin unit tests/build passed. Production verification passed 28 source-table comparisons, 27 API/invitation checks and 11 external HTTPS/asset/authorization/object checks. A fresh source comparison matched all 23 non-audit business tables. Four stored objects (two images and two placeholders) retain their SHA-256 digests and ownership.
+A full service restart and functional checks passed under these limits. This is not a high-load benchmark or full-machine reboot acceptance test. Investigate activation latency and pressure before increasing resource limits.
 
-Actual browser interaction remains unverified because browser control timed out. No Android-device installation/acceptance has been performed. Prefer a user login through the admin site/new APK before releasing old Hangzhou ECS.
+After the October 14 host OOM recovery, core containers use `restart: on-failure:5`. Systemd owns cold startup order; Docker retries failed running containers up to five times without launching the whole stack ahead of the database after a daemon restart. The startup script verifies this policy. Healthchecks retain their original commands, timeout and retries, with a 30-second steady interval and a 5-second startup interval during a 90-second grace period. `configure-bounded-runtime.py` applies only these fields to the private main Compose file, verifies the resolved configuration has no other changes, and retains one root-only recovery copy. It does not restart services; apply the result through the backend unit above. Docker restart-policy semantics are documented [here](https://docs.docker.com/engine/containers/start-containers-automatically/).
 
-During cutover, Windows briefly reused the old Hangzhou DNS answer. Both Cloudflare authoritative nameservers and three public resolvers returned Hong Kong; clearing the local DNS cache restored all external checks. Allow stale client/resolver caches to expire when diagnosing a connection to the old IP.
+The incident's kernel OOM snapshot contained 105 `runc` and 32 `runc:[2:INIT]` processes, with about 354 MiB summed RSS, outside the application processes themselves. This establishes runtime-process accumulation as a material source of host pressure, but does not prove the precise trigger. Reduced probe frequency mitigates repeated exec overhead; no permanent leak fix or unlimited capacity is claimed. The 900 MiB core hard limit and independent activation service remain unchanged.
 
-`smoke-test.py` must run only on the self-hosted destination. It creates uniquely named synthetic accounts/invitations and removes them afterward; audit events remain. Set `CAMPUSAI_TEST_BASE_URL=https://campusai.campus3ai.xyz` for the public hostname. `verify-restore.py --allow-new-audit-events` compares original typed rows while allowing added audit records.
+## Clients and verification
+
+The server move preserved hostname, signing secrets, accounts and sessions. Clients already using `campusai.campus3ai.xyz` need no endpoint/APK change. Clients must contain only the anon key, never service-role keys or server secrets.
+
+Final restore matched 58 table inventories and all six media file/xattr records. Post-cutover validation passed 27 API/invitation/admin checks and 65 HTTPS/API/private media checks. Four original objects passed download/hash checks. Chrome rendered the login page. These checks do not substitute for real-user browser login or Android-device acceptance.
+
+`smoke-test.py` creates disposable synthetic accounts/invitations and removes them afterward; audit events remain. Run only against the authorized self-hosted deployment. Set `CAMPUSAI_TEST_BASE_URL=https://campusai.campus3ai.xyz` for public-hostname checks.
+
+TLS renewal uses `/var/www/campusai-acme`, the existing certbot timer and nginx reload hook. The post-cutover renewal dry-run succeeded.
 
 ## Backup and restore
 
-`backup.sh` creates a protected timestamped directory containing a PostgreSQL custom dump, roles, environment/configuration and Storage files, DB configuration volume, admin assets, nginx configuration, TLS/account keys and a SHA-256 manifest. The verified cutover backup is `/opt/campusai/backups/20260908T110339Z`, also downloaded to `artifacts/alicloud-migration-20260908/private/20260908T110339Z`. All seven file digests matched. These archives contain secrets: do not commit or share them.
+Run `/opt/campusai/deploy/backup.sh` for a protected timestamped logical database/configuration/media backup. It includes roles, DB configuration volume, admin assets, nginx/TLS material, runtime slice/unit/start script, the installed cloud-free relay and its protected environment file, and a SHA-256 manifest. No automatic database-backup schedule was added. A live dump and media archive are not a single atomic snapshot; freeze writes for a final migration copy.
 
-For a future migration, inspect the destination and use the same pinned image digests. Stop writes before the final copy. A physical PostgreSQL copy requires a clean database shutdown and the same compatible database image/architecture. Restore only into an empty destination, preserving numeric ownership and named `campusai_db-config` volume. Never overlay an active database. Retain the old deployment and independent archives until verification passes.
+Verified final cold backup: `hangzhou-final-20260926T042600Z`. Verified post-cutover backup: `/opt/campusai/backups/20260926T043238Z`. Independent hash-verified copies are under ignored `artifacts/hangzhou-migration-20260926/private/`. Archives contain secrets and must not be committed or shared.
 
-**Storage extended attributes are required.** For archiving and extraction use `tar --xattrs --xattrs-include='*' --acls` with the normal create/extract flags. A plain tar can retain file bytes while losing metadata, causing Storage GET ENODATA/500. Verify through Storage API downloads and compare hashes afterward.
+For physical migration, stop writes and cleanly stop PostgreSQL; use the same compatible image/architecture. Restore only into an empty destination, preserving numeric ownership and named `campusai_db-config` volume. Never overlay an active database. For logical restore, deliberately restore roles, grants, ownership and the custom dump into a prepared compatible destination.
 
-The protected migration directory holds `hongkong-stack.tar.gz`, `hongkong-db-config.tar.gz`, `hongkong-image-lock.json`, and corrective `hongkong-storage-xattrs.tar.gz`. Together these are the cleanly stopped, successfully restored source copy. The last archive supplies attributes missing from the initial stack tar. Original platform exports/media remain separately available. For a logical restore, restore roles/grants and the custom database dump into a prepared, empty compatible destination; handle built-in roles deliberately and validate ownership, RLS, triggers, RPCs and auth hashes.
+**Storage xattrs are required.** Archive and extract with `tar --xattrs --xattrs-include='*' --acls` and appropriate create/extract flags and numeric ownership. Verify actual Storage API downloads afterward; file hashes alone do not establish metadata preservation. Restore bounded compose configuration and runtime units before starting. Preserve the activation virtual host, certificates and service.
 
-Restore configuration and certificates with restricted permissions. Verify through SSH, then external HTTPS against the target IP with the valid hostname, then normal DNS. Check login/refresh, invite concurrency, authorization and file downloads. Reusing hostname/server secrets avoids another client change. Any future 2 GiB deployment requires separate capacity verification; current checks cover the 4 GiB server only.
+New writes belong to Hangzhou. A rollback requires a write freeze and reverse synchronization of current database/media; stale Hong Kong archives alone omit new data. No VM was released by the agent. Unrelated Cloudflare applications and hosted Korea Supabase remain outside this migration. See [the historical work log](../../docs/alicloud-migration-work.md) for earlier work.
 
-## Rollback and cleanup
+## Caesar cloud free
 
-Hosted Korea Supabase remains unchanged. Pre-cutover client configuration is archived privately in `client-before-hongkong.env`. Back up and reconcile new Hong Kong writes before rollback; do not discard post-cutover data. Do not use the old hosted-deployment workflow to apply self-hosted migrations.
+Installed October 13, 2026: `caesar-cloud-free.service` runs `/usr/local/bin/node` against `/opt/campusai/cloud-free/server.mjs`, listening only on `127.0.0.1:8788`. The exact public endpoint is `POST /caesar-cloud/v1/chat`; nginx includes `/etc/nginx/snippets/caesar-cloud-free.conf` with streaming buffering disabled. The root-only environment file is `/etc/campusai/cloud-free.env` (0600). Never print or commit it.
 
-The old CampusAI CF worker/settings were archived and the worker deleted. Other Workers, D1 databases, DNS and tunnels are outside cleanup. Local CI changes have not been pushed. No Alibaba instance was released. After interactive acceptance, release only old Hangzhou ECS, never active Hong Kong ECS.
+The service uses a 96 MiB JS heap, 128 MiB memory high / 192 MiB hard limit, no swap and one CPU core maximum. It does not modify the core container slice or activation service. `GET /healthz` only checks configuration presence. Use `journalctl -u caesar-cloud-free.service` for content-free diagnostic codes; upstream 1305 means model overload, not a local daily quota. Fast text with the new client capability falls back once to free `glm-4-flash-250414` on model overload, upstream 5xx or no first token within eight seconds. Other requests retain one same-model congestion retry. Deep, vision and legacy clients keep their fixed routing, with no paid fallback. See [routing and live verification](../../docs/caesar-cloud-free.md).

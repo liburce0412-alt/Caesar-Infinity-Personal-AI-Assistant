@@ -27,6 +27,45 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AiEngineRouterTest {
+    @Test fun `free cloud needs network but no personal provider key`() {
+        assertEquals(AiRouteDecision.Use(AiRoute.CAESAR_CLOUD_FREE),
+            decideAiRoute(AiProvider.CAESAR_CLOUD_FREE, AiMode.FAST, true, false))
+        assertEquals("cloud_offline", (decideAiRoute(AiProvider.CAESAR_CLOUD_FREE,
+            AiMode.FAST, false, true) as AiRouteDecision.Block).code)
+    }
+
+    @Test fun `free cloud image capability never bypasses local content requirements`() = runTest {
+        for (localOnly in listOf(false, true)) {
+            val cloud = FakeEngine()
+            val local = FakeEngine()
+            val personal = FakeEngine()
+            val router = AiEngineRouter(personal, local, { AiProvider.CAESAR_CLOUD_FREE },
+                { false }, { true }, { LocalModelState.Ready }, caesarCloudFree = cloud)
+            val path = "/private/current.jpg"
+            router.stream(AiRequest(AiMode.FAST,
+                listOf(AiConversationMessage("user", "看图", attachmentPaths = listOf(path))),
+                imagePaths = listOf(path), allowCloudFreeImageUpload = true, requiresLocal = localOnly)).toList()
+            assertEquals(if (localOnly) 0 else 1, cloud.calls)
+            assertEquals(if (localOnly) 1 else 0, local.calls)
+            assertEquals(0, personal.calls)
+        }
+    }
+
+    @Test fun `free cloud image capability cannot unlock another provider`() = runTest {
+        val cloud = FakeEngine()
+        val local = FakeEngine()
+        val personal = FakeEngine()
+        val router = AiEngineRouter(personal, local, { AiProvider.DEEPSEEK },
+            { true }, { true }, { LocalModelState.Ready }, caesarCloudFree = cloud)
+        val path = "/private/current.jpg"
+        router.stream(AiRequest(AiMode.FAST,
+            listOf(AiConversationMessage("user", "看图", attachmentPaths = listOf(path))),
+            imagePaths = listOf(path), allowCloudFreeImageUpload = true)).toList()
+        assertEquals(1, local.calls)
+        assertEquals(0, cloud.calls)
+        assertEquals(0, personal.calls)
+    }
+
     @Test
     fun `empty state labels the selected cloud provider without claiming a connection`() {
         assertEquals("DEEPSEEK · 已选择", selectedCloudProviderStatus(AiProvider.DEEPSEEK))

@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.view.View
 import android.widget.RemoteViews
+import com.campusai.core.designsystem.CaesarOrbArtwork
 import com.campusai.R
 import java.time.Instant
 import java.time.ZoneId
@@ -68,7 +69,7 @@ internal object CourseIslandExpandedCard {
             for (id in listOf(R.id.course_island_period, R.id.course_island_room, R.id.course_island_timer_label, R.id.course_island_range, R.id.course_island_dismiss)) {
                 setTextColor(id, secondary)
             }
-            setInt(R.id.course_island_icon, "setColorFilter", accent)
+            setImageViewBitmap(R.id.course_island_icon, CaesarOrbArtwork.bitmap(dark))
             setInt(R.id.course_island_divider, "setBackgroundColor", if (dark) 0x20c3d1ef else 0x18344864)
             // Chronometer runs in SystemUI. Convert epoch deadlines to elapsed time once,
             // rather than waking our process or reposting the notification every second.
