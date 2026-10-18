@@ -125,28 +125,27 @@ data class CloudDailyHealthSummary(
     val averageStressScore: Double? = null,
     val workoutCount: Long? = null,
 ) {
-    internal fun toAllowedJson(): JSONObject = JSONObject()
+    /** Zero is observed data; absent, non-finite and out-of-range values are not. */
+    val hasShareableMetrics: Boolean get() = allowedMetrics().isNotEmpty()
+
+    internal fun toAllowedJson(): JSONObject = allowedJson(allowedMetrics())
+
+    internal fun toAllowedJsonOrNull(): JSONObject? = allowedMetrics().takeIf { it.isNotEmpty() }?.let(::allowedJson)
+
+    private fun allowedJson(metrics: Map<String, Number>): JSONObject = JSONObject()
         .put("localDate", localDate.takeIf(LOCAL_DATE_PATTERN::matches) ?: "unknown")
-        .putNonNegative("steps", steps)
-        .putNonNegative("distanceMeters", distanceMeters)
-        .putNonNegative("activeCaloriesKcal", activeCaloriesKcal)
-        .putNonNegative("activityMinutes", activityMinutes)
-        .putNonNegative("sleepMinutes", sleepMinutes)
-        .putInRange("averageHeartRateBpm", averageHeartRateBpm, 1.0, 300.0)
-        .putInRange("averageOxygenSaturationPercent", averageOxygenSaturationPercent, 0.0, 100.0)
-        .putInRange("averageStressScore", averageStressScore, 0.0, 100.0)
-        .putNonNegative("workoutCount", workoutCount)
+        .apply { metrics.forEach { (name, value) -> put(name, value) } }
 
-    private fun JSONObject.putNonNegative(name: String, value: Long?): JSONObject = apply {
-        if (value != null && value >= 0L) put(name, value)
-    }
-
-    private fun JSONObject.putNonNegative(name: String, value: Double?): JSONObject = apply {
-        if (value != null && value.isFinite() && value >= 0.0) put(name, value)
-    }
-
-    private fun JSONObject.putInRange(name: String, value: Double?, minimum: Double, maximum: Double): JSONObject = apply {
-        if (value != null && value.isFinite() && value in minimum..maximum) put(name, value)
+    private fun allowedMetrics(): Map<String, Number> = buildMap {
+        steps?.takeIf { it >= 0L }?.let { put("steps", it) }
+        distanceMeters?.takeIf { it.isFinite() && it >= 0.0 }?.let { put("distanceMeters", it) }
+        activeCaloriesKcal?.takeIf { it.isFinite() && it >= 0.0 }?.let { put("activeCaloriesKcal", it) }
+        activityMinutes?.takeIf { it >= 0L }?.let { put("activityMinutes", it) }
+        sleepMinutes?.takeIf { it >= 0L }?.let { put("sleepMinutes", it) }
+        averageHeartRateBpm?.takeIf { it.isFinite() && it in 1.0..300.0 }?.let { put("averageHeartRateBpm", it) }
+        averageOxygenSaturationPercent?.takeIf { it.isFinite() && it in 0.0..100.0 }?.let { put("averageOxygenSaturationPercent", it) }
+        averageStressScore?.takeIf { it.isFinite() && it in 0.0..100.0 }?.let { put("averageStressScore", it) }
+        workoutCount?.takeIf { it >= 0L }?.let { put("workoutCount", it) }
     }
 
     private companion object {

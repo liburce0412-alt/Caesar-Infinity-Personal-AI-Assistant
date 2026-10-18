@@ -117,11 +117,25 @@ object CaesarIntentEvidence {
         }
     }
 
-    fun idempotencyKey(sessionId: String, toolName: String, argumentsJson: String): String {
+    fun idempotencyKey(
+        sessionId: String,
+        toolName: String,
+        argumentsJson: String,
+        ownerUserId: String = "local_user",
+        actionScope: String = "",
+    ): String {
         val canonicalArguments = runCatching { canonicalArguments(JSONObject(argumentsJson)) }
             .getOrDefault(argumentsJson.trim())
+        // Keep pre-turn-scope callers and historical rows intact. Agent turns use a separate
+        // namespace, so a later explicit action cannot replay an earlier turn's cached success.
+        val owner = ownerUserId.ifBlank { "local_user" }
+        val identity = if (actionScope.isBlank()) {
+            "caesar-action-v2\u0000$owner\u0000$sessionId\u0000$toolName\u0000$canonicalArguments"
+        } else {
+            "caesar-action-v3\u0000$owner\u0000$sessionId\u0000$actionScope\u0000$toolName\u0000$canonicalArguments"
+        }
         val digest = MessageDigest.getInstance("SHA-256")
-            .digest("$sessionId\u0000$toolName\u0000$canonicalArguments".toByteArray())
+            .digest(identity.toByteArray())
         return digest.take(16).joinToString("") { "%02x".format(it) }
     }
 

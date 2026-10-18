@@ -85,7 +85,7 @@ class CaesarCloudFreeEngineTest {
                 assertEquals("https://backend.example/caesar-cloud/v1/chat", chain.request().url.toString())
                 assertEquals("Bearer session-token", chain.request().header("Authorization"))
                 val data = listOf(
-                    """{"type":"meta","model":"glm-4.7-flash","requestId":"request-1"}""",
+                    """{"type":"meta","model":"glm-4-flash-250414","requestId":"request-1"}""",
                     """{"type":"delta","text":"你好"}""",
                 ) + if (complete) listOf("""{"type":"done","elapsedMs":10}""") else emptyList()
                 Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
@@ -108,9 +108,66 @@ class CaesarCloudFreeEngineTest {
         assertFalse(called)
     }
 
-    @Test fun `fallback capability is limited to fast text`() {
-        assertTrue(cloudFreePayload(request()).getBoolean("allowTextFallback"))
-        assertFalse(cloudFreePayload(request().copy(mode = AiMode.DEEP)).getBoolean("allowTextFallback"))
+    @Test fun `explicit debug relay keeps owner authentication and the same fast payload`() = runTest {
+        var authenticatedOwner: String? = null
+        var calls = 0
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            calls++
+            assertEquals(CAESAR_CLOUD_LOOPBACK_ENDPOINT, chain.request().url.toString())
+            assertEquals("Bearer session-token", chain.request().header("Authorization"))
+            val buffer = okio.Buffer()
+            chain.request().body!!.writeTo(buffer)
+            val payload = JSONObject(buffer.readUtf8())
+            assertEquals("fast", payload.getString("mode"))
+            assertFalse(payload.has("allowTextFallback"))
+            val events = listOf(
+                """{"type":"meta","model":"glm-4-flash-250414","requestId":"debug-relay-test"}""",
+                """{"type":"delta","text":"你好"}""",
+                """{"type":"done","elapsedMs":10}""",
+            )
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .header("Content-Type", "text/event-stream")
+                .body(events.joinToString("") { "data: $it\n\n" }.toResponseBody("text/event-stream".toMediaType())).build()
+        }.build()
+        val engine = CaesarCloudFreeEngine({ "https://backend.example" },
+            { owner -> authenticatedOwner = owner; "session-token" }, { it == "session-token" }, client,
+            buildType = "debug", testEndpoint = CAESAR_CLOUD_LOOPBACK_ENDPOINT)
+        val events = engine.stream(request()).toList()
+        assertEquals("owner", authenticatedOwner)
+        assertEquals(1, calls)
+        assertEquals("glm-4-flash-250414", (events.first() as AiEvent.Meta).execution.model)
+        assertTrue(events.last() is AiEvent.Done)
+    }
+
+    @Test fun `HTTP and invalid variant overrides fail before transport`() = runTest {
+        for ((buildType, base, endpoint) in listOf(
+            Triple("debug", "http://127.0.0.1:18789", ""),
+            Triple("release", "http://127.0.0.1:18789", ""),
+            Triple("release", "https://backend.example", CAESAR_CLOUD_LOOPBACK_ENDPOINT),
+            Triple("benchmark", "https://backend.example", CAESAR_CLOUD_LOOPBACK_ENDPOINT),
+            Triple("debug", "https://backend.example", "http://127.0.0.1:18790/caesar-cloud/v1/chat"),
+        )) {
+            var called = false
+            val http = OkHttpClient.Builder().addInterceptor { called = true; error("must not call") }.build()
+            val engine = CaesarCloudFreeEngine({ base }, { "session-token" }, { true }, http,
+                buildType = buildType, testEndpoint = endpoint)
+            assertEquals("cloud_not_configured", (engine.stream(request()).toList().single() as AiEvent.Error).code)
+            assertFalse(called)
+        }
+    }
+
+    @Test fun `debug relay cannot bypass the changed-session guard`() = runTest {
+        var called = false
+        val http = OkHttpClient.Builder().addInterceptor { called = true; error("must not call") }.build()
+        val engine = CaesarCloudFreeEngine({ "https://backend.example" }, { "old-session" }, { false }, http,
+            buildType = "debug", testEndpoint = CAESAR_CLOUD_LOOPBACK_ENDPOINT)
+        assertEquals("authentication_required", (engine.stream(request()).toList().single() as AiEvent.Error).code)
+        assertFalse(called)
+    }
+
+    @Test fun `text and image payloads no longer send a fallback capability`() {
+        assertEquals("fast", cloudFreePayload(request()).getString("mode"))
+        assertFalse(cloudFreePayload(request()).has("allowTextFallback"))
         val file = File.createTempFile("cloud-free", ".jpg")
         try {
             file.writeBytes(byteArrayOf(-1, -40, 1, 2, -1, -39))
@@ -118,19 +175,33 @@ class CaesarCloudFreeEngineTest {
                 messages = listOf(AiConversationMessage("user", "图形", attachmentPaths = listOf(file.absolutePath))),
                 imagePaths = listOf(file.absolutePath), allowCloudFreeImageUpload = true,
             )
-            assertFalse(cloudFreePayload(imageRequest).getBoolean("allowTextFallback"))
+            assertFalse(cloudFreePayload(imageRequest).has("allowTextFallback"))
+            assertEquals("fast", cloudFreePayload(imageRequest).getString("mode"))
         } finally { file.delete() }
     }
 
-    @Test fun `only fast mode accepts the fixed free fallback and reports its actual model`() = runTest {
-        for ((mode, model, accepted) in listOf(
-            Triple(AiMode.FAST, "glm-4-flash-250414", true),
-            Triple(AiMode.DEEP, "glm-4-flash-250414", false),
-            Triple(AiMode.FAST, "glm-4.7-flashx", false),
+    @Test fun `unsupported deep requests stop before authentication or transport`() = runTest {
+        var authenticated = false
+        var called = false
+        val client = OkHttpClient.Builder().addInterceptor { called = true; error("must not call") }.build()
+        val engine = CaesarCloudFreeEngine({ "https://backend.example" },
+            { authenticated = true; "session-token" }, { true }, client)
+        val events = engine.stream(request().copy(mode = AiMode.DEEP)).toList()
+        assertEquals("unsupported_mode", (events.single() as AiEvent.Error).code)
+        assertFalse(authenticated)
+        assertFalse(called)
+    }
+
+    @Test fun `text accepts only the direct free model and rejects retired or vision metadata`() = runTest {
+        for ((model, accepted) in listOf(
+            "glm-4-flash-250414" to true,
+            "glm-4.7-flash" to false,
+            "glm-4v-flash" to false,
+            "glm-4-flash-250414x" to false,
         )) {
             val client = OkHttpClient.Builder().addInterceptor { chain ->
                 val data = listOf(
-                    """{"type":"meta","model":"$model","requestId":"fallback-test"}""",
+                    """{"type":"meta","model":"$model","requestId":"direct-model-test"}""",
                     """{"type":"delta","text":"你好"}""",
                     """{"type":"done","elapsedMs":10}""",
                 )
@@ -139,10 +210,38 @@ class CaesarCloudFreeEngineTest {
                     .body(data.joinToString("") { "data: $it\n\n" }.toResponseBody("text/event-stream".toMediaType())).build()
             }.build()
             val engine = CaesarCloudFreeEngine({ "https://backend.example" }, { "session-token" }, { true }, client)
-            val events = engine.stream(request().copy(mode = mode)).toList()
+            val events = engine.stream(request()).toList()
             assertEquals(accepted, events.last() is AiEvent.Done)
             if (accepted) assertEquals(model, (events.first() as AiEvent.Meta).execution.model)
             else assertTrue(events.first() is AiEvent.Error)
         }
+    }
+
+    @Test fun `current image still accepts only the vision model`() = runTest {
+        val file = File.createTempFile("cloud-free-model", ".jpg")
+        try {
+            file.writeBytes(byteArrayOf(-1, -40, 1, 2, -1, -39))
+            val input = request().copy(
+                messages = listOf(AiConversationMessage("user", "图形", attachmentPaths = listOf(file.absolutePath))),
+                imagePaths = listOf(file.absolutePath), allowCloudFreeImageUpload = true,
+            )
+            for (model in listOf("glm-4v-flash", "glm-4-flash-250414", "glm-4.7-flash")) {
+                val client = OkHttpClient.Builder().addInterceptor { chain ->
+                    val events = listOf(
+                        """{"type":"meta","model":"$model","requestId":"vision-test"}""",
+                        """{"type":"delta","text":"图形"}""",
+                        """{"type":"done","elapsedMs":10}""",
+                    )
+                    Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                        .header("Content-Type", "text/event-stream")
+                        .body(events.joinToString("") { "data: $it\n\n" }.toResponseBody("text/event-stream".toMediaType())).build()
+                }.build()
+                val engine = CaesarCloudFreeEngine({ "https://backend.example" }, { "session-token" }, { true }, client)
+                val events = engine.stream(input).toList()
+                assertEquals(model == "glm-4v-flash", events.last() is AiEvent.Done)
+                if (model == "glm-4v-flash") assertEquals(model, (events.first() as AiEvent.Meta).execution.model)
+                else assertTrue(events.single() is AiEvent.Error)
+            }
+        } finally { file.delete() }
     }
 }

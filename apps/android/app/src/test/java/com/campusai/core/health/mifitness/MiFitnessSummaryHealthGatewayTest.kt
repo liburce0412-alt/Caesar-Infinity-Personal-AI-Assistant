@@ -27,6 +27,58 @@ import java.time.ZoneOffset
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [25])
 class MiFitnessSummaryHealthGatewayTest {
+    @Test fun `real Beijing daily cache can be disclosed only with current turn consent and within its day`() = runTest {
+        val storage = MemorySecretStorage()
+        val credentials = MiFitnessCredentialStore(storage)
+        credentials.save("123456789", "unit-pass-token-one").getOrThrow()
+        val cache = MiFitnessStepsCache(storage)
+        val now = Instant.parse("2026-10-18T06:47:00Z").toEpochMilli()
+        val date = LocalDate.of(2026, 10, 18)
+        val start = date.atStartOfDay(com.campusai.core.time.CaesarTime.zone).toInstant().toEpochMilli()
+        val dayBucket = HealthPeriod(start, start + 86_400_000L - 1L, "today")
+        cache.save(MiFitnessStepsSummary(dayBucket, date, requireNotNull(credentials.read()).accountScope,
+            steps = 3210, recordCount = 4, observedAt = now - 1000, lastSyncAt = now - 1000)).getOrThrow()
+        val gateway = MiFitnessSummaryHealthGateway(credentials, cache, { now })
+        val snapshot = gateway.snapshot(com.campusai.core.health.HealthPeriods.parse("today", now)).getOrThrow()
+        assertEquals(dayBucket, snapshot.period)
+        assertTrue(snapshot.period.endEpochMillis > now)
+        val included = com.campusai.features.ai.currentCloudHealthDisclosure(snapshot, true, now)
+            as com.campusai.core.ai.CloudHealthDisclosure.Included
+        assertEquals("2026-10-18", included.summary.localDate)
+        assertEquals(3210L, included.summary.steps)
+        assertEquals(com.campusai.core.ai.CloudHealthDisclosure.Excluded,
+            com.campusai.features.ai.currentCloudHealthDisclosure(snapshot, false, now))
+        assertEquals(com.campusai.core.ai.CloudHealthDisclosure.Excluded,
+            com.campusai.features.ai.currentCloudHealthDisclosure(snapshot, true, start + 86_400_000L))
+    }
+
+    @Test fun `default Beijing gateway rejects a legacy foreign day cache without rewriting it`() = runTest {
+        val storage = MemorySecretStorage()
+        val credentials = MiFitnessCredentialStore(storage)
+        credentials.save("123456789", "unit-pass-token-one").getOrThrow()
+        val scope = requireNotNull(credentials.read()).accountScope
+        val cache = MiFitnessStepsCache(storage)
+        val now = Instant.parse("2026-08-27T08:00:00Z").toEpochMilli()
+        val legacyDate = LocalDate.of(2026, 8, 27)
+        val legacyPeriod = HealthPeriod(Instant.parse("2026-08-27T00:00:00Z").toEpochMilli(), now, "today")
+        val legacy = MiFitnessStepsSummary(
+            period = legacyPeriod, localDate = legacyDate, accountScope = scope, steps = 3210,
+            recordCount = 4, observedAt = now - 1000, lastSyncAt = now - 1000,
+        )
+        cache.save(legacy).getOrThrow()
+        val original = java.util.TimeZone.getDefault()
+        try {
+            java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("America/Los_Angeles"))
+            val gateway = MiFitnessSummaryHealthGateway(credentials, cache, { now })
+            val requested = com.campusai.core.health.HealthPeriods.parse("today", now)
+            assertTrue(gateway.snapshot(requested).isFailure)
+            assertEquals(legacy, cache.read(legacyPeriod, legacyDate, scope))
+            val beijing = legacy.copy(period = requested)
+            cache.save(beijing).getOrThrow()
+            assertEquals(3210L, gateway.snapshot(requested).getOrThrow().metrics.steps)
+        } finally { java.util.TimeZone.setDefault(original) }
+    }
+
     @Test
     fun `API 25 reads matching Mi Fitness vendor aggregate cache as typed snapshot`() = runTest {
         val fixture = fixture()

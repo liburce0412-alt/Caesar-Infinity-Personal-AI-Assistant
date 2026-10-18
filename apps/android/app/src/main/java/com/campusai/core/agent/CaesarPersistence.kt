@@ -14,6 +14,7 @@ class CaesarMemoryStore(private val dao: CampusDao) {
         source: String,
         confidence: Double,
         expiresAt: Long? = null,
+        ownerUserId: String = "local_user",
     ): CaesarMemoryProposal {
         require(type in TYPES) { "Unsupported memory type" }
         require(content.isNotBlank() && content.length <= 1_000) { "Invalid memory content" }
@@ -35,22 +36,25 @@ class CaesarMemoryStore(private val dao: CampusDao) {
                 createdAt = System.currentTimeMillis(),
                 confirmedAt = null,
                 expiresAt = proposal.expiresAt,
+                ownerUserId = ownerUserId.ifBlank { "local_user" },
             ),
         )
         return proposal
     }
 
-    suspend fun confirm(id: String): Boolean = dao.confirmAgentMemory(id) == 1
-    suspend fun updateContent(id: String, content: String): Boolean {
+    suspend fun confirm(id: String, ownerUserId: String = "local_user"): Boolean =
+        dao.confirmAgentMemory(id, ownerUserId = ownerUserId.ifBlank { "local_user" }) == 1
+    suspend fun updateContent(id: String, content: String, ownerUserId: String = "local_user"): Boolean {
         val normalized = content.trim()
         require(normalized.isNotBlank() && normalized.length <= 1_000) { "Invalid memory content" }
-        return dao.updateAgentMemoryContent(id, normalized) == 1
+        return dao.updateAgentMemoryContent(id, normalized, ownerUserId.ifBlank { "local_user" }) == 1
     }
-    suspend fun forget(id: String) = dao.deleteAgentMemory(id)
-    suspend fun forgetAll() = dao.deleteAllAgentMemories()
+    suspend fun forget(id: String, ownerUserId: String = "local_user"): Boolean =
+        dao.deleteAgentMemory(id, ownerUserId.ifBlank { "local_user" }) == 1
+    suspend fun forgetAll(ownerUserId: String = "local_user") = dao.deleteAllAgentMemories(ownerUserId.ifBlank { "local_user" })
 
-    suspend fun context(now: Long = System.currentTimeMillis()): List<CaesarMemoryProposal> =
-        dao.getConfirmedAgentMemories(now).map { row ->
+    suspend fun context(ownerUserId: String = "local_user", now: Long = System.currentTimeMillis()): List<CaesarMemoryProposal> =
+        dao.getConfirmedAgentMemories(now, ownerUserId = ownerUserId.ifBlank { "local_user" }).map { row ->
             CaesarMemoryProposal(row.id, row.type, row.content, row.source, row.confidence, row.expiresAt)
         }
 
@@ -69,6 +73,7 @@ class RoomCaesarTraceSink(private val dao: CampusDao) : CaesarTraceSink {
                 success = event.success,
                 errorCode = event.errorCode?.take(80),
                 createdAt = System.currentTimeMillis(),
+                ownerUserId = event.ownerUserId.ifBlank { "local_user" },
             ),
         )
     }

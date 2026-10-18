@@ -1,5 +1,7 @@
 package com.campusai.core.appfunctions
 
+import com.campusai.core.time.CaesarTime
+
 import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.appfunctions.AppFunction
@@ -10,7 +12,6 @@ import com.campusai.core.database.CampusDatabase
 import com.campusai.core.database.TimeRecordEntity
 import com.campusai.features.community.CampusRepository
 import java.time.Instant
-import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -28,7 +29,7 @@ abstract class CaesarAppFunctionEntryPoint : AppFunctionService() {
     /** Returns today's local time records as a size-limited JSON array. */
     @AppFunction(isDescribedByKDoc = true)
     suspend fun getTodayTimeRecords(context: AppFunctionContext): String = withContext(Dispatchers.IO) {
-        val zone = ZoneId.systemDefault()
+        val zone = CaesarTime.zone
         val today = Instant.now().atZone(zone).toLocalDate()
         val start = today.atStartOfDay(zone).toInstant().toEpochMilli()
         val end = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()

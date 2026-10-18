@@ -30,6 +30,8 @@ import com.campusai.core.designsystem.PageMood
 import com.campusai.core.designsystem.SpectraDialog
 import com.campusai.core.designsystem.SpectraSurface
 import com.campusai.core.model.CourseSchedule
+import com.campusai.core.time.rememberCaesarDate
+import com.campusai.core.time.CaesarTime
 import com.campusai.features.schedule.courseTimeLabel
 import com.campusai.features.schedule.hasPeriods
 import com.campusai.features.schedule.courseClock
@@ -48,7 +50,8 @@ internal fun CourseTimetable(courses: List<CourseSchedule>, onRemove: ((CourseSc
     var showWeekend by rememberSaveable { mutableStateOf(false) }
     var showManage by rememberSaveable { mutableStateOf(false) }
     var overlapSelection by remember { mutableStateOf<List<CourseSchedule>?>(null) }
-    var day by rememberSaveable { mutableIntStateOf(LocalDate.now().dayOfWeek.value) }
+    val today by rememberCaesarDate()
+    var day by rememberSaveable { mutableIntStateOf(today.dayOfWeek.value) }
     var selected by remember { mutableStateOf<CourseSchedule?>(null) }
     LaunchedEffect(initialCourseId, courses) {
         if (initialCourseId != null && initialCourseId >= 0) {
@@ -61,7 +64,7 @@ internal fun CourseTimetable(courses: List<CourseSchedule>, onRemove: ((CourseSc
         else courses.map { it.weeks }.filter { it.isNotBlank() }.distinct().sortedBy { Regex("\\d+").find(it)?.value?.toIntOrNull() ?: 0 }
     }
     var selectedWeek by rememberSaveable { mutableStateOf("") }
-    val todayWeek = semesterStart?.let { (java.time.temporal.ChronoUnit.DAYS.between(it, LocalDate.now()) / 7 + 1).toInt() }
+    val todayWeek = semesterStart?.let { (java.time.temporal.ChronoUnit.DAYS.between(it, today) / 7 + 1).toInt() }
     val currentWeek = selectedWeek.takeIf { it in sourceWeeks || it == "全部" }
         ?: todayWeek?.takeIf { it in 1..semesterWeeks }?.let { "第${it}周" }
         ?: courses.filter { it.weeks.endsWith("（截图）") }.maxByOrNull { it.id }?.weeks ?: "全部"
@@ -122,9 +125,9 @@ internal fun CourseTimetable(courses: List<CourseSchedule>, onRemove: ((CourseSc
                     }
                 }
                 val periodCourses = validCourses.filter { it.hasPeriods() }
-                if (periodCourses.isNotEmpty()) PeriodCourseGrid(periodCourses, onSelect = { selected = it }, onOverlap = { overlapSelection = it }, weekMonday = weekMonday)
+                if (periodCourses.isNotEmpty()) PeriodCourseGrid(periodCourses, onSelect = { selected = it }, onOverlap = { overlapSelection = it }, weekMonday = weekMonday, today = today)
                 val clockCourses = validCourses.filterNot { it.hasPeriods() }
-                if (clockCourses.isNotEmpty()) WeekCourseGrid(clockCourses, showWeekend, onSelect = { selected = it }, onOverlap = { overlapSelection = it }, weekMonday = weekMonday)
+                if (clockCourses.isNotEmpty()) WeekCourseGrid(clockCourses, showWeekend, onSelect = { selected = it }, onOverlap = { overlapSelection = it }, weekMonday = weekMonday, today = today)
             } else {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     (1..7).forEach { weekday ->
@@ -136,7 +139,7 @@ internal fun CourseTimetable(courses: List<CourseSchedule>, onRemove: ((CourseSc
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
                             Text(weekdayLabel(weekday), style = MaterialTheme.typography.labelLarge)
-                            WeekDateLabel(weekMonday, weekday)
+                            WeekDateLabel(weekMonday, weekday, today)
                             Text("${validCourses.count { it.weekday == weekday }} 项", style = MaterialTheme.typography.labelSmall)
                         }
                     }
@@ -215,6 +218,7 @@ private fun WeekCourseGrid(
     courses: List<CourseSchedule>, showWeekend: Boolean,
     onSelect: (CourseSchedule) -> Unit, onOverlap: (List<CourseSchedule>) -> Unit,
     weekMonday: LocalDate? = null,
+    today: LocalDate = CaesarTime.today(),
 ) {
     val days = if (showWeekend) 1..7 else 1..5
     val groups = remember(courses) { (1..7).associateWith { day -> groupDayCourses(courses.filter { it.weekday == day }, minimumMinutes = 68) } }
@@ -247,7 +251,7 @@ private fun WeekCourseGrid(
                     days.forEach { day ->
                         Column(Modifier.width(columnWidth).height(56.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                             Text(weekdayLabel(day), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
-                            WeekDateLabel(weekMonday, day)
+                            WeekDateLabel(weekMonday, day, today)
                         }
                     }
                 }
@@ -296,11 +300,11 @@ private fun WeekCourseGrid(
 }
 
 @Composable
-internal fun WeekDateLabel(monday: LocalDate?, day: Int) {
+internal fun WeekDateLabel(monday: LocalDate?, day: Int, today: LocalDate = CaesarTime.today()) {
     val date = monday?.plusDays(day.toLong() - 1)
     Text(date?.let { "${it.monthValue}/${it.dayOfMonth}" } ?: "—",
         style = MaterialTheme.typography.labelSmall,
-        color = if (date == LocalDate.now()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+        color = if (date == today) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 @Composable

@@ -294,23 +294,12 @@ fun SpectraBackdrop(
     LaunchedEffect(surface, active, lifecycleActive) {
         if (lifecycleActive) surface?.setSceneActive(active)
     }
-    LaunchedEffect(surface, quality, phase, lifecycleActive, active) {
+    LaunchedEffect(surface, lifecycleActive, active) {
         if (!lifecycleActive || !active) return@LaunchedEffect
-        val minFrameIntervalNanos = when (quality) {
-            RenderQuality.LOW -> 32_000_000L
-            // High-quality motion follows every display tick, including 90/120 Hz.
-            RenderQuality.AUTO, RenderQuality.HIGH -> 0L
-        }
-        var lastRequestedAt = Long.MIN_VALUE
         while (lifecycleActive && active) {
             withFrameNanos { frameTimeNanos ->
-                if (
-                    lastRequestedAt == Long.MIN_VALUE ||
-                    frameTimeNanos - lastRequestedAt >= minFrameIntervalNanos
-                ) {
-                    surface?.requestRender()
-                    lastRequestedAt = frameTimeNanos
-                }
+                // The existing shared loop owns adaptive cadence; no per-widget timers/state.
+                surface?.renderOnFrame(frameTimeNanos)
             }
         }
     }

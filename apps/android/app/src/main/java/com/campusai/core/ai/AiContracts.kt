@@ -33,6 +33,10 @@ data class AiRequest(
     val allowCloudFreeImageUpload: Boolean = false,
     /** Explicit cloud-only capability: permits projection and execution of the read-only web.search tool. */
     val allowWebSearch: Boolean = false,
+    /** Local-only capability. Free-text memories must never be read back to a cloud model. */
+    val allowLocalMemoryRead: Boolean = false,
+    /** Null preserves the selected route's registered tools; a set restricts this turn further. */
+    val allowedToolNames: Set<String>? = null,
     /** A compact JSON schema for the tools projected into this turn. */
     val caesarToolsJson: String = "[]",
     /** Vision, health-live and other device-only turns bypass automatic cloud routing. */
@@ -42,6 +46,8 @@ data class AiRequest(
     val sessionId: String = "",
     val ownerUserId: String = "",
     val userPrompt: String = "",
+    /** Stable for one user turn, including retries and confirmation; separate turns may repeat an action. */
+    val toolActionScope: String = "",
     /** Default-deny cloud boundary; only a typed daily summary may be explicitly disclosed per turn. */
     val cloudHealthDisclosure: CloudHealthDisclosure = CloudHealthDisclosure.Excluded,
 )

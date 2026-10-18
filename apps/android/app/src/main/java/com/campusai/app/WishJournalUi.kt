@@ -25,9 +25,8 @@ import com.campusai.core.designsystem.*
 import com.campusai.core.model.UiState
 import com.campusai.features.community.*
 import kotlinx.coroutines.launch
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneOffset
+import com.campusai.core.time.CaesarTime
+import com.campusai.core.time.rememberCaesarDate
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -35,22 +34,24 @@ internal fun WishDateChoice(value: String, onChange: (String) -> Unit, enabled: 
     var choosing by remember { mutableStateOf(false) }
     SpectraSurface(Modifier.fillMaxWidth()) {
         Text("希望实现的日子（可选）", style = MaterialTheme.typography.titleMedium)
-        Text("给期待一个日子，也可以让它慢慢发生。", style = MaterialTheme.typography.bodyMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SpectraAction(value.ifBlank { "选个日子" }, { choosing = true }, enabled = enabled)
             if (value.isNotBlank()) TextButton(enabled = enabled, onClick = { onChange("") }) { Text("清除日期") }
         }
     }
     if (choosing) {
-        val initial = runCatching { LocalDate.parse(value).atStartOfDay().toInstant(ZoneOffset.UTC).toEpochMilli() }.getOrNull()
-        val picker = rememberDatePickerState(initialSelectedDateMillis = initial)
+        val initial = CaesarTime.datePickerMillis(value)
+        val picker = rememberDatePickerState(
+            initialSelectedDateMillis = initial,
+            initialDisplayedMonthMillis = initial ?: CaesarTime.datePickerMillis(CaesarTime.today().toString()),
+        )
         SpectraDialog(onDismissRequest = { choosing = false }) {
             Column {
                 DatePicker(picker, colors = DatePickerDefaults.colors(containerColor = Color.Transparent))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = { choosing = false }) { Text("取消") }
                     TextButton(enabled = picker.selectedDateMillis != null, onClick = {
-                        picker.selectedDateMillis?.let { onChange(Instant.ofEpochMilli(it).atOffset(ZoneOffset.UTC).toLocalDate().toString()) }
+                        picker.selectedDateMillis?.let { onChange(CaesarTime.dateKeyFromPickerMillis(it)) }
                         choosing = false
                     }) { Text("确定") }
                 }
@@ -84,6 +85,7 @@ internal fun ListingDetails(
     onComment: (String, () -> Unit) -> Unit,
 ) {
     var draft by rememberSaveable(listing.id) { mutableStateOf("") }
+    val today by rememberCaesarDate()
     SpectraFullScreenDialog(onDismissRequest = onClose, mood = PageMood.COMMERCE) {
         SpectraPageScaffold(mood = PageMood.COMMERCE) {
             Column(Modifier.fillMaxSize().statusBarsPadding().windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))) {
@@ -103,7 +105,7 @@ internal fun ListingDetails(
                             if (listing.location.isNotBlank()) Text(listing.location, style = MaterialTheme.typography.bodyMedium)
                             if (listing.targetDate.isNotBlank()) {
                                 Text("希望实现于 ${listing.targetDate}", style = MaterialTheme.typography.bodyMedium)
-                                if (listing.completedAt.isBlank()) wishDateMessage(listing.targetDate)?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+                                if (listing.completedAt.isBlank()) wishDateMessage(listing.targetDate, today)?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
                             }
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 if (ownListing) SpectraAction(if (listing.completedAt.isBlank()) "实现了，留个纪念" else "编辑留念", onComplete, Modifier.fillMaxWidth(), enabled = !busy)
@@ -123,7 +125,7 @@ internal fun ListingDetails(
                     error?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
                     item { Text(if (ownListing) "评论 · 也可以写给自己" else "给心愿留句话", style = MaterialTheme.typography.titleLarge) }
                     when (comments) {
-                        UiState.Loading -> item { SpectraStatePane(SpectraStateKind.LOADING, "正在打开留言", "稍等片刻，正在同步这份心愿的回应。", modifier = Modifier.fillMaxWidth()) }
+                        UiState.Loading -> item { Text("正在读取留言", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         UiState.Empty -> item { Text(if (ownListing) "今天，离它近了一点吗？把这一小步记在这里。" else "一句真诚的回应，也能让期待多一点温度。", color = MaterialTheme.colorScheme.onSurface.copy(.65f)) }
                         is UiState.Error -> item { Text(comments.message, color = MaterialTheme.colorScheme.error); SpectraAction("重试", onRetry) }
                         is UiState.Data -> items(comments.value, key = { it.id }) { CommentRow(it) }

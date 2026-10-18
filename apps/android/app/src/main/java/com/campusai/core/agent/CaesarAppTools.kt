@@ -29,10 +29,13 @@ class CaesarAppTools(
 ) {
     fun registry(): CaesarToolRegistry = CaesarToolRegistry(
         listOf(
-            read("time.list_records", "读取时间记录", listOf(optional("limit", "integer", "返回条数，1-50")), setOf("时间", "记录", "统计")) { args, ctx ->
+            read("time.list_records", "读取时间记录；summary 是本次返回记录的数量与时长合计，受 limit 限制，不代表全部历史", listOf(optional("limit", "integer", "返回条数，1-50")), setOf("时间", "记录", "统计")) { args, ctx ->
                 val user = activeUser(ctx)
                 val records = dao.getAllTimeRecordsFlow(user, true).first().take(args.optInt("limit", 20).coerceIn(1, 50))
-                success(JSONArray(records.map { JSONObject().put("id", it.id).put("title", it.title).put("category", it.category).put("startTime", it.startTime).put("endTime", it.endTime).put("durationMinutes", it.durationMinutes).put("remark", it.remark) }))
+                val data = JSONArray(records.map { JSONObject().put("id", it.id).put("title", it.title).put("category", it.category).put("startTime", it.startTime).put("endTime", it.endTime).put("durationMinutes", it.durationMinutes).put("remark", it.remark) })
+                val summary = JSONObject().put("scope", "returned_records")
+                    .put("recordCount", records.size).put("totalDurationMinutes", records.sumOf { it.durationMinutes })
+                CaesarToolResult.Success(JSONObject().put("ok", true).put("data", data).put("summary", summary).toString())
             },
             write("time.create_record", "新建时间记录", reversible = true, params = listOf(text("title", "标题", 120), text("category", "分类", 40), number("startTime", "开始 Unix 毫秒"), number("endTime", "结束 Unix 毫秒"), optional("remark", "string", "备注", 500)), keywords = setOf("记录", "添加时间", "学习时间")) { args, ctx ->
                 persisted("time.create_record", args, ctx) {
@@ -46,16 +49,44 @@ class CaesarAppTools(
                 persisted("time.edit_record", args, ctx) {
                     val start = args.getLong("startTime"); val end = args.getLong("endTime")
                     if (end <= start) return@persisted CaesarToolResult.Denied("invalid_time_range", "结束时间必须晚于开始时间。")
-                    dao.editTimeRecord(args.getInt("id"), args.getString("title").trim(), args.getString("category").trim(), start, end, (end - start) / 60_000L, args.optString("remark").trim())
-                    success(JSONObject().put("updated", true))
+                    val changed = dao.editOwnedTimeRecord(args.getInt("id"), args.getString("title").trim(), args.getString("category").trim(), start, end, (end - start) / 60_000L, args.optString("remark").trim(), activeUser(ctx))
+                    if (changed == 1) success(JSONObject().put("updated", true))
+                    else CaesarToolResult.Denied("record_unavailable", "记录已不可用，请重新读取后再试。")
                 }
             },
-            write("time.delete_record", "软删除时间记录，可撤销", reversible = true, params = listOf(number("id", "记录 ID")), keywords = setOf("删除记录")) { args, ctx -> persisted("time.delete_record", args, ctx) { dao.softDeleteTimeRecord(args.getInt("id")); success(JSONObject().put("deleted", true).put("undoAvailable", true)) } },
-            write("time.undo_delete", "撤销时间记录删除", reversible = true, params = listOf(number("id", "记录 ID")), keywords = setOf("撤销", "恢复记录")) { args, ctx -> persisted("time.undo_delete", args, ctx) { dao.undoDeleteTimeRecord(args.getInt("id")); success(JSONObject().put("restored", true)) } },
-            read("course.list", "读取课程表", emptyList(), setOf("课程", "课表", "上课")) { _, ctx ->
-                success(JSONArray(dao.getCourseSchedulesFlow(activeUser(ctx), true).first().map { JSONObject().put("id", it.id).put("name", it.name).put("weekday", it.weekday).put("startMinute", it.startMinute).put("endMinute", it.endMinute).put("periodStart", it.periodStart).put("periodEnd", it.periodEnd).put("location", it.location).put("teacher", it.teacher).put("weeks", it.weeks) }))
+            write("time.delete_record", "软删除时间记录，可撤销", reversible = true, params = listOf(number("id", "记录 ID")), keywords = setOf("删除记录")) { args, ctx ->
+                persisted("time.delete_record", args, ctx) {
+                    if (dao.softDeleteOwnedTimeRecord(args.getInt("id"), activeUser(ctx)) == 1)
+                        success(JSONObject().put("deleted", true).put("undoAvailable", true))
+                    else CaesarToolResult.Denied("record_unavailable", "记录已不可用，请重新读取后再试。")
+                }
             },
-            write("course.delete", "软删除一条课程", reversible = true, params = listOf(number("id", "课程 ID")), keywords = setOf("删除课程", "移除课程")) { args, ctx -> persisted("course.delete", args, ctx) { dao.softDeleteCourseSchedule(args.getInt("id")); success(JSONObject().put("deleted", true)) } },
+            write("time.undo_delete", "撤销时间记录删除", reversible = true, params = listOf(number("id", "记录 ID")), keywords = setOf("撤销", "恢复记录")) { args, ctx ->
+                persisted("time.undo_delete", args, ctx) {
+                    if (dao.undoDeleteOwnedTimeRecord(args.getInt("id"), activeUser(ctx)) == 1)
+                        success(JSONObject().put("restored", true))
+                    else CaesarToolResult.Denied("record_unavailable", "记录已不可用，请重新读取后再试。")
+                }
+            },
+            read("course.list", "读取课程表", emptyList(), setOf("课程", "课表", "上课")) { _, ctx ->
+                val courses = dao.getCourseSchedulesFlow(activeUser(ctx), true).first()
+                    .sortedWith(compareBy({ it.weekday }, { it.startMinute }, { it.id }))
+                // Keep the existing data array and every included field intact. Coverage metadata
+                // makes this bounded view explicit; leave room below the 8,000-character replay cap.
+                val result = com.campusai.core.ai.AiContextBudget.putItems(JSONObject().put("ok", true), "data",
+                    courses.asSequence().map { JSONObject().put("id", it.id).put("name", it.name).put("weekday", it.weekday)
+                        .put("startMinute", it.startMinute).put("endMinute", it.endMinute).put("periodStart", it.periodStart)
+                        .put("periodEnd", it.periodEnd).put("location", it.location).put("teacher", it.teacher).put("weeks", it.weeks) },
+                    maxItems = Int.MAX_VALUE, maxChars = 7_500)
+                CaesarToolResult.Success(result.toString())
+            },
+            write("course.delete", "软删除一条课程", reversible = true, params = listOf(number("id", "课程 ID")), keywords = setOf("删除课程", "移除课程")) { args, ctx ->
+                persisted("course.delete", args, ctx) {
+                    if (dao.softDeleteOwnedCourseSchedule(args.getInt("id"), activeUser(ctx)) == 1)
+                        success(JSONObject().put("deleted", true))
+                    else CaesarToolResult.Denied("course_unavailable", "课程已不可用，请重新读取后再试。")
+                }
+            },
 
             read("community.announcements", "查询同步公告", emptyList(), setOf("公告", "通知")) { _, _ -> campus.loadAnnouncements().fold({ values -> success(JSONArray(values.map { JSONObject().put("id", it.id).put("title", it.title).put("body", it.body).put("publishAt", it.publishAt) })) }, ::remoteFailure) },
             read("community.list_posts", "查询树洞动态", emptyList(), setOf("帖子", "树洞", "动态", "校园圈")) { _, ctx -> campus.loadPosts(ctx.ownerUserId).fold({ values -> success(JSONArray(values.take(30).map { JSONObject().put("id", it.id).put("author", it.author).put("body", it.body).put("topic", it.topic).put("likes", it.likes).put("comments", it.comments).put("createdAt", it.createdAt) })) }, ::remoteFailure) },
@@ -77,17 +108,20 @@ class CaesarAppTools(
             read("profile.get", "读取当前个人资料", emptyList(), setOf("个人资料", "昵称", "简介")) { _, _ -> profile.state.value.profile.let { success(JSONObject().put("id", it.id).put("displayName", it.displayName).put("bio", it.bio).put("role", it.role).put("level", it.level).put("streakDays", it.streakDays)) } },
             external("profile.update", "更新昵称和简介", listOf(text("displayName", "昵称", 32), optional("bio", "string", "简介", 160)), setOf("修改昵称", "修改简介", "更新资料")) { args, ctx -> requireLogin(ctx) ?: persisted("profile.update", args, ctx) { if (profile.updateText(ctx.ownerUserId, args.getString("displayName"), args.optString("bio"))) success(JSONObject().put("updated", true)) else CaesarToolResult.Denied("profile_update_failed", "资料更新失败，请稍后重试。") } },
 
-            read("memory.list", "读取用户已确认的长期记忆", emptyList(), setOf("记忆", "记得", "偏好", "目标")) { _, _ ->
-                success(JSONArray(memory.context().map { JSONObject().put("id", it.id).put("type", it.type).put("content", it.content).put("source", it.source).put("confidence", it.confidence).put("expiresAt", it.expiresAt ?: JSONObject.NULL) }))
+            read("memory.list", "仅在本地读取当前用户已确认的长期记忆", emptyList(), setOf("记忆", "记得", "偏好", "目标")) { _, ctx ->
+                success(JSONArray(memory.context(activeUser(ctx)).map { JSONObject().put("id", it.id).put("type", it.type).put("content", it.content).put("source", it.source).put("confidence", it.confidence).put("expiresAt", it.expiresAt ?: JSONObject.NULL) }))
             },
             write("memory.propose", "提议一条长期记忆；用户点击确认后才生效", reversible = true, params = listOf(text("type", "preference/fact/goal/routine", 20), text("content", "需要记住的内容", 1_000), optional("confidence", "number", "0 到 1 的置信度"), optional("expiresAt", "integer", "可选过期 Unix 毫秒")), keywords = setOf("记住", "我喜欢", "偏好", "目标", "习惯")) { args, ctx ->
-                val proposal = memory.propose(args.getString("type"), args.getString("content"), ctx.userPrompt, args.optDouble("confidence", .8), args.optLong("expiresAt").takeIf { args.has("expiresAt") })
+                val proposal = memory.propose(args.getString("type"), args.getString("content"), ctx.userPrompt, args.optDouble("confidence", .8), args.optLong("expiresAt").takeIf { args.has("expiresAt") }, activeUser(ctx))
                 CaesarToolResult.Success(
                     JSONObject().put("ok", true).put("proposalId", proposal.id).put("confirmed", false).toString(),
                     CaesarSurface("memory-${proposal.id}", "保存为 Caesar∞ 记忆？", listOf(CaesarComponent.Text(proposal.content), CaesarComponent.Button("确认保存", "memory.confirm:${proposal.id}"))),
                 )
             },
-            write("memory.forget", "删除一条长期记忆", reversible = false, params = listOf(text("id", "记忆 ID", 80)), keywords = setOf("忘记", "删除记忆")) { args, _ -> memory.forget(args.getString("id")); success(JSONObject().put("deleted", true)) },
+            write("memory.forget", "删除一条长期记忆", reversible = false, params = listOf(text("id", "记忆 ID", 80)), keywords = setOf("忘记", "删除记忆")) { args, ctx ->
+                if (memory.forget(args.getString("id"), activeUser(ctx))) success(JSONObject().put("deleted", true))
+                else CaesarToolResult.Denied("memory_unavailable", "这条记忆已不可用。")
+            },
 
             read(
                 name = "web.search",
@@ -178,7 +212,13 @@ class CaesarAppTools(
         val canonicalArguments = CaesarIntentEvidence.canonicalArguments(args)
         idempotency.completed(context.idempotencyKey)?.let { return CaesarToolResult.Success(it) }
         if (!idempotency.begin(context.idempotencyKey, name, canonicalArguments)) return CaesarToolResult.RetryableError("duplicate_in_progress", "相同操作正在执行，不会重复提交。")
-        val result = runCatching { action() }.getOrElse {
+        val result = try {
+            action()
+        } catch (cancelled: CancellationException) {
+            // The write may already have committed. Leave its running key locked rather than
+            // falsely making an uncertain operation retryable after an account switch/cancel.
+            throw cancelled
+        } catch (_: Exception) {
             CaesarToolResult.RetryableError("tool_exception", "工具执行失败，请稍后重试。")
         }
         if (result is CaesarToolResult.Success) idempotency.complete(context.idempotencyKey, name, canonicalArguments, result.contentJson)

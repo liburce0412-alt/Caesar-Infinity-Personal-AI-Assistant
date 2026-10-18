@@ -1,5 +1,7 @@
 package com.campusai.app
 
+import com.campusai.core.time.CaesarTime
+
 import androidx.compose.material3.TextButton
 
 import androidx.compose.runtime.snapshotFlow
@@ -103,7 +105,7 @@ fun MessageCenterScreen(
     }
 
     OverlayPage(PageMood.COMMERCE) {
-        PageHeader("消息", "围绕心愿卡的每次沟通，都清楚而可追溯", onBack)
+        PageHeader("消息", "", onBack)
         state.operationError?.let { message -> item { InlineOperationError(message, PageMood.COMMERCE, viewModel::clearOperationError) } }
         when (val conversations = state.conversations) {
             UiState.Loading -> item {
@@ -334,7 +336,7 @@ fun OrdersScreen(
     var pending by remember { mutableStateOf<Pair<MarketplaceOrder, OrderAction>?>(null) }
     LaunchedEffect(Unit) { viewModel.refreshOrders() }
     OverlayPage(PageMood.COMMERCE) {
-        PageHeader("订单", "交易状态由双方确认，关键变化会留下审计记录", onBack)
+        PageHeader("订单", "交易状态由双方确认", onBack)
         state.operationError?.let { message -> item { InlineOperationError(message, PageMood.COMMERCE, viewModel::clearOperationError) } }
         when (val orders = state.orders) {
             UiState.Loading -> item {
@@ -555,7 +557,10 @@ private fun androidx.compose.foundation.lazy.LazyListScope.PageHeader(title: Str
                 label = "返回",
                 onClick = onBack,
             )
-            Column(Modifier.weight(1f)) { Text(title, style = MaterialTheme.typography.headlineLarge); Text(subtitle, color = MaterialTheme.colorScheme.onSurface.copy(.58f)) }
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.headlineLarge)
+                if (subtitle.isNotBlank()) Text(subtitle, color = MaterialTheme.colorScheme.onSurface.copy(.58f))
+            }
         }
     }
 }
@@ -629,7 +634,7 @@ private fun messageValues(state: UiState<List<CampusMessage>>): List<CampusMessa
     else -> emptyList()
 }
 
-private fun commerceTime(value: String): String = value.take(16).replace('T', ' ').ifBlank { "刚刚" }
+private fun commerceTime(value: String): String = CaesarTime.formatRemote(value)
 private fun orderStatusText(value: String): String = when (value) {
     "pending_payment" -> "待付款"
     "paid" -> "已付款"

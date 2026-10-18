@@ -1,12 +1,14 @@
 package com.campusai.core.health
 
+import com.campusai.core.time.CaesarTime
+
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.temporal.TemporalAdjusters
 
 object HealthPeriods {
-    fun parse(value: String, nowMillis: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()): HealthPeriod {
+    fun parse(value: String, nowMillis: Long = System.currentTimeMillis(), zone: ZoneId = CaesarTime.zone): HealthPeriod {
         val now = Instant.ofEpochMilli(nowMillis).atZone(zone)
         val today = now.toLocalDate()
         val startDate = when (value.lowercase()) {

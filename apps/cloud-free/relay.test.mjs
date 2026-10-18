@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
-import { createRelay, prepareRequest, MODEL, VISION_MODEL, FALLBACK_MODEL, CHAT_PATH } from './relay.mjs'
+import { createRelay, prepareRequest, MODEL, VISION_MODEL, CHAT_PATH } from './relay.mjs'
 
 const body = { messages: [{ role: 'user', content: '你好' }] }
 const jpeg = `data:image/jpeg;base64,${Buffer.from([255, 216, 1, 2, 255, 217]).toString('base64')}`
@@ -29,15 +29,15 @@ async function fixture(t, upstream = reply, options = {}) {
   }) }
 }
 
-test('free model is fixed; fast is default and deep is explicit', () => {
+test('text uses only 250414 without thinking; retired deep mode is rejected', () => {
   const fast = prepareRequest(body)
+  assert.equal(MODEL, 'glm-4-flash-250414')
   assert.equal(fast.model, MODEL)
-  assert.equal(fast.thinking.type, 'disabled')
+  assert.equal(fast.thinking, undefined)
   assert.equal(fast.max_tokens, 512)
-  const deep = prepareRequest({ ...body, mode: 'deep' })
-  assert.equal(deep.thinking.type, 'enabled')
-  assert.equal(deep.max_tokens, 8192)
-  for (const override of [{ model: 'paid-model' }, { url: 'https://other.example' }, { tools: [] }, { mode: 'other' }]) {
+  assert.throws(() => prepareRequest({ ...body, mode: 'deep' }), { code: 'unsupported_mode' })
+  for (const override of [{ model: 'glm-4.7-flash' }, { model: 'paid-model' },
+    { url: 'https://other.example' }, { tools: [] }, { mode: 'other' }]) {
     assert.throws(() => prepareRequest({ ...body, ...override }))
   }
 })
@@ -88,8 +88,9 @@ test('an explicit JPEG selects only the free vision model and current question',
   const payload = JSON.parse(f.requests[1].body)
   assert.equal(payload.model, VISION_MODEL)
   assert.equal(payload.thinking, undefined)
-  assert.equal(payload.messages.length, 1)
-  assert.equal(payload.messages[0].content[0].image_url.url, jpeg)
+  assert.equal(payload.messages.length, 2)
+  assert.match(payload.messages[0].content, /Asia\/Shanghai/)
+  assert.equal(payload.messages[1].content[0].image_url.url, jpeg)
   assert.throws(() => prepareRequest({ ...body, images: ['https://private.example/image'] }))
   assert.throws(() => prepareRequest({ ...body, images: [jpeg, jpeg] }))
   assert.throws(() => prepareRequest({ ...body, imageTask: 'ocr', images: [jpeg] }))
@@ -232,84 +233,68 @@ test('busy queue returns promptly and a finished request releases its slot', asy
   assert.match(await (await third).text(), /event: done/)
 })
 
-test('opted-in fast text switches on congestion to the fixed free fallback', async t => {
-  let calls = 0
-  const f = await fixture(t, () => ++calls === 1
-    ? Response.json({ error: { code: '1305' } }, { status: 429 }) : reply())
-  const stream = await (await f.send({ ...body, allowTextFallback: true })).text()
-  assert.match(stream, new RegExp(`"model":"${FALLBACK_MODEL}"`))
-  assert.match(stream, /event: done/)
-  const payload = JSON.parse(f.requests.at(-1).body)
-  assert.equal(calls, 2)
-  assert.equal(payload.model, FALLBACK_MODEL)
-  assert.equal(payload.thinking, undefined)
-  assert.equal(payload.allowTextFallback, undefined)
-  assert.deepEqual(payload.messages, prepareRequest(body).messages)
-})
-
-test('fallback applies to a stalled first token even after upstream headers', async t => {
-  let calls = 0, primaryAborted = false
-  const f = await fixture(t, (_, init) => {
-    if (++calls > 1) return reply()
-    return new Response(new ReadableStream({ start(controller) {
-      init.signal.addEventListener('abort', () => {
-        primaryAborted = true
-        controller.error(init.signal.reason)
-      }, { once: true })
-    } }))
-  }, { primaryWaitMs: 25 })
-  const stream = await (await f.send({ ...body, allowTextFallback: true })).text()
-  assert.equal(primaryAborted, true)
-  assert.equal(calls, 2)
-  assert.match(stream, new RegExp(FALLBACK_MODEL))
-  assert.match(stream, /event: done/)
-})
-
-test('first primary token commits the stream and cancels the fallback deadline', async t => {
-  let calls = 0
-  const encoder = new TextEncoder()
-  const f = await fixture(t, () => {
-    calls++
-    return new Response(new ReadableStream({ start(controller) {
-      controller.enqueue(encoder.encode(packets({ choices: [{ delta: { content: '主模型' } }] })))
-      setTimeout(() => {
-        controller.enqueue(encoder.encode(packets({ choices: [{ delta: {}, finish_reason: 'stop' }] }, '[DONE]')))
-        controller.close()
-      }, 80)
-    } }))
-  }, { primaryWaitMs: 25 })
-  const stream = await (await f.send({ ...body, allowTextFallback: true })).text()
-  assert.equal(calls, 1)
-  assert.match(stream, /主模型/)
-  assert.match(stream, /event: done/)
-  assert.doesNotMatch(stream, new RegExp(FALLBACK_MODEL))
-})
-
-test('deep, vision and account failures never downgrade even with capability enabled', async t => {
-  for (const payload of [{ ...body, mode: 'deep' }, { ...body, images: [jpeg] }]) {
-    const f = await fixture(t, () => Response.json({ error: { code: '1305' } }, { status: 429 }))
-    await (await f.send({ ...payload, allowTextFallback: true })).text()
-    assert.equal(f.requests.filter(r => !r.url.includes('/auth/')).length, 2)
-    assert.ok(f.requests.filter(r => !r.url.includes('/auth/')).every(r => JSON.parse(r.body).model !== FALLBACK_MODEL))
+test('legacy fallback capability is ignored and direct text never emits fallback metadata', async t => {
+  for (const allowTextFallback of [false, true]) {
+    const f = await fixture(t)
+    const stream = await (await f.send({ ...body, allowTextFallback })).text()
+    assert.match(stream, /"model":"glm-4-flash-250414"/)
+    assert.match(stream, /event: done/)
+    assert.doesNotMatch(stream, /fallbackFrom|glm-4\.7-flash/)
+    const upstream = f.requests.filter(r => !r.url.includes('/auth/'))
+    assert.equal(upstream.length, 1)
+    assert.equal(JSON.parse(upstream[0].body).thinking, undefined)
+    assert.equal(JSON.parse(upstream[0].body).allowTextFallback, undefined)
   }
+})
+
+test('a stalled text stream times out without invoking another model', async t => {
+  let calls = 0, upstreamSignal
+  const f = await fixture(t, (_, init) => {
+    calls++
+    upstreamSignal = init.signal
+    return new Response(new ReadableStream({ start(controller) {
+      init.signal.addEventListener('abort', () => controller.error(init.signal.reason), { once: true })
+    } }))
+  }, { timeoutMs: 60 })
+  const stream = await (await f.send()).text()
+  assert.equal(upstreamSignal.aborted, true)
+  assert.equal(calls, 1)
+  assert.match(stream, /event: error/)
+  assert.doesNotMatch(stream, /fallbackFrom|event: done/)
+})
+
+test('retired text deep requests fail clearly before any authentication or provider traffic', async t => {
+  const f = await fixture(t)
+  const response = await f.send({ ...body, mode: 'deep', allowTextFallback: true })
+  assert.equal(response.status, 400)
+  assert.equal((await response.json()).error.code, 'unsupported_mode')
+  assert.equal(f.requests.length, 0)
+})
+
+test('vision congestion stays on vision and account errors do not retry', async t => {
+  const vision = await fixture(t, () => Response.json({ error: { code: '1305' } }, { status: 429 }))
+  await (await vision.send({ ...body, images: [jpeg], allowTextFallback: true })).text()
+  const attempts = vision.requests.filter(r => !r.url.includes('/auth/'))
+  assert.equal(attempts.length, 2)
+  assert.ok(attempts.every(r => JSON.parse(r.body).model === VISION_MODEL))
   const f = await fixture(t, () => Response.json({ error: { code: '1113' } }, { status: 429 }))
-  assert.equal((await (await f.send({ ...body, allowTextFallback: true })).json()).error.code, 'provider_account_unavailable')
+  assert.equal((await (await f.send()).json()).error.code, 'provider_account_unavailable')
   assert.equal(f.requests.filter(r => !r.url.includes('/auth/')).length, 1)
 })
 
-test('client cancellation while awaiting first token never starts fallback', async t => {
+test('client cancellation while awaiting headers aborts the only model request', async t => {
   let calls = 0, abortSignal
   const f = await fixture(t, (_, init) => {
     calls++
     abortSignal = init.signal
     return new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true }))
-  }, { primaryWaitMs: 80 })
+  })
   const controller = new AbortController()
-  const pending = f.send({ ...body, allowTextFallback: true }, { signal: controller.signal }).catch(e => e)
+  const pending = f.send(body, { signal: controller.signal }).catch(e => e)
   while (!calls) await new Promise(resolve => setTimeout(resolve, 5))
   controller.abort()
   await pending
-  await new Promise(resolve => setTimeout(resolve, 100))
+  for (let i = 0; i < 30 && !abortSignal.aborted; i++) await new Promise(resolve => setTimeout(resolve, 10))
   assert.equal(abortSignal.aborted, true)
   assert.equal(calls, 1)
 })

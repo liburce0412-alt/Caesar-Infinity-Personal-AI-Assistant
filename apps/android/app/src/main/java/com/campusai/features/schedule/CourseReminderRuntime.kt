@@ -1,5 +1,7 @@
 package com.campusai.features.schedule
 
+import com.campusai.core.time.CaesarTime
+
 import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -17,7 +19,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import java.time.LocalDate
-import java.time.ZoneId
 import java.util.concurrent.TimeUnit
 
 internal class CourseReminderStore(context: Context) {
@@ -63,7 +64,7 @@ internal class CourseReminderStore(context: Context) {
         if (prefs.getString("demoOwner", null) != owner || prefs.getLong("demoEnd", 0) <= now) return null
         val start = prefs.getLong("demoStart", 0)
         val end = prefs.getLong("demoEnd", 0)
-        val date = java.time.Instant.ofEpochMilli(start).atZone(ZoneId.systemDefault()).toLocalDate()
+        val date = java.time.Instant.ofEpochMilli(start).atZone(CaesarTime.zone).toLocalDate()
         return CourseOccurrence(CourseSchedule(id = -1, name = "课程提醒演示", weekday = date.dayOfWeek.value,
             startMinute = 0, endMinute = 1, location = "示例教室 · 不影响真实课表", weeks = date.toString(), sourceHash = "demo"), date, start, end)
     }
@@ -126,7 +127,7 @@ internal object CourseReminderRuntime {
         val store = CourseReminderStore(app)
         val config = store.read(user)
         val now = System.currentTimeMillis()
-        val zone = ZoneId.systemDefault()
+        val zone = CaesarTime.zone
         val date = java.time.Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
         val rows = if (config.enabled) CampusDatabase.getDatabase(app).campusDao()
             .getCourseSchedulesFlow(user, user != "local_user").first().map { it.toDomain() } else emptyList()

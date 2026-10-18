@@ -19,6 +19,30 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class CloudProviderCoreTest {
+    @Test fun `all personal cloud providers omit free-text memories and memory read envelopes`() {
+        val memoryCall = OpenAiProviderToolCall("memory-call", "memory_list", "memory.list", "{}", null)
+        for (provider in CloudAiProvider.entries) {
+            val prepared = OpenAiCompatibleRequestFactory.prepare(provider, request(
+                context = """{"confirmedMemories":[{"content":"night oxygen 88%"}],"study":{"minutes":20}}""",
+                tools = """[{"name":"memory.list","description":"local memory","parameters":[]},{"name":"memory.propose","description":"proposal","parameters":[]}]""",
+                messages = listOf(
+                    AiConversationMessage("user", "private memory question", cloudHealthSensitive = true),
+                    AiConversationMessage("assistant", "private memory answer", cloudHealthSensitive = true),
+                    AiConversationMessage("assistant", ProviderToolCallEnvelope.encode(memoryCall)),
+                    AiConversationMessage("tool", "private old memory result"),
+                    AiConversationMessage("user", "普通新问题"),
+                ),
+            ), "test-model")
+            val encoded = prepared.payload.toString()
+            assertFalse(encoded.contains("oxygen"))
+            assertFalse(encoded.contains("private memory"))
+            assertFalse(encoded.contains("private old"))
+            assertFalse(encoded.contains("memory_list"))
+            assertTrue(encoded.contains("memory_propose"))
+            assertTrue(encoded.contains("minutes"))
+        }
+    }
+
     @Test
     fun `Codex uses its requested defaults while accepting a dynamic HTTPS model catalog`() {
         val provider = CloudAiProvider.CODEX

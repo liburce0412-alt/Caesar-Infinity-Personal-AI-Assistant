@@ -23,10 +23,10 @@ fun decideAiRoute(
     geminiKeyAvailable: Boolean = false,
     codexKeyAvailable: Boolean = false,
 ): AiRouteDecision = when (provider) {
-    AiProvider.CAESAR_CLOUD_FREE -> if (online) {
-        AiRouteDecision.Use(AiRoute.CAESAR_CLOUD_FREE)
-    } else {
-        AiRouteDecision.Block("cloud_offline", "Caesar cloud free 需要网络连接，请联网后重试。")
+    AiProvider.CAESAR_CLOUD_FREE -> when {
+        mode != AiMode.FAST -> AiRouteDecision.Block("unsupported_mode", "免费云端仅支持快速回答，请切换回答方式。")
+        online -> AiRouteDecision.Use(AiRoute.CAESAR_CLOUD_FREE)
+        else -> AiRouteDecision.Block("cloud_offline", "Caesar cloud free 需要网络连接，请联网后重试。")
     }
     AiProvider.AUTO -> when {
         localReady -> AiRouteDecision.Use(AiRoute.LOCAL)

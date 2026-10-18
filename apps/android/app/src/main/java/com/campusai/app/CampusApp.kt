@@ -299,7 +299,7 @@ fun CampusApp(
             profileRepository,
         ),
     )
-    val aiRuntimeState by aiViewModel.state.collectAsState()
+    val aiRuntimeState by aiViewModel.runtimeState.collectAsState()
     var aiOrbInteraction by remember { mutableStateOf<com.campusai.core.designsystem.CaesarOrbMode?>(null) }
     com.campusai.features.ai.AiIslandStatusHost(aiRuntimeState, aiOrbInteraction)
     LaunchedEffect(aiViewModel) {
@@ -317,7 +317,6 @@ fun CampusApp(
     val courses by timeViewModel.courses.collectAsState()
     val dailyTargetSnapshots by timeViewModel.dailyTargetSnapshots.collectAsState()
     val dailyGreeting by aiViewModel.dailyGreeting.collectAsState()
-    val aiHistory by aiViewModel.history.collectAsState()
     val contextPosts = when (val posts = campusState.posts) {
         is UiState.Data -> posts.value
         is UiState.Offline -> posts.value
@@ -373,7 +372,7 @@ fun CampusApp(
         initialSharedImage,
         aiRuntimeState.streaming,
         aiRuntimeState.importingImage,
-        aiRuntimeState.pendingImages.size,
+        aiRuntimeState.pendingImageCount,
         aiRuntimeState.completedExternalImageImport,
     ) {
         val shared = initialSharedImage ?: return@LaunchedEffect
@@ -402,11 +401,10 @@ fun CampusApp(
         }
     }
 
-    LaunchedEffect(initialAutomationConversationId, aiHistory, aiRuntimeState.streaming) {
+    LaunchedEffect(initialAutomationConversationId, aiRuntimeState.streaming) {
         val conversationId = initialAutomationConversationId ?: return@LaunchedEffect
         if (aiRuntimeState.streaming) return@LaunchedEffect
-        val report = aiHistory.firstOrNull { it.id == conversationId } ?: return@LaunchedEffect
-        aiViewModel.openConversation(report)
+        aiViewModel.openConversationById(conversationId, "local_user")
         navigateTo(AppSurface.Ai(appSurface.returnDestination))
         onAutomationConversationConsumed()
     }
@@ -482,6 +480,7 @@ fun CampusApp(
 
     LaunchedEffect(authState.signedIn, authState.userId) {
         campusViewModel.setSession(authState.signedIn, authState.userId)
+        aiViewModel.setActiveOwner(authState.userId.takeIf { authState.signedIn }.orEmpty())
     }
     LaunchedEffect(authState.signedIn, authState.userId) {
         if (authState.signedIn) authRepository.refresh()

@@ -1,5 +1,8 @@
 package com.campusai.app
 
+import com.campusai.core.time.CaesarTime
+import com.campusai.core.time.rememberCaesarDate
+
 import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -158,7 +161,7 @@ fun CampusScreen(
             ) {
             item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) { Text(if (state.postsScope == CommunityFeedScope.MINE) "${ownerName}的树洞" else "树洞广场", style = MaterialTheme.typography.headlineLarge); Text("收起喧闹，留下对你真正重要的声音", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.6f)) }
+                    Text(if (state.postsScope == CommunityFeedScope.MINE) "${ownerName}的树洞" else "树洞广场", Modifier.weight(1f), style = MaterialTheme.typography.headlineLarge)
                     SpectraIconAction(
                         icon = Icons.Rounded.Refresh,
                         label = "刷新动态",
@@ -388,17 +391,13 @@ internal fun PostDetails(
                     item { Text("评论", style = MaterialTheme.typography.titleLarge) }
                     when (comments) {
                         UiState.Loading -> item {
-                            SpectraStatePane(
-                                kind = SpectraStateKind.LOADING,
-                                title = "正在读取评论",
-                                detail = "会话不会因加载而自动发布草稿。",
-                                modifier = Modifier.fillMaxWidth(),
-                            )
+                            Text("正在读取评论", style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         UiState.Empty -> item {
                             EmptyRemote(
                                 title = "还没有评论",
-                                detail = "这条动态尚无评论；你可以在下方写下具体而友善的回应。",
+                                detail = "写下第一条回应。",
                                 action = "重新检查",
                                 mood = PageMood.SOCIAL,
                                 onAction = onRetry,
@@ -479,6 +478,7 @@ fun MarketScreen(
     contentPadding: PaddingValues,
     onScopeChange: (CommunityFeedScope) -> Unit = viewModel::selectListingsScope,
 ) {
+    val today by rememberCaesarDate()
     val layout = SpectraTheme.layout
     val pageBottom = maxOf(contentPadding.calculateBottomPadding(), layout.pageBottomSpacing)
     var composing by rememberSaveable { mutableStateOf(false) }
@@ -508,13 +508,13 @@ fun MarketScreen(
                 verticalArrangement = Arrangement.spacedBy(layout.sectionGap),
             ) {
             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
-                Column { Text("心愿墙", style = MaterialTheme.typography.headlineLarge); Text("把想遇见、想交换的东西，认真留在这里", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.6f)); Spacer(Modifier.height(layout.compactGap)) }
+                Text("心愿墙", style = MaterialTheme.typography.headlineLarge)
             }
             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                 CommunityScopeChoice(state.listingsScope, onScopeChange, enabled = signedIn)
             }
             state.operationError?.let { message -> item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) { ErrorBar(message, PageMood.COMMERCE) { viewModel.clearOperationError() } } }
-            wishToRevisit(visibleWishes, userId)?.let { memory ->
+            wishToRevisit(visibleWishes, userId, today)?.let { memory ->
                 item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                     WishRevisitCard(memory) { selected = memory; viewModel.openWishComments(memory.id) }
                 }
@@ -548,7 +548,7 @@ fun MarketScreen(
                     }
                 }
                 is UiState.Error -> item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) { RemoteError(listings.message, signedIn, onLogin, viewModel::refreshListings, PageMood.COMMERCE) }
-                is UiState.Data -> items(listings.value, key = { it.id }, span = { androidx.compose.foundation.lazy.grid.GridItemSpan(if (it.mediaUrl.isBlank() && it.mediaPaths.isEmpty()) maxLineSpan else 1) }) { listing -> ListingCardView(listing) { selected = listing; viewModel.openWishComments(listing.id) } }
+                is UiState.Data -> items(listings.value, key = { it.id }, span = { androidx.compose.foundation.lazy.grid.GridItemSpan(if (it.mediaUrl.isBlank() && it.mediaPaths.isEmpty()) maxLineSpan else 1) }) { listing -> ListingCardView(listing, today) { selected = listing; viewModel.openWishComments(listing.id) } }
                 is UiState.Offline -> {
                     item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
                         SpectraStatePane(
@@ -560,7 +560,7 @@ fun MarketScreen(
                             onAction = viewModel::refreshListings,
                         )
                     }
-                    items(listings.value, key = { it.id }, span = { androidx.compose.foundation.lazy.grid.GridItemSpan(if (it.mediaUrl.isBlank() && it.mediaPaths.isEmpty()) maxLineSpan else 1) }) { listing -> ListingCardView(listing) { selected = listing; viewModel.openWishComments(listing.id) } }
+                    items(listings.value, key = { it.id }, span = { androidx.compose.foundation.lazy.grid.GridItemSpan(if (it.mediaUrl.isBlank() && it.mediaPaths.isEmpty()) maxLineSpan else 1) }) { listing -> ListingCardView(listing, today) { selected = listing; viewModel.openWishComments(listing.id) } }
                 }
             }
             }
@@ -623,7 +623,7 @@ fun MarketScreen(
 }
 
 @Composable
-internal fun ListingCardView(listing: MarketplaceListing, onClick: () -> Unit) {
+internal fun ListingCardView(listing: MarketplaceListing, today: java.time.LocalDate = CaesarTime.today(), onClick: () -> Unit) {
     val hasImage = listing.mediaUrl.isNotBlank() || listing.mediaPaths.isNotEmpty()
     GlassPanel(Modifier.fillMaxWidth(), onClick = onClick) {
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))) {
@@ -635,8 +635,8 @@ internal fun ListingCardView(listing: MarketplaceListing, onClick: () -> Unit) {
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (listing.completedAt.isNotBlank()) Text("已实现 · 把这一刻留下", style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary)
-                else wishDateMessage(listing.targetDate)?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary) }
-                Text(wishRecordedTime(listing.createdAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                else wishDateMessage(listing.targetDate, today)?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary) }
+                Text(wishRecordedTime(listing.createdAt, today), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -659,7 +659,6 @@ internal fun PostComposer(busy: Boolean, onClose: () -> Unit, onPublish: (String
     }
     ComposerDialog(
         title = if (initial == null) "写进树洞" else "修改树洞",
-        subtitle = "一句真话就够了。完成后点击保存，未保存的修改不会提交。",
         editing = initial != null,
         progress = "${body.length} / 5000",
         primaryText = if (busy || preparing) "正在保存" else "保存",
@@ -680,7 +679,7 @@ internal fun PostComposer(busy: Boolean, onClose: () -> Unit, onPublish: (String
     ) {
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         VisibilityChoice(isPublic, { isPublic = it }, enabled = !busy && !preparing)
-        ComposerSection("01", "此刻想说的", "先把句子写完，排版和话题可以稍后再想。", PageMood.SOCIAL) {
+        ComposerSection("01", "此刻想说的", "", PageMood.SOCIAL) {
             SpectraTextField(
                 value = body,
                 onValueChange = { body = it.take(5000) },
@@ -690,7 +689,7 @@ internal fun PostComposer(busy: Boolean, onClose: () -> Unit, onPublish: (String
                 shape = RoundedCornerShape(18.dp),
             )
         }
-        ComposerSection("02", "给它一个线索", "话题可选，日后回看时更容易找到。", PageMood.SOCIAL) {
+        ComposerSection("02", "话题（可选）", "", PageMood.SOCIAL) {
             SpectraTextField(
                 value = topic,
                 onValueChange = { topic = it.take(40) },
@@ -703,7 +702,7 @@ internal fun PostComposer(busy: Boolean, onClose: () -> Unit, onPublish: (String
                 supportingText = { Text("${topic.length} / 40") },
             )
         }
-        ComposerSection("03", "谁在说话", "这是一个可滑动的选择；匿名内容不会向其他人展示你的名字。", PageMood.SOCIAL) {
+        ComposerSection("03", "谁在说话", "匿名发布不向其他人展示你的名字。", PageMood.SOCIAL) {
             com.campusai.core.designsystem.CaesarSlidingSelector(
                 options = listOf("以本人发布", "匿名发布"),
                 selectedIndex = if (anonymous) 1 else 0,
@@ -712,7 +711,7 @@ internal fun PostComposer(busy: Boolean, onClose: () -> Unit, onPublish: (String
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        ComposerSection("04", "加一张画面", "不加图也可以发布。", PageMood.SOCIAL) {
+        ComposerSection("04", "图片（可选）", "", PageMood.SOCIAL) {
             if (imageUri == null && !removeImage && initial?.mediaUrl?.isNotBlank() == true) {
                 AsyncImage(initial.mediaUrl, "原来的树洞图片", Modifier.fillMaxWidth().height(140.dp), contentScale = ContentScale.Crop)
             }
@@ -750,7 +749,6 @@ internal fun ListingComposer(busy: Boolean, onClose: () -> Unit, onPublish: (Str
     val cents = wishPriceCents(price)
     ComposerDialog(
         title = if (initial == null) "贴一张心愿" else "修改心愿",
-        subtitle = "想做的事、想遇见的人，都可以成为心愿。价格和公开分享由你决定。",
         editing = initial != null,
         progress = if (title.isBlank()) "草稿" else "可以保存",
         primaryText = if (busy || preparing) "正在保存" else "保存",
@@ -772,15 +770,15 @@ internal fun ListingComposer(busy: Boolean, onClose: () -> Unit, onPublish: (Str
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         VisibilityChoice(isPublic, { isPublic = it }, enabled = !busy && !preparing)
         WishDateChoice(targetDate, { targetDate = it }, enabled = !busy && !preparing)
-        ComposerSection("01", "这是什么", "先给心愿一个一眼能懂的名字。", PageMood.COMMERCE) {
+        ComposerSection("01", "这是什么", "", PageMood.COMMERCE) {
             SpectraTextField(title, { title = it.take(160) }, Modifier.fillMaxWidth(), enabled = !busy && !preparing, label = { Text("心愿标题") }, singleLine = true, shape = RoundedCornerShape(18.dp))
             SpectraTextField(description, { description = it.take(2000) }, Modifier.fillMaxWidth().heightIn(min = 132.dp), enabled = !busy && !preparing, label = { Text("细节（可选）") }, placeholder = { Text("为什么想实现它、期待怎样的回应…") }, shape = RoundedCornerShape(18.dp))
         }
-        ComposerSection("02", "期待的条件", "不涉及金钱就留空；填写 0 元表示明确免费。地点也可留空。", PageMood.COMMERCE) {
+        ComposerSection("02", "期待的条件", "不涉及金钱可留空，0 元表示免费。", PageMood.COMMERCE) {
             SpectraTextField(price, { price = it.filter { char -> char.isDigit() || char == '.' }.take(10) }, Modifier.fillMaxWidth(), enabled = !busy && !preparing, label = { Text("期待价格（元，可选）") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, shape = RoundedCornerShape(18.dp), isError = !wishPriceValid(price), supportingText = { Text(if (wishPriceValid(price)) "可以留空" else "请输入有效金额，最多两位小数") })
             SpectraTextField(location, { location = it.take(80) }, Modifier.fillMaxWidth(), enabled = !busy && !preparing, label = { Text("碰面地点（可选）") }, singleLine = true, shape = RoundedCornerShape(18.dp))
         }
-        ComposerSection("03", "让它被看见", "清楚的图片会让回应更准确。", PageMood.COMMERCE) {
+        ComposerSection("03", "图片（可选）", "", PageMood.COMMERCE) {
             if (imageUri == null && !removeImage && initial?.mediaUrl?.isNotBlank() == true) {
                 AsyncImage(initial.mediaUrl, "原来的心愿图片", Modifier.fillMaxWidth().height(140.dp), contentScale = ContentScale.Crop)
             }
@@ -823,7 +821,6 @@ internal fun VisibilityChoice(isPublic: Boolean, onChange: (Boolean) -> Unit, en
 @Composable
 private fun ComposerDialog(
     title: String,
-    subtitle: String,
     progress: String,
     editing: Boolean,
     primaryText: String,
@@ -857,7 +854,6 @@ private fun ComposerDialog(
                     Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    Text(subtitle, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface.copy(.66f))
                     content()
                     Spacer(Modifier.height(8.dp))
                 }
@@ -885,8 +881,10 @@ private fun ComposerSection(
 ) {
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         Text(title, style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(3.dp))
-        Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.54f))
+        if (detail.isNotBlank()) {
+            Spacer(Modifier.height(3.dp))
+            Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(.54f))
+        }
         Spacer(Modifier.height(12.dp))
         Column(verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
         Spacer(Modifier.height(16.dp))
@@ -1026,32 +1024,32 @@ internal fun marketEmptyPresentation(
     refreshing && !hasSynced -> MarketEmptyPresentation(
         status = "正在确认",
         title = "正在确认心愿墙",
-        detail = "本地暂时没有可显示的心愿卡；正在后台获取最新结果。",
+        detail = "正在读取最新心愿。",
     )
     refreshing -> MarketEmptyPresentation(
         status = "正在更新",
         title = "上次同步时心愿墙是空的",
-        detail = "正在后台确认最新内容；你仍可直接贴上一张心愿。",
+        detail = "正在读取最新内容。",
     )
     hasError && !hasSynced -> MarketEmptyPresentation(
         status = "同步未完成",
         title = "暂时无法确认心愿墙",
-        detail = "尚未取得远端结果；当前空白不代表没有心愿卡。",
+        detail = "读取失败，请重试。",
     )
     hasError -> MarketEmptyPresentation(
         status = "刷新未完成",
         title = "上次同步时心愿墙是空的",
-        detail = "本次刷新失败，目录可能已经变化；网络恢复后可重试。",
+        detail = "未能更新，显示上次结果。请重试。",
     )
     hasSynced -> MarketEmptyPresentation(
         status = "暂无内容",
         title = "心愿墙还很安静",
-        detail = "本次同步结果为空；新心愿提交后会先进入审核。",
+        detail = "暂无心愿；公开发布后需审核。",
     )
     else -> MarketEmptyPresentation(
         status = "暂无内容",
         title = "暂时没有显示心愿",
-        detail = "正在等待首次同步；你也可以直接贴上一张心愿。",
+        detail = "等待首次同步。",
     )
 }
 
@@ -1123,7 +1121,7 @@ private fun ErrorBar(message: String, mood: PageMood, onDismiss: () -> Unit) {
     }
 }
 
-private fun remoteTime(value: String): String = value.take(16).replace('T', ' ').ifBlank { "刚刚" }
+private fun remoteTime(value: String): String = CaesarTime.formatRemote(value)
 private fun moderationText(value: String): String = when (value) { "pending" -> "待审核"; "approved" -> "已通过"; "rejected" -> "未通过"; else -> value }
 
 internal suspend fun readUploadImage(context: Context, uri: Uri): UploadImage = withContext(Dispatchers.IO) {

@@ -17,7 +17,7 @@ class MarketEmptyPresentationTest {
         val copy = marketEmptyPresentation(refreshing = false, hasSynced = false, hasError = true)
 
         assertEquals("暂时无法确认心愿墙", copy.title)
-        assertEquals("尚未取得远端结果；当前空白不代表没有心愿卡。", copy.detail)
+        assertEquals("读取失败，请重试。", copy.detail)
     }
 
     @Test
@@ -25,7 +25,7 @@ class MarketEmptyPresentationTest {
         val copy = marketEmptyPresentation(refreshing = false, hasSynced = true, hasError = false)
 
         assertEquals("心愿墙还很安静", copy.title)
-        assertEquals("本次同步结果为空；新心愿提交后会先进入审核。", copy.detail)
+        assertEquals("暂无心愿；公开发布后需审核。", copy.detail)
     }
 
     @Test

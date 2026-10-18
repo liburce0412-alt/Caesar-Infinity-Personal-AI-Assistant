@@ -19,6 +19,27 @@ import org.robolectric.annotation.Config
 @Config(sdk = [36])
 class CaesarTurnAssemblyTest {
     @Test
+    fun `full persisted history gives stable regeneration scope and a distinct next user turn`() {
+        val history = (1..125).flatMap { index -> listOf(
+            AiConversationMessage("user", "第 $index 轮", cloudHealthSensitive = index % 2 == 0),
+            AiConversationMessage("assistant", "完成"),
+        ) }
+        val restored = AiConversationCodec.decode(AiConversationCodec.encode(history))
+        fun assemble(messages: List<AiConversationMessage>) = assembleCaesarTurnRequest(
+            AiMode.FAST, messages, "添加时间记录", "添加时间记录", JSONObject(), emptyList(), "session", "owner", "model",
+        )
+        val request = assemble(restored)
+        val completed = restored + request.messages.last() + AiConversationMessage("assistant", "已完成")
+        val reopened = AiConversationCodec.decode(AiConversationCodec.encode(completed))
+        val regeneration = checkNotNull(planAiRegeneration(reopened))
+
+        assertEquals("turn-126", request.toolActionScope)
+        assertEquals(request.toolActionScope, assemble(regeneration.history).toolActionScope)
+        assertEquals("turn-127", assemble(reopened).toolActionScope)
+        assertEquals(request.toolActionScope, request.copy(messages = request.messages.takeLast(4)).toolActionScope)
+    }
+
+    @Test
     fun `speech transcript and image remain in one local locked request`() {
         val request = assembleCaesarTurnRequest(
             mode = AiMode.FAST,

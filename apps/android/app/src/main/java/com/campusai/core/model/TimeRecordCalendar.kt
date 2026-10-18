@@ -1,18 +1,20 @@
 package com.campusai.core.model
 
+import com.campusai.core.time.CaesarTime
+
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.temporal.TemporalAdjusters
 
-/** Completed records belong to their local completion day. Weeks start on Monday. */
+/** Completed records belong to their Beijing completion day by default. Weeks start on Monday. */
 object TimeRecordCalendar {
-    fun completionDate(record: TimeRecord, zone: ZoneId = ZoneId.systemDefault()): LocalDate? =
+    fun completionDate(record: TimeRecord, zone: ZoneId = CaesarTime.zone): LocalDate? =
         if (record.durationMinutes > 0 && record.endTime > record.startTime)
             Instant.ofEpochMilli(record.endTime).atZone(zone).toLocalDate() else null
 
-    fun inRange(records: List<TimeRecord>, range: String, now: Instant = Instant.now(), zone: ZoneId = ZoneId.systemDefault()): List<TimeRecord> {
+    fun inRange(records: List<TimeRecord>, range: String, now: Instant = Instant.now(), zone: ZoneId = CaesarTime.zone): List<TimeRecord> {
         val today = now.atZone(zone).toLocalDate()
         val from = when (range) {
             "周" -> today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
@@ -25,7 +27,7 @@ object TimeRecordCalendar {
         }
     }
 
-    fun streak(records: List<TimeRecord>, now: Instant = Instant.now(), zone: ZoneId = ZoneId.systemDefault()): Int {
+    fun streak(records: List<TimeRecord>, now: Instant = Instant.now(), zone: ZoneId = CaesarTime.zone): Int {
         val days = records.filter { it.endTime <= now.toEpochMilli() }.mapNotNull { completionDate(it, zone) }.toSet()
         var day = now.atZone(zone).toLocalDate()
         if (day !in days) day = day.minusDays(1)

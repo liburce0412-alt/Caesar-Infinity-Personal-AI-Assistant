@@ -1,5 +1,7 @@
 package com.campusai.features.schedule
 
+import com.campusai.core.time.CaesarTime
+
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -110,7 +112,7 @@ object ScheduleImporter {
         return fromIcsText(raw)
     }
 
-    internal fun fromIcsText(raw: String, zoneId: java.time.ZoneId = java.time.ZoneId.systemDefault()): List<CourseDraft> =
+    internal fun fromIcsText(raw: String, zoneId: java.time.ZoneId = CaesarTime.zone): List<CourseDraft> =
         IcsCourseParser.parse(raw, zoneId)
 
 }

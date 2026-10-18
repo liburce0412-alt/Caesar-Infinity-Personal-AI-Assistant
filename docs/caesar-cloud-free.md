@@ -1,21 +1,23 @@
 # Caesar cloud free
 
-状态（2026-10-14）：已配置服务器 Key、部署杭州中转并保留数据安装到测试手机。主机 OOM 故障恢复后，手机真实登录下的快速文本免费兜底、GLM-4V-Flash 图片理解均已完整回复，停止生成也已通过。调整启动策略和健康检查频率后，七个服务健康，手机快速文本再次成功；深度模式仍受 GLM-4.7-Flash 上游拥堵影响，长期稳定性不能仅凭当次测试推定。
+**3.0.0 / versionCode 14。** 生产relay已实际部署免费文本直用`glm-4-flash-250414`和受控文字工具协议，`caesar-cloud-free.service`处于active。4.7优先/回退链和8秒首字切换等待已移除；Android免费深度入口移除，旧免费DEEP状态按FAST处理，图片仍用4V。工具执行继续由App权限、确认策略、按用户轮次幂等和账号边界控制，图片不使用工具。正式APK与更新源以发布流程的实际结果为准；服务active不代替最终生产请求检查或APK发布证据。见[3.0工具协议与验证](caesar-3.0-cloud-tools.md)及[总验收清单](caesar-3.0-acceptance.md)。
 
-## 产品行为
+历史状态（2026-10-14）：已配置服务器Key、部署杭州中转并保留数据安装到测试手机。主机OOM恢复后，手机真实登录下的快速文本免费兜底、GLM-4V-Flash图片理解及停止生成通过；当时深度仍受4.7拥堵影响。以下历史记录保留原结论，不代表当前路由或长期可用性。
+
+## 3.0 行为与当前生产路由
 
 | 输入 | 固定模型 | 行为 |
 | --- | --- | --- |
-| 纯文本 | `glm-4.7-flash` | 默认快速，不开启思考；用户可手动选择深度 |
+| 纯文本 | `glm-4-flash-250414` | 直接使用，无4.7优先请求或8秒切换等待；免费入口只有快速，旧免费DEEP按FAST处理 |
 | 当前轮附图 | `glm-4v-flash` | 每轮一张 JPEG，最多 4 MiB；不带入旧图片或历史上下文 |
 
-快速文本请求遇到上游拥堵 `1305`、上游 5xx 或 8 秒没有首字时，自动使用免费备用模型 `glm-4-flash-250414`。已开始输出后不切换；深度和图片仍固定原模型。服务器最多调用两次，第二次失败即返回错误。客户端通过 `allowTextFallback` 声明支持，仅在快速纯文本发送 true；旧客户端继续原模型，不会收到无法识别的模型事件。标题显示实际模型，备用回答标注“免费兜底”，报告也保存实际模型。
+文本不再请求4.7，也没有跨模型免费回退或首字切换计时。标题与报告继续保留实际模型，直用250414不标成“免费兜底”。服务端保留输出前`1305`拥堵的一次同模型重试；其他错误明确返回，已开始输出后不重试。Android兼容已保存的免费DEEP状态；绕过新客户端直接提交纯文本`mode=deep`会被中转明确拒绝，不暗中调用4.7。旧`allowTextFallback`字段不再启用跨模型切换。
 
-不接入 GLM-OCR，不配置付费兜底，不设每日个人次数或总次数限制。保留上游并发保护和具体错误提示。模型免费状态以[智谱官方定价](https://docs.bigmodel.cn/cn/guide/start/pricing)为准，免费服务不等于厂商永远不会调整政策。备用模型较旧，复杂问题可手动选择深度，但仍受 4.7 上游可用性影响。
+不接入GLM-OCR、不配置付费兜底、不设每日个人次数或总次数限制。保留上游并发保护和具体错误提示。模型免费状态以[智谱官方定价](https://docs.bigmodel.cn/cn/guide/start/pricing)为准，免费服务不等于厂商永远不会调整政策。复杂任务可使用用户已配置的其他Provider；本次不改变本地或个人云端模式。
 
-新安装默认选择 Caesar cloud free；已有明确选择保持不变，已完成引导但缺少旧配置的用户仍保留 AUTO。AI 切换使用完整名称的纵向单选弹层；快速/深度与 Provider 分开选择。图片使用独立视觉模型，深度开关只影响纯文本。
+新安装默认选择Caesar cloud free；已有明确Provider选择保持不变，已完成引导但缺少旧配置的用户仍保留AUTO。AI切换保留完整名称的纵向单选弹层；只有免费云端移除深度选项，其他Provider保留原有模式。图片使用独立视觉模型。
 
-该入口第一版提供对话和图片理解，不执行 App 工具、不联网搜索。原有本地、DeepSeek、Gemini、Codex 及其工具能力继续保留。首页问候不使用免费云端后台生成。
+生产relay支持固定白名单受控文字工具：时间记录读取、新建、编辑、软删除与撤销，课程读取，待确认记忆提议及只读搜索。工具实际执行仍由App守卫控制；中转不直接执行工具。原有本地、DeepSeek、Gemini、Codex及其工具能力继续保留。首页问候不使用免费云端后台生成。
 
 ## 请求与隐私边界
 
@@ -25,34 +27,29 @@
 - 智谱 Key 仅由服务器环境文件提供，不进入 APK、个人 Key 存储或客户端配置。中转不记录正文、凭据、用户标识或上游错误原文，不持久化对话；智谱自身留存政策另行适用。
 - 纯文本最多带入最近 12 条、合计 12,000 字符的用户/助手消息。过滤历史健康敏感轮次和工具消息；结构化依据同样受 12,000 字符限制，仅当次显式勾选才附带类型化今日健康摘要。
 - 图片沿用本机旋转校正、缩放与 JPEG 重编码流程，仅发送当前新附的一张；文件路径和 Base64 不写入云端会话存储。图片问题最多 2,000 字符，视觉请求不带健康摘要或文本历史。保留 `requiresLocal` 硬边界。
-- 快速输出默认 512 tokens，最多 2,048；深度启用思考，思考和输出共享至少 8,192 tokens。视觉输出最多 1,024 tokens。达到上限或中断时提示未完成，不伪装成功。
-- 上游流实时转为 `meta/status/delta/done/error` SSE。快速请求 60 秒、深度 120 秒超时；停止生成或连接断开会取消上游。收到部分答案后不会自动重试。
-- 未启用文本兜底的请求遇到模型拥堵 `1305` 时，等待 1 秒并使用相同模型、请求和总超时自动重试一次。账号限流、余额/权益、授权异常、内容拒绝分别提示，不盲目重试或切换。日志只保留随机请求编号、固定模型、错误码、HTTP 状态与耗时，不包含错误原文或用户内容。
+- 文本输出默认512 tokens，最多2,048；视觉输出最多1,024 tokens。免费路线不再启用深度思考，达到上限或中断时提示未完成，不伪装成功。
+- 上游流实时转为`meta/status/delta/done/error` SSE，请求总超时60秒；停止生成或连接断开会取消上游，收到部分答案后不重试。移除的是4.7的8秒首字切换等待，不是登录或并发队列的时限。
+- 输出前遇到模型拥堵`1305`时，等待1秒并使用相同模型、请求和总超时重试一次。账号限流、余额/权益、授权异常、内容拒绝分别提示，不盲目重试或切换。日志只保留随机请求编号、固定模型、错误码、HTTP状态与耗时，不包含错误原文或用户内容。
 
-## 服务端部署准备
+## 更新已有服务端部署
 
 当前阿里云部署没有运行 Supabase Edge Functions，因此复用登录服务，单独运行无 npm 依赖的 Node 中转；原 `supabase/functions/ai-chat` 不变。
 
-1. 确认服务器有 Node **22.16+**，核对 `command -v node`；杭州现有环境与模板使用 `/usr/local/bin/node`，其他环境不一致时先调整服务文件。中转 JS 堆上限 96 MiB，服务内存高水位 128 MiB、硬上限 192 MiB、禁用 swap，CPU 最多一核，避免挤占同机业务。
-2. 将 `apps/cloud-free/` 的 `server.mjs`、`relay.mjs`、`package.json` 部署到 `/opt/campusai/cloud-free/`，目录与源码由管理员拥有，对服务用户可读。
-3. 在服务器受保护的 `/etc/campusai/cloud-free.env` 配置以下变量。目录仅管理员可访问，环境文件权限 `0600`；实际 Key 不进入 Git 或聊天消息。
+[`install-cloud-free.py`](../deploy/alicloud/install-cloud-free.py) 用于更新**已有**relay部署，不负责首次安装或提供密钥。必须已存在普通文件 `/etc/campusai/cloud-free.env`，所有者为root、权限严格为`0600`；缺失或权限不符就拒绝。安装器仅检查文件元数据，不读取、复制、打印或修改环境文件中的Key；服务通过原有systemd环境配置继承鉴权与上游凭据，预检子进程使用不含调用端凭据的最小环境。
 
-```dotenv
-CAESAR_AUTH_URL=http://127.0.0.1:8000
-SUPABASE_ANON_KEY=<现有后端的公开 anon Key>
-ZHIPU_API_KEY=<智谱 API Key>
-CAESAR_CLOUD_CONCURRENCY=1
-```
+1. 保留现有Node **22.16+**与`/usr/local/bin/node`路径、已有服务和nginx站点。受审部署包只包含`server.mjs`、`relay.mjs`、`tools.mjs`、`package.json`、`caesar-cloud-free.service`与`caesar-cloud-free.nginx.conf`；以JSON从stdin传入安装器，不包含密钥。
+2. `--check`只暂存并验证JS模块、systemd与完整nginx候选配置；无参数模式在授权后事务更新，保留root受保护恢复快照`/etc/campusai/cloud-free.rollback`。失败时恢复原服务；`--rollback`恢复该快照。安装器不调用Provider、不重启Supabase或独立激活服务。
+3. 服务仍只监听`127.0.0.1:8788`，公网入口为既有HTTPS `POST /caesar-cloud/v1/chat`；nginx关闭响应缓冲、缓存与gzip，请求体上限6MiB。JS堆96MiB，服务内存高水位128MiB、硬上限192MiB、禁用swap、CPU最多一核。
 
-`CAESAR_AUTH_URL` 指向同一实例的可访问认证网关；杭州当前使用 Envoy，监听 `127.0.0.1:8000`。不能使用 service-role Key 代替 anon Key。认证请求最多等待 15 秒，超时明确返回 `authentication_unavailable`，不调用模型，也不绕过登录校验。并发默认 1 是本项目的保守初值，不代表智谱账户的官方限制；根据控制台实际并发权益调整为 1–8。仅运行一个进程共享队列，不启用 Node cluster。队列最多 4 个，等待最多 8 秒，超出返回 429；无日额度计数器。
+既有`CAESAR_AUTH_URL`指向同实例认证网关，杭州为`127.0.0.1:8000`；服务沿用已有anon Key和智谱Key，不能用service-role Key代替anon Key。认证最多等待15秒，失败不调用模型。并发默认1、可配置1–8，单进程队列最多4个、等待最多8秒，超出返回429；无每日额度计数器。`GET /healthz`仅证明配置就绪与固定模型，不证明真实鉴权或上游可用；最终生产请求检查单独记录，不再发起4.7 live验证。
 
-4. 安装 [`caesar-cloud-free.service`](../deploy/alicloud/caesar-cloud-free.service)，检查路径和环境文件后启动。服务只监听 `127.0.0.1:8788`，无需开放公网端口。`GET /healthz` 只检查配置存在，不证明 Key、鉴权或上游可用。
-5. 将 [`caesar-cloud-free.nginx.conf`](../deploy/alicloud/caesar-cloud-free.nginx.conf) 包含到现有 HTTPS `server` 块，先 `nginx -t` 再重载。保留原有路由。中转路径关闭响应缓冲、缓存与 gzip，请求体上限 6 MiB。
-6. 使用真实测试账号在手机验证文字、深度、图片、停止、断网和退出登录；记录首字延迟和完整响应时间，再决定是否对外开放。不能用本地模拟测试推定国内真实延迟。
+## 部署前的隔离验证记录（2026-10-18）
 
-本轮已按上述边界安装服务、检查并重载 Nginx。`install-cloud-free.py` 接收五个已审阅文件组成的 JSON 包，重复安装保留现有 Key；旧 Nginx 配置仅保留一份受保护的恢复副本。客户端纳入 [v2.2.2](releases/v2.2.2.md)，versionCode 13。
+直用250414已完成Node72/72、Android7类65/65；按受影响class整体替换后的合并结果为665/665（不是新全量）。lint0错误/80警告，debug/benchmark构建6分2秒成功，原证书已核。独立手机验收仅2次上游，均为250414 HTTP200，鉴权2次200；标题显示250414，time.list_records回放matchesData=true，回答4条250分钟。App两次POST完成耗时6773ms/1403ms，不是TTFT。结果见 `artifacts/caesar-3.0-drop47-result.json`、`caesar-3.0-drop47-test-cases.json` 与 `artifacts/caesar-3.0-device/drop47-result.xml/png`；本轮2次与旧13次分账。
 
-## 本地验证
+移除4.7之前，Android合并659项（全量加多轮定向）、Node72项、lint0错误/80警告及debug/benchmark构建通过；这些结果不能替代新路由的定向测试。隔离手机summary复测已正确返回4条250分钟，回放`matchesData=true`，证据为 `artifacts/caesar-3.0-device/summary-retest-result.*`。此前隔离relay累计鉴权7次200、上游13次：4.7七次全失败（2次8秒超时、4次1305、1次1302），250414六次均200。与旧直接probe五次分开统计。
+
+该阶段语音“现在几点”只进入草稿，手动发送后回答北京时间14:05:12，离页取消和TTS当时尚未验。旧审批冲突已解决；该阶段测试对话均已删除、legacy未动。14:33:24曾install-r恢复普通非debug benchmark3.0.0/code14，firstInstall仍为2026-08-23 22:17:32；个人页4h10/4记录/5成就保留，课表第6周11门。随后关闭隔离relay并撤销18789转发。证据为 `drop47-restored-profile.xml`、`drop47-final-screen.xml`、`drop47-package.txt`（均在artifacts/caesar-3.0-device）。这是部署前检查点，后续验收与发布结果以[总验收记录](caesar-3.0-acceptance.md)为准，当前生产部署状态见本文开头。
 
 ```powershell
 node --test --test-timeout=12000 apps/cloud-free/relay.test.mjs
@@ -65,10 +62,10 @@ node --test --test-timeout=12000 apps/cloud-free/relay.test.mjs
 
 免费兜底及认证错误区分修复后中转 21 项测试通过，覆盖相同模型一次重试、连续拥堵退出、账号错误不重试、停止等待后不重试、首字截止切换、首字后不切换，以及深度/图片/旧客户端保持原路由。Android 云端引擎 9 项、图片存储 2 项测试通过；`lintDebug` 与 benchmark 构建通过。图片路径统一使用 canonical 基准目录，避免 Android `/data/user/0` 与 `/data/data` 别名混用造成导入失败，同时保留目录边界检查。
 
-## 本次线上与手机记录
+## 历史线上与手机记录（2026-10-13 至 14）
 
 - 10 月 13 日中转已在 `127.0.0.1:8788` 运行，现有 HTTPS 路由已接通；Key 环境文件权限为 `0600`。当时主站与同机激活服务检查正常；10 月 14 日二者所在主机出现连接超时，不能沿用此前健康结论。
-- 手机现安装 `versionCode=12`、`versionName=2.2.2-cloud-fallback-local`，签名保持一致，使用 `install -r` 保留数据，首次安装时间仍为 2026-08-23。原有 DeepSeek 选择在首次覆盖安装后保留，随后在手机手动选中 Caesar cloud free；纵向模型选择已在实机操作。
+- 当时手机安装 `versionCode=12`、`versionName=2.2.2-cloud-fallback-local`，签名保持一致，使用 `install -r` 保留数据，首次安装时间仍为 2026-08-23。原有DeepSeek选择在首次覆盖安装后保留，随后在手机手动选中Caesar cloud free；这不是当前3.0包状态。
 - GLM-4V-Flash 从生产服务器识别合成红方块/蓝圆形成功，首字约 775 ms、完成约 995 ms；这是服务器直连测试，尚不代表手机图片端到端通过。
 - GLM-4.7-Flash 多次返回 HTTP 429 / `1305`，并出现 25 秒和 45 秒诊断超时；手机实际请求也曾出现 429/502。
 - 诊断时另测 GLM-4-Flash-250414，首字约 228 ms、完成约 249 ms；用户随后明确允许免费兜底，已部署相应服务端。GLM-4.5-Flash 官方说明已路由至 4.7，不能视为独立备用服务。

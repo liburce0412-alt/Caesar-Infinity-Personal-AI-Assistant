@@ -2,6 +2,7 @@ package com.campusai.features.ai
 
 import com.campusai.core.model.CourseSchedule
 import com.campusai.core.model.TimeRecord
+import com.campusai.core.ai.AiContextBudget
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
@@ -94,7 +95,7 @@ object DailyGreetingPolicy {
         text: String,
         snapshot: AiContextSnapshot,
         nowMillis: Long = System.currentTimeMillis(),
-        zone: ZoneId = ZoneId.systemDefault(),
+        zone: ZoneId = com.campusai.core.time.CaesarTime.zone,
     ): Boolean {
         if (text.isBlank() || text.length > 24) return false
         val now = Instant.ofEpochMilli(nowMillis).atZone(zone)
@@ -127,11 +128,12 @@ object AiContextAssembler {
         snapshot: AiContextSnapshot,
         selection: AiContextSelection,
         nowMillis: Long = System.currentTimeMillis(),
-        zone: ZoneId = ZoneId.systemDefault(),
+        zone: ZoneId = com.campusai.core.time.CaesarTime.zone,
     ): JSONObject {
         val today = Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate()
         val personal = JSONObject()
             .put("displayName", snapshot.displayName.take(48))
+            .put("clock", com.campusai.core.time.AiClock.context(Instant.ofEpochMilli(nowMillis)))
             .put("localDate", today.toString())
             .put("timezone", zone.id)
             .put("locale", "zh-CN")
@@ -148,12 +150,15 @@ object AiContextAssembler {
         if (selection.ownPosts) {
             val own = snapshot.visiblePosts.filter { it.authorId == snapshot.userId }
             personal.put("ownPostCount", own.size)
-            if (postQuestion) personal.put("ownPosts", postsJson(own.take(MAX_POSTS)))
+            if (postQuestion) AiContextBudget.putItems(personal, "ownPosts", own.asSequence().map(::postJson),
+                maxItems = MAX_POSTS, maxChars = 4_000)
         }
         if (selection.publicPosts && postQuestion) {
-            personal.put(
+            AiContextBudget.putItems(
+                personal,
                 "selectedPublicPosts",
-                postsJson(snapshot.visiblePosts.filter { it.authorId != snapshot.userId }.take(MAX_PUBLIC_POSTS)),
+                snapshot.visiblePosts.asSequence().filter { it.authorId != snapshot.userId }.map(::postJson),
+                maxItems = MAX_PUBLIC_POSTS, maxChars = 2_500,
             )
         }
         return JSONObject(base.toString()).put("personalContext", personal)
@@ -162,7 +167,7 @@ object AiContextAssembler {
     fun greetingContext(
         snapshot: AiContextSnapshot,
         nowMillis: Long = System.currentTimeMillis(),
-        zone: ZoneId = ZoneId.systemDefault(),
+        zone: ZoneId = com.campusai.core.time.CaesarTime.zone,
     ): JSONObject {
         val today = Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate()
         val start = today.atStartOfDay(zone).toInstant().toEpochMilli()
@@ -200,13 +205,13 @@ object AiContextAssembler {
         }
         val selected = records.filter { it.durationMinutes > 0 && it.endTime > it.startTime && it.endTime in selectedStart until tomorrowStart }
             .sortedWith(compareByDescending<TimeRecord> { it.endTime }.thenByDescending { it.startTime })
-            .take(MAX_RECENT_RECORDS)
-        return JSONObject()
+        val result = JSONObject()
             .put("today", summary(records, todayStart, tomorrowStart, 240L, zone, today))
             .put("week", summary(records, weekStartMs, tomorrowStart, 1_680L, zone, today))
             .put("month", summary(records, monthStartMs, tomorrowStart, 7_200L, zone, today))
             .put("allTime", summary(records, Long.MIN_VALUE, Long.MAX_VALUE, null, zone, today))
-            .put("recentRelevantEntries", JSONArray(selected.map(::recordJson)))
+        return AiContextBudget.putItems(result, "recentRelevantEntries", selected.asSequence().map(::recordJson),
+            maxItems = MAX_RECENT_RECORDS, maxChars = 3_500)
     }
 
     private fun summary(
@@ -249,15 +254,23 @@ object AiContextAssembler {
     }
 
     private fun courseContext(courses: List<CourseSchedule>, today: LocalDate, currentMinute: Int): JSONObject {
-        val conflicts = JSONArray(com.campusai.features.schedule.potentialCourseOverlaps(courses).map { (first, second) ->
-            JSONObject().put("first", first.name).put("second", second.name).put("weekday", first.weekday)
-                .put("requiresDateReview", true).put("basis", "time_overlap_only")
-        })
-        val rows = courses.sortedWith(compareBy(CourseSchedule::weekday, CourseSchedule::startMinute)).take(20)
+        val rows = courses.sortedWith(compareBy(CourseSchedule::weekday, CourseSchedule::startMinute, CourseSchedule::id))
+        // Count all possible overlaps without retaining the quadratic pair list in memory.
+        val conflicts = sequence {
+            rows.forEachIndexed { index, first ->
+                for (other in index + 1 until rows.size) {
+                    val second = rows[other]
+                    if (com.campusai.features.schedule.courseSlotsOverlap(first, second)) {
+                        yield(JSONObject().put("first", first.name.take(80)).put("second", second.name.take(80))
+                            .put("weekday", first.weekday).put("requiresDateReview", true).put("basis", "time_overlap_only"))
+                    }
+                }
+            }
+        }
         val next = courses
             .filter { it.weekday == today.dayOfWeek.value && it.startMinute >= currentMinute }
             .minByOrNull(CourseSchedule::startMinute)
-        return JSONObject()
+        val result = JSONObject()
             .put("todayWeekday", today.dayOfWeek.value)
             .put("scheduleDateReviewRequired", true)
             .put("nextCourse", next?.let { course -> JSONObject()
@@ -267,7 +280,7 @@ object AiContextAssembler {
                 .put("periodStart", course.periodStart).put("periodEnd", course.periodEnd)
                 .put("location", course.location.take(80))
             } ?: JSONObject.NULL)
-            .put("items", JSONArray(rows.map { course -> JSONObject()
+        AiContextBudget.putItems(result, "items", rows.asSequence().map { course -> JSONObject()
                 .put("name", course.name.take(80))
                 .put("weekday", course.weekday)
                 .put("startMinute", course.startMinute)
@@ -276,18 +289,18 @@ object AiContextAssembler {
                 .put("location", course.location.take(80))
                 .put("teacher", course.teacher.take(48))
                 .put("weeks", course.weeks.take(80))
-            }))
-            .put("computedConflicts", conflicts)
+            }, maxItems = 20, maxChars = 4_500)
+        return AiContextBudget.putItems(result, "computedConflicts", conflicts,
+            maxItems = 20, maxChars = 1_500)
     }
 
-    private fun postsJson(posts: List<AiPostContext>) = JSONArray(posts.map { post -> JSONObject()
+    private fun postJson(post: AiPostContext) = JSONObject()
         .put("id", post.id)
         .put("body", post.body.take(240))
         .put("topic", post.topic.take(48))
         .put("likes", post.likes)
         .put("comments", post.comments)
         .put("createdAt", post.createdAt)
-    })
 
     private fun recordJson(record: TimeRecord) = JSONObject()
         .put("title", record.title.take(80))

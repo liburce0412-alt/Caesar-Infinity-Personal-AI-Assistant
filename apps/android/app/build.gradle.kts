@@ -16,6 +16,14 @@ if (providers.gradleProperty("campusBuildDir").isPresent) {
   layout.buildDirectory.set(file("${System.getProperty("user.home")}/.gradle/campusai-build/android-app"))
 }
 
+// Opt-in loopback relay for an isolated adb-reverse debug session. Never change
+// Supabase configuration, persist this choice, or copy it into other variants.
+val caesarCloudTestEndpoint = providers.gradleProperty("caesarCloudTestEndpoint").orNull
+require(caesarCloudTestEndpoint == null ||
+  caesarCloudTestEndpoint == "http://127.0.0.1:18789/caesar-cloud/v1/chat") {
+  "caesarCloudTestEndpoint only accepts the fixed debug loopback relay URL."
+}
+
 android {
   namespace = "com.campusai"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
@@ -25,8 +33,9 @@ android {
     applicationId = "com.aistudio.campusai.ywtpzx"
     minSdk = 24
     targetSdk = 36
-    versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 13
-    versionName = System.getenv("VERSION_NAME") ?: "2.2.2"
+    versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 14
+    versionName = System.getenv("VERSION_NAME") ?: "3.0.0"
+    buildConfigField("String", "CAESAR_CLOUD_TEST_ENDPOINT", "\"\"")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     ndk { abiFilters += "arm64-v8a" }
@@ -63,6 +72,12 @@ android {
     }
     debug {
       signingConfig = signingConfigs.getByName("debugConfig")
+      buildConfigField("String", "CAESAR_CLOUD_TEST_ENDPOINT", "\"${caesarCloudTestEndpoint.orEmpty()}\"")
+      manifestPlaceholders["caesarCloudNetworkSecurityConfig"] = if (caesarCloudTestEndpoint != null) {
+        "@xml/caesar_cloud_test_network_security"
+      } else {
+        "@xml/caesar_cloud_network_security"
+      }
     }
     create("benchmark") {
       initWith(getByName("release"))

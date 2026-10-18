@@ -159,7 +159,7 @@ class ScreenReadabilityUiTest {
     @Test fun `message metadata stays below long names and unread badges remain visible`() {
         show(fontScale = 2f) {
             ConversationRow(ConversationSummary("conversation", "wish", "周末去看日出", "other", "名字特别长的校园朋友",
-                "我们明天早上见。", "2026-10-02T17:30:00", 120)) {}
+                "我们明天早上见。", "2026-10-02T17:30:00+08:00", 120)) {}
         }
         val name = compose.onNodeWithText("名字特别长的校园朋友", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val time = compose.onNodeWithText("2026-10-02 17:30", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot

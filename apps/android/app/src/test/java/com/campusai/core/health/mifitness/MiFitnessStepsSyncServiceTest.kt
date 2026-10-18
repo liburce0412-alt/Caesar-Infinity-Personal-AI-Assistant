@@ -16,6 +16,23 @@ import kotlinx.coroutines.test.runTest
 
 @RunWith(RobolectricTestRunner::class)
 class MiFitnessStepsSyncServiceTest {
+    @Test fun `default day window uses Beijing despite a different clock and device zone`() {
+        val original = java.util.TimeZone.getDefault()
+        try {
+            java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("America/Los_Angeles"))
+            val storage = RecordingSecretStorage()
+            val now = Instant.parse("2026-08-26T16:01:00Z")
+            val service = MiFitnessStepsSyncService(
+                MiFitnessCredentialStore(storage), FakeTransport(), MiFitnessStepsCache(storage),
+                Clock.fixed(now, java.time.ZoneId.of("Pacific/Kiritimati")),
+            )
+            val window = service.todayWindow()
+            assertEquals(LocalDate.of(2026, 8, 27), window.localDate)
+            assertEquals(Instant.parse("2026-08-26T16:00:00Z").toEpochMilli(), window.period.startEpochMillis)
+            assertEquals(Instant.parse("2026-08-27T16:00:00Z").toEpochMilli() - 1, window.period.endEpochMillis)
+        } finally { java.util.TimeZone.setDefault(original) }
+    }
+
     @Test
     fun `sync reads one local day follows pages and stores only vendor aggregate`() = runTest {
         val storage = RecordingSecretStorage()

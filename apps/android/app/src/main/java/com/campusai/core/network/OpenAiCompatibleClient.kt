@@ -536,11 +536,13 @@ internal object OpenAiCompatibleRequestFactory {
             }
             val disclosure = request.cloudHealthDisclosure
             if (disclosure is CloudHealthDisclosure.Included) {
-                put(
-                    JSONObject()
-                        .put("role", "system")
-                        .put("content", "<health_summary>${disclosure.summary.toAllowedJson()}</health_summary>"),
-                )
+                disclosure.summary.toAllowedJsonOrNull()?.let { summary ->
+                    put(
+                        JSONObject()
+                            .put("role", "system")
+                            .put("content", "<health_summary>$summary</health_summary>"),
+                    )
+                }
             }
             encodeConversation(
                 provider = provider,
@@ -600,7 +602,8 @@ internal object OpenAiCompatibleRequestFactory {
             }
             val envelope = message.takeIf { it.role == "assistant" }
                 ?.let { ProviderToolCallEnvelope.decode(it.content) }
-            if (envelope != null && !envelope.originalName.startsWith("health.") && messages.getOrNull(index + 1)?.role == "tool") {
+            if (envelope != null && !envelope.originalName.startsWith("health.") && envelope.originalName != "memory.list" &&
+                messages.getOrNull(index + 1)?.let { it.role == "tool" && !it.cloudHealthSensitive } == true) {
                 add(ProviderToolCallEnvelope.toAssistantMessage(envelope))
                 add(
                     JSONObject()
@@ -785,6 +788,7 @@ internal object CloudRequestBoundary {
         key in SENSITIVE_KEYS || SENSITIVE_KEY_FRAGMENTS.any(key::contains)
 
     private val SENSITIVE_KEYS = setOf(
+        "confirmedmemories",
         "health",
         "healthdata",
         "healthsnapshot",
@@ -854,7 +858,7 @@ private data class OpenAiToolProjection(
             repeat(minOf(definitions.length(), MAX_TOOLS)) { index ->
                 val definition = definitions.optJSONObject(index) ?: return@repeat
                 val originalName = definition.optString("name")
-                if (!ORIGINAL_TOOL_NAME.matches(originalName) || originalName.startsWith("health.")) return@repeat
+                if (!ORIGINAL_TOOL_NAME.matches(originalName) || originalName.startsWith("health.") || originalName == "memory.list") return@repeat
                 val wireName = wireName(originalName)
                 if (names.putIfAbsent(wireName, originalName) != null) return@repeat
                 val properties = JSONObject()

@@ -1,5 +1,8 @@
 package com.campusai.app
 
+import com.campusai.core.time.CaesarTime
+import com.campusai.core.time.rememberCaesarDate
+
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -158,7 +161,6 @@ import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
 import kotlin.math.roundToInt
@@ -207,6 +209,8 @@ fun ProfileScreen(
     val level = maxOf(profile.level, (totalHours / 10 + 1).coerceAtMost(99).toInt())
     var sheet by remember { mutableStateOf<ProfileSheet?>(null) }
     val fallbackName = authState.email.substringBefore('@').ifBlank { "Caesar 用户" }
+    val today by rememberCaesarDate()
+    val streak = remember(records, today) { currentStreak(records) }
     val achievements = remember(records, profile.streakDays) { buildAchievements(records, profile.streakDays) }
 
     LaunchedEffect(authState.signedIn, authState.userId) {
@@ -238,7 +242,7 @@ fun ProfileScreen(
                     VerticalRule()
                     StatCell(records.size.toString(), "时间记录", Modifier.weight(1f))
                     VerticalRule()
-                    StatCell(profile.streakDays.coerceAtLeast(currentStreak(records)).toString(), "连续天数", Modifier.weight(1f))
+                    StatCell(streak.toString(), "连续天数", Modifier.weight(1f))
                 }
             }
         }
@@ -582,8 +586,8 @@ private fun AnnualContributionCard(
     targetSnapshots: Map<LocalDate, Long>,
     onOpenDay: ((LocalDate) -> Unit)?,
 ) {
-    val zone = ZoneId.systemDefault()
-    val today = LocalDate.now(zone)
+    val zone = CaesarTime.zone
+    val today by rememberCaesarDate()
     val currentYear = today.year
     val earliestYear = remember(records, zone, currentYear) {
         records.asSequence()
@@ -917,7 +921,7 @@ internal fun miFitnessStatusText(status: MiFitnessSettingsStatus, configured: Bo
 internal fun formatMiFitnessLastSync(epochMillis: Long?): String {
     if (epochMillis == null || epochMillis <= 0L) return "尚未刷新"
     return runCatching {
-        val time = Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault())
+        val time = Instant.ofEpochMilli(epochMillis).atZone(CaesarTime.zone)
         "${time.monthValue}月${time.dayOfMonth}日 ${time.hour.toString().padStart(2, '0')}:${time.minute.toString().padStart(2, '0')}"
     }.getOrDefault("尚未刷新")
 }
@@ -1493,7 +1497,7 @@ private fun LocalAiSettings(
             )
             Text(
                 when (preferences.aiProvider) {
-                    AiProvider.CAESAR_CLOUD_FREE -> "通过 Caesar 服务器连接智谱 GLM-4.7-Flash，无需个人 Key，不设每日次数限制。发送的对话由云端处理。"
+                    AiProvider.CAESAR_CLOUD_FREE -> "免费文本使用 GLM-4-Flash-250414，图片使用 GLM-4V-Flash，不提供深度思考模式。无需个人 Key，不设每日次数限制。发送的对话由云端处理。"
                     AiProvider.AUTO -> "优先使用当前本地档位；本地不可用时只展示已配置的云端选项，绝不会自动上传对话。"
                     AiProvider.DEEPSEEK -> "固定使用你自己的 DeepSeek Key，不会自动切换本地，也不会调用任何平台共享额度。"
                     AiProvider.GOOGLE_GEMINI -> "固定使用你自己的 Google AI Studio Key，不会自动切换本地，也不会调用其他云端 Provider。"
@@ -1739,7 +1743,7 @@ private fun LocalAiSettings(
                                         modelId = model.id
                                         providerRevision++
                                         personalKeyMessageIsError = false
-                                        personalKeyMessage = "已选择 ${model.displayName}。"
+                                        personalKeyMessage = null
                                     }
                                 },
                             ) {

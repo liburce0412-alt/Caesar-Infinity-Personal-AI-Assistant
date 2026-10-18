@@ -14,6 +14,20 @@ import java.time.LocalDate
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class CourseReminderNotificationTest {
+    @Test fun `notification and island show Beijing course time on a foreign device zone`() {
+        val original = java.util.TimeZone.getDefault()
+        try {
+            java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("America/Los_Angeles"))
+            val start = java.time.Instant.parse("2026-10-07T00:00:00Z").toEpochMilli()
+            val occurrence = item.copy(start = start, end = start + 6_000_000)
+            val notification = CourseReminderNotifications.build(context, "owner", occurrence, CourseReminderConfig(), start - 60_000)
+            assertTrue(notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString().contains("08:00–09:40"))
+            val island = CourseIslandStyle.params(occurrence, start - 60_000).getJSONObject("param_v2")
+            assertTrue(island.getJSONObject("hintInfo").getString("subContent").contains("08:00 — 09:40"))
+            assertEquals(start, notification.`when`)
+        } finally { java.util.TimeZone.setDefault(original) }
+    }
+
     private val context = ApplicationProvider.getApplicationContext<Context>()
     private val now = 1_800_000_000_000L
     private val item = CourseOccurrence(CourseSchedule(1, "Java", 3, 480, 580, "S402", sourceHash = "a"),

@@ -1,14 +1,14 @@
 package com.campusai.features.community
 
+import com.campusai.core.time.CaesarTime
+
 import java.time.LocalDate
-import java.time.OffsetDateTime
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
-fun wishRecordedTime(value: String, today: LocalDate = LocalDate.now(), full: Boolean = false): String {
-    val time = runCatching { OffsetDateTime.parse(value).atZoneSameInstant(ZoneId.systemDefault()) }.getOrNull()
-        ?: return "刚刚记下"
+fun wishRecordedTime(value: String, today: LocalDate = CaesarTime.today(), full: Boolean = false): String {
+    val time = CaesarTime.parseRemoteInstant(value)?.atZone(CaesarTime.zone)
+        ?: return "记录时间未知"
     if (full) return "记于 ${time.format(DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm"))}"
     return when (time.toLocalDate()) {
         today -> "今天记下"
@@ -17,8 +17,8 @@ fun wishRecordedTime(value: String, today: LocalDate = LocalDate.now(), full: Bo
     }
 }
 
-fun wishDateMessage(value: String, today: LocalDate = LocalDate.now()): String? {
-    val date = runCatching { LocalDate.parse(value) }.getOrNull() ?: return null
+fun wishDateMessage(value: String, today: LocalDate = CaesarTime.today()): String? {
+    val date = CaesarTime.parseDateKey(value) ?: return null
     val days = ChronoUnit.DAYS.between(today, date)
     return when {
         days > 0 -> "还有 $days 天，慢慢靠近它"
@@ -27,10 +27,11 @@ fun wishDateMessage(value: String, today: LocalDate = LocalDate.now()): String? 
     }
 }
 
-fun wishToRevisit(wishes: List<MarketplaceListing>, userId: String, today: LocalDate = LocalDate.now()): MarketplaceListing? {
+fun wishToRevisit(wishes: List<MarketplaceListing>, userId: String, today: LocalDate = CaesarTime.today()): MarketplaceListing? {
     val old = wishes.filter { wish ->
         wish.sellerId == userId && runCatching {
-            OffsetDateTime.parse(wish.createdAt).atZoneSameInstant(ZoneId.systemDefault()).toLocalDate() <= today.minusDays(30)
+            CaesarTime.parseRemoteInstant(wish.createdAt)?.atZone(CaesarTime.zone)?.toLocalDate()
+                ?.let { it <= today.minusDays(30) } ?: false
         }.getOrDefault(false)
     }.sortedBy { it.id }
     return old.takeIf { it.isNotEmpty() }?.let { it[Math.floorMod(today.toEpochDay(), it.size.toLong()).toInt()] }

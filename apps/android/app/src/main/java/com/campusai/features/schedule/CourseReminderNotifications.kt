@@ -1,5 +1,7 @@
 package com.campusai.features.schedule
 
+import com.campusai.core.time.CaesarTime
+
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -13,7 +15,6 @@ import androidx.core.app.NotificationManagerCompat
 import com.campusai.MainActivity
 import com.campusai.R
 import java.time.Instant
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 internal object CourseReminderNotifications {
@@ -52,7 +53,7 @@ internal object CourseReminderNotifications {
         val inClass = now >= item.start
         val demo = item.course.id == -1
         val id = if (demo) DEMO_ID else ID
-        val time = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
+        val time = DateTimeFormatter.ofPattern("HH:mm").withZone(CaesarTime.zone)
         val range = "${time.format(Instant.ofEpochMilli(item.start))}–${time.format(Instant.ofEpochMilli(item.end))}"
         val target = if (inClass) item.end else item.start
         val stage = if (inClass) "距下课" else "距上课"

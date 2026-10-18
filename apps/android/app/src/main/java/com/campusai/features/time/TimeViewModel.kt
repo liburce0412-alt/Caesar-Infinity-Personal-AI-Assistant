@@ -1,5 +1,7 @@
 package com.campusai.features.time
 
+import com.campusai.core.time.CaesarTime
+
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -50,12 +52,12 @@ class TimeViewModel(private val dao: CampusDao, private val appContext: Context,
         val currentUser = activeUser.value
         buildMap {
             snapshots.filter { it.userId == "local_user" }.forEach { snapshot ->
-                runCatching { LocalDate.parse(snapshot.localDate) }.getOrNull()?.let { date ->
+                CaesarTime.parseDateKey(snapshot.localDate)?.let { date ->
                     put(date, snapshot.targetMinutes)
                 }
             }
             snapshots.filter { it.userId == currentUser }.forEach { snapshot ->
-                runCatching { LocalDate.parse(snapshot.localDate) }.getOrNull()?.let { date ->
+                CaesarTime.parseDateKey(snapshot.localDate)?.let { date ->
                     put(date, snapshot.targetMinutes)
                 }
             }
@@ -118,19 +120,20 @@ class TimeViewModel(private val dao: CampusDao, private val appContext: Context,
     }
 
     // Delete record
-    fun deleteTimeRecord(id: Int) {
-        viewModelScope.launch {
-            dao.softDeleteTimeRecord(id)
-        }
+    suspend fun deleteTimeRecord(id: Int, expectedOwner: String) {
+        check(expectedOwner == activeUser.value) { "账号已切换，请重新打开记录" }
+        check(dao.softDeleteOwnedTimeRecord(id, expectedOwner) == 1) { "记录已不可用，请重新读取" }
     }
 
-    fun confirmDeleteTimeRecord() = CampusSyncScheduler.enqueue(appContext)
+    fun confirmDeleteTimeRecord(expectedOwner: String) {
+        if (expectedOwner != activeUser.value) return
+        runCatching { CampusSyncScheduler.enqueue(appContext) }
+    }
 
-    fun undoDeleteTimeRecord(id: Int) {
-        viewModelScope.launch {
-            dao.undoDeleteTimeRecord(id)
-            CampusSyncScheduler.enqueue(appContext)
-        }
+    suspend fun undoDeleteTimeRecord(id: Int, expectedOwner: String) {
+        check(expectedOwner == activeUser.value) { "账号已切换，请重新打开记录" }
+        check(dao.undoDeleteOwnedTimeRecord(id, expectedOwner) == 1) { "记录已不可恢复，请重新读取" }
+        runCatching { CampusSyncScheduler.enqueue(appContext) }
     }
 
     suspend fun editTimeRecord(id: Int, title: String, category: String, startTime: Long, endTime: Long, remark: String, expectedOwner: String) {
@@ -145,11 +148,10 @@ class TimeViewModel(private val dao: CampusDao, private val appContext: Context,
         } finally { _isInserting.value = false }
     }
 
-    fun deleteCourse(id: Int) {
-        viewModelScope.launch {
-            dao.softDeleteCourseSchedule(id)
-            CampusSyncScheduler.enqueue(appContext)
-        }
+    suspend fun deleteCourse(id: Int, expectedOwner: String) {
+        check(expectedOwner == activeUser.value) { "账号已切换，请重新打开课程" }
+        check(dao.softDeleteOwnedCourseSchedule(id, expectedOwner) == 1) { "课程已不可用，请重新读取" }
+        runCatching { CampusSyncScheduler.enqueue(appContext) }
     }
 
     suspend fun editCourse(course: CourseSchedule, expectedOwner: String) {
@@ -177,7 +179,7 @@ class TimeViewModel(private val dao: CampusDao, private val appContext: Context,
 
 data class CourseImportResult(val inserted: Int, val duplicates: Int)
 
-private fun TimeRecord.dailyGoalSnapshot(zoneId: ZoneId = ZoneId.systemDefault()): DailyGoalSnapshotEntity? {
+private fun TimeRecord.dailyGoalSnapshot(zoneId: ZoneId = CaesarTime.zone): DailyGoalSnapshotEntity? {
     if (durationMinutes <= 0L || endTime <= startTime) return null
     return DailyGoalSnapshotEntity(
         userId = userId,

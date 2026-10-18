@@ -1,5 +1,7 @@
 package com.campusai.core.health.mifitness
 
+import com.campusai.core.time.CaesarTime
+
 import com.campusai.core.health.HealthAvailability
 import com.campusai.core.health.HealthFreshness
 import com.campusai.core.health.HealthGateway
@@ -17,8 +19,8 @@ class MiFitnessSummaryHealthGateway(
     private val credentialStore: MiFitnessCredentialStore,
     private val cache: MiFitnessStepsCache,
     private val nowMillis: () -> Long = System::currentTimeMillis,
-    private val zoneId: ZoneId = ZoneId.systemDefault(),
-    private val requestZoneId: () -> ZoneId = ZoneId::systemDefault,
+    private val zoneId: ZoneId = CaesarTime.zone,
+    private val requestZoneId: () -> ZoneId = { CaesarTime.zone },
 ) : HealthGateway {
     override val readPermissions: Set<String> = emptySet()
 
@@ -51,7 +53,7 @@ class MiFitnessSummaryHealthGateway(
                 period.endEpochMillis >= period.startEpochMillis &&
                 period.endEpochMillis <= now + CLOCK_SKEW_TOLERANCE_MILLIS
         ) {
-            "Mi Fitness 缓存仅支持设备本地当天。"
+            "Mi Fitness 缓存仅支持北京时间当天。"
         }
         val credentials = credentialStore.read() ?: error("尚未配置 Mi Fitness 凭据。")
         val summary = cache.read(canonicalTodayPeriod(today), today, credentials.accountScope)

@@ -9,16 +9,70 @@ import java.io.File
 import java.io.FileOutputStream
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class CaesarImageStorageTest {
+    @Test
+    fun `continued history owns independent image files and preserves missing attachment notice`() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val legacy = File(context.cacheDir, "fork-image.jpg")
+        FileOutputStream(legacy).use { output ->
+            Bitmap.createBitmap(8, 6, Bitmap.Config.ARGB_8888).also { bitmap ->
+                assertTrue(bitmap.compress(Bitmap.CompressFormat.JPEG, 90, output))
+                bitmap.recycle()
+            }
+        }
+        val processor = CaesarImageProcessor(context)
+        try {
+            val source = processor.migrateLegacy("legacy-source", listOf(
+                AiConversationMessage("user", "历史图片", attachmentPaths = listOf(legacy.absolutePath), missingAttachmentCount = 1),
+            )).single()
+            val pending = CaesarImageAttachment(source.attachmentPaths.single(), "image/jpeg", "OCR", source.attachmentRefs.single())
+            val (messages, images) = processor.copyForConversation("alice-copy", listOf(source), listOf(pending))
+            assertNotEquals(source.attachmentRefs.single().relativePath, messages.single().attachmentRefs.single().relativePath)
+            assertEquals("OCR", images.single().ocrText)
+            assertTrue(images.single().imageRef!!.relativePath.startsWith("ai-conversations/alice-copy/"))
+            processor.deleteConversation("legacy-source")
+            assertTrue(File(messages.single().attachmentPaths.single()).isFile)
+            assertEquals(1, processor.hydrate(messages).single().missingAttachmentCount)
+            assertEquals(1, processor.migrateLegacy("alice-copy", messages).single().missingAttachmentCount)
+            assertEquals(1, processor.hydrate(messages).single().attachmentPaths.size)
+        } finally {
+            processor.deleteConversation("legacy-source")
+            processor.deleteConversation("alice-copy")
+            legacy.delete()
+        }
+    }
+
+    @Test
+    fun `invalid existing image aborts copy instead of dropping it from continued history`() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val invalid = File(context.cacheDir, "invalid-fork.jpg").apply { writeText("not an image") }
+        val processor = CaesarImageProcessor(context)
+        try {
+            val failure = runCatching {
+                processor.copyForConversation("invalid-copy", listOf(
+                    AiConversationMessage("user", "图片", attachmentPaths = listOf(invalid.absolutePath)),
+                ), emptyList())
+            }
+            assertTrue(failure.isFailure)
+            assertTrue(invalid.isFile)
+        } finally {
+            processor.deleteConversation("invalid-copy")
+            invalid.delete()
+        }
+    }
+
     @Test
     fun `legacy cache image migrates to stable no-backup reference and reports deletion`() = runTest {
         val context = ApplicationProvider.getApplicationContext<Context>()

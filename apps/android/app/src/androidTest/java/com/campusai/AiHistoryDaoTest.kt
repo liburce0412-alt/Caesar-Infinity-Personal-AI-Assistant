@@ -34,16 +34,17 @@ class AiHistoryDaoTest {
         database.campusDao().insertAiReport(original)
         database.campusDao().insertAiReport(report(summary = "继续后的第二轮", updatedAt = 200))
 
-        val updated = database.campusDao().getAiReportsFlow().first()
+        val updated = database.campusDao().observeAiReportSummaries("local_user").first()
         assertEquals(1, updated.size)
         assertEquals("继续后的第二轮", updated.single().summary)
         assertEquals(200L, updated.single().updatedAt)
 
+        val complete = requireNotNull(database.campusDao().getAiReport("conversation-1"))
         database.campusDao().deleteAiReport("conversation-1")
-        assertEquals(0, database.campusDao().getAiReportsFlow().first().size)
+        assertEquals(0, database.campusDao().observeAiReportSummaries("local_user").first().size)
 
-        database.campusDao().insertAiReport(updated.single())
-        assertEquals("conversation-1", database.campusDao().getAiReportsFlow().first().single().id)
+        database.campusDao().insertAiReport(complete)
+        assertEquals("conversation-1", database.campusDao().observeAiReportSummaries("local_user").first().single().id)
     }
 
     private fun report(summary: String, updatedAt: Long) = AiReportEntity(

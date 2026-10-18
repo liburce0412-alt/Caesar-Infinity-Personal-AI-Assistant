@@ -24,8 +24,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -33,6 +36,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.campusai.core.designsystem.SpectraColors
+import java.net.URI
 
 internal sealed interface AiMarkdownBlock {
     data class Paragraph(val text: String) : AiMarkdownBlock
@@ -209,7 +213,16 @@ private fun AiCodeBlock(block: AiMarkdownBlock.Code) {
     }
 }
 
-private fun inlineAiMarkdown(text: String, contentColor: Color, codeBackground: Color): AnnotatedString =
+/** Parse only web destinations; the platform UriHandler opens them only after a user click. */
+internal fun aiMarkdownWebUrl(value: String): String? = runCatching {
+    val uri = URI(value)
+    val scheme = uri.scheme?.lowercase() ?: return@runCatching null
+    if (scheme !in setOf("http", "https") || uri.host.isNullOrBlank() || uri.rawUserInfo != null ||
+        (uri.port != -1 && uri.port !in 1..65535)) return@runCatching null
+    scheme + value.substring(uri.scheme.length)
+}.getOrNull()
+
+internal fun inlineAiMarkdown(text: String, contentColor: Color, codeBackground: Color): AnnotatedString =
     buildAnnotatedString {
         var index = 0
         while (index < text.length) {
@@ -250,9 +263,17 @@ private fun inlineAiMarkdown(text: String, contentColor: Color, codeBackground: 
                 if (labelEnd > index + 1 && targetStart < text.length && text[targetStart] == '(') {
                     val targetEnd = text.indexOf(')', targetStart + 1)
                     if (targetEnd > targetStart + 1) {
-                        pushStyle(SpanStyle(color = SpectraColors.Focus, textDecoration = TextDecoration.Underline))
-                        append(text.substring(index + 1, labelEnd))
-                        pop()
+                        val label = text.substring(index + 1, labelEnd)
+                        val url = aiMarkdownWebUrl(text.substring(targetStart + 1, targetEnd))
+                        if (url != null) {
+                            withLink(LinkAnnotation.Url(url, TextLinkStyles(
+                                style = SpanStyle(color = SpectraColors.Focus, textDecoration = TextDecoration.Underline),
+                            ))) { append(label) }
+                        } else {
+                            pushStyle(SpanStyle(color = contentColor))
+                            append(label)
+                            pop()
+                        }
                         index = targetEnd + 1
                         continue
                     }

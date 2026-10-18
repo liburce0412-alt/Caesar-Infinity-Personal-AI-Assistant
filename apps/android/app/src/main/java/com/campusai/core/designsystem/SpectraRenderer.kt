@@ -1,10 +1,14 @@
 package com.campusai.core.designsystem
 
 import android.content.Context
+import android.content.BroadcastReceiver
+import android.content.Intent
+import android.content.IntentFilter
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.os.SystemClock
 import android.os.Build
+import android.os.PowerManager
 import android.util.Log
 import android.view.Surface
 import android.view.SurfaceHolder
@@ -43,6 +47,21 @@ class SpectraSurfaceView(context: Context) : GLSurfaceView(context) {
     private var sceneActive = true
     private var resumed = false
     private var appliedFrameRate = Float.NaN
+    private val renderPolicy = SpectraRenderPolicy()
+    private val framePacer = SpectraFramePacer()
+    private var appliedBudget = SpectraRenderBudget.FULL
+    private var lastConsumedFrameAt = 0L
+    private val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+    private var powerSave = false
+    private var thermalStatus = 0
+    private var powerReceiverRegistered = false
+    private var removeThermalListener: (() -> Unit)? = null
+    private val powerReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            powerSave = powerManager?.isPowerSaveMode == true
+            updateRenderBudget()
+        }
+    }
 
     init {
         setEGLContextClientVersion(2)
@@ -56,18 +75,35 @@ class SpectraSurfaceView(context: Context) : GLSurfaceView(context) {
     override fun onAttachedToWindow() {
         OpticalGlassRegistry.claimRenderer(opticalRendererOwnerId)
         super.onAttachedToWindow()
+        if (resumed) startPowerMonitoring()
     }
 
     override fun onDetachedFromWindow() {
         if (OpticalGlassRegistry.currentScope()?.rendererOwnerId == opticalRendererOwnerId) CaesarOrbAvailability.available = false
         OpticalGlassRegistry.releaseRenderer(opticalRendererOwnerId)
+        stopPowerMonitoring()
+        resetFrameFeedback()
         super.onDetachedFromWindow()
     }
 
     fun configure(environment: SpectraEnvironment, quality: RenderQuality, darkMode: Boolean, phase: SpectraPhase, glassEffects: GlassEffects = GlassEffects(), foregroundGlassVisible: Boolean = true) {
         requestedQuality = quality
-        updateFrameRate()
+        updateRenderBudget()
         queueEvent { spectraRenderer.configure(environment, quality, darkMode, phase, glassEffects, foregroundGlassVisible) }
+    }
+
+    /** Called by the one Compose display loop; changes no Compose state. */
+    fun renderOnFrame(frameTimeNanos: Long) {
+        if (!resumed || !sceneActive || !isAttachedToWindow) return
+        val refreshHz = saneSpectraRefreshRate(display?.refreshRate ?: 60f)
+        val completedAt = spectraRenderer.completedFrameAtNanos
+        if (completedAt != 0L && completedAt != lastConsumedFrameAt) {
+            renderPolicy.recordRender(completedAt, spectraRenderer.frameCpuDurationNanos, refreshHz)
+            lastConsumedFrameAt = completedAt
+        }
+        renderPolicy.recordDisplay(frameTimeNanos, refreshHz)
+        applyRenderBudget()
+        if (framePacer.shouldRender(frameTimeNanos, renderPolicy.budget, refreshHz)) requestRender()
     }
 
     fun setPointer(x: Float, y: Float) {
@@ -76,6 +112,7 @@ class SpectraSurfaceView(context: Context) : GLSurfaceView(context) {
 
     /** Freezes scene time without pausing/detaching the GL surface itself. */
     fun setSceneActive(value: Boolean) {
+        if (sceneActive != value) resetFrameFeedback()
         sceneActive = value
         updateFrameRate()
         queueEvent { spectraRenderer.setActive(value) }
@@ -101,13 +138,17 @@ class SpectraSurfaceView(context: Context) : GLSurfaceView(context) {
 
     override fun onResume() {
         resumed = true
+        resetFrameFeedback()
+        if (isAttachedToWindow) startPowerMonitoring()
         updateFrameRate()
-        spectraRenderer.setActive(true)
+        spectraRenderer.setActive(sceneActive)
         super.onResume()
     }
 
     override fun onPause() {
         resumed = false
+        stopPowerMonitoring()
+        resetFrameFeedback()
         updateFrameRate()
         spectraRenderer.setActive(false)
         super.onPause()
@@ -115,6 +156,7 @@ class SpectraSurfaceView(context: Context) : GLSurfaceView(context) {
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
         super.surfaceChanged(holder, format, width, height)
+        resetFrameFeedback()
         appliedFrameRate = Float.NaN
         updateFrameRate()
     }
@@ -128,8 +170,7 @@ class SpectraSurfaceView(context: Context) : GLSurfaceView(context) {
         if (Build.VERSION.SDK_INT < 30 || !holder.surface.isValid) return
         val rate = when {
             !resumed || !sceneActive -> 0f
-            requestedQuality == RenderQuality.LOW -> 30f
-            else -> 120f
+            else -> renderPolicy.budget.maximumHz
         }
         if (appliedFrameRate == rate) return
         // A surface-local hint; respect the device's mode/power policy and avoid black-screen
@@ -141,6 +182,62 @@ class SpectraSurfaceView(context: Context) : GLSurfaceView(context) {
             holder.surface.setFrameRate(rate, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
         }
         appliedFrameRate = rate
+    }
+
+    private fun resetFrameFeedback() {
+        renderPolicy.resetTiming()
+        framePacer.reset()
+        lastConsumedFrameAt = spectraRenderer.completedFrameAtNanos
+    }
+
+    private fun updateRenderBudget() {
+        renderPolicy.configure(requestedQuality, powerSave, thermalStatus)
+        applyRenderBudget()
+    }
+
+    private fun applyRenderBudget() {
+        val budget = renderPolicy.budget
+        if (budget != appliedBudget) {
+            appliedBudget = budget
+            framePacer.reset()
+            queueEvent { spectraRenderer.setSceneScale(budget.sceneScale) }
+            Log.d("CaesarRenderBudget", "$requestedQuality/$budget cap=${budget.maximumHz} scale=${budget.sceneScale} thermal=$thermalStatus powerSave=$powerSave")
+        }
+        updateFrameRate()
+    }
+
+    private fun startPowerMonitoring() {
+        if (powerReceiverRegistered) return
+        powerSave = powerManager?.isPowerSaveMode == true
+        val filter = IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED)
+        if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(powerReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        else context.registerReceiver(powerReceiver, filter)
+        powerReceiverRegistered = true
+        val manager = powerManager
+        if (Build.VERSION.SDK_INT >= 29 && manager != null) {
+            runCatching {
+                thermalStatus = manager.currentThermalStatus
+                val listener = PowerManager.OnThermalStatusChangedListener { status ->
+                    if (resumed && isAttachedToWindow) {
+                        thermalStatus = status
+                        updateRenderBudget()
+                    }
+                }
+                manager.addThermalStatusListener(listener)
+                removeThermalListener = { manager.removeThermalStatusListener(listener) }
+            }.onFailure {
+                // Some device services do not expose thermal feedback; frames/power still work.
+                Log.w("CaesarRenderBudget", "Thermal feedback unavailable")
+            }
+        }
+        updateRenderBudget()
+    }
+
+    private fun stopPowerMonitoring() {
+        removeThermalListener?.let { runCatching(it) }
+        removeThermalListener = null
+        if (powerReceiverRegistered) context.unregisterReceiver(powerReceiver)
+        powerReceiverRegistered = false
     }
 
 }
@@ -173,6 +270,11 @@ private class SpectraGlRenderer(
     private var sceneWidth = 1
     private var sceneHeight = 1
     private var sceneFramebufferReady = false
+    private var sceneScale = SpectraRenderBudget.FULL.sceneScale
+    @Volatile var frameCpuDurationNanos = 0L
+        private set
+    @Volatile var completedFrameAtNanos = 0L
+        private set
     private var activeSeconds = 0f
     private var lastFrameAt = SystemClock.elapsedRealtime()
     @Volatile private var active = true
@@ -221,6 +323,13 @@ private class SpectraGlRenderer(
         windowOriginY = y
     }
 
+    fun setSceneScale(scale: Float) {
+        if (sceneScale == scale) return
+        sceneScale = scale
+        // Reallocate only on a budget transition, on the GL thread, after a surface exists.
+        if (sceneFramebufferReady) createSceneFramebuffer()
+    }
+
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         sceneProgram = linkProgram(VERTEX_SHADER, SCENE_FRAGMENT_SHADER)
         blitProgram = linkProgram(VERTEX_SHADER, BLIT_FRAGMENT_SHADER)
@@ -248,6 +357,18 @@ private class SpectraGlRenderer(
     }
 
     override fun onDrawFrame(gl: GL10?) {
+        val startedAtNanos = System.nanoTime()
+        try {
+            drawFrame()
+        } finally {
+            val completedAt = System.nanoTime()
+            frameCpuDurationNanos = completedAt - startedAtNanos
+            // Publish last; the main thread reads this volatile before the duration above.
+            completedFrameAtNanos = completedAt
+        }
+    }
+
+    private fun drawFrame() {
         val orbAvailable = sceneProgram != 0 && sceneFramebufferReady && blitHandles != null && opticalHandles != null && orbHandles != null && quality != RenderQuality.LOW
         if (lastOrbAvailable != orbAvailable) { lastOrbAvailable = orbAvailable; orbAvailability(orbAvailable) }
         if (sceneProgram == 0) {
@@ -260,7 +381,6 @@ private class SpectraGlRenderer(
         val deltaSeconds = (now - lastFrameAt).coerceIn(0L, 100L) / 1000f
         if (active) activeSeconds += deltaSeconds
         lastFrameAt = now
-        val speed = if (quality == RenderQuality.LOW) .82f else 1f
         val seconds = activeSeconds
         val pointerAlpha = (1f - kotlin.math.exp(-4.2f * deltaSeconds)).coerceIn(0f, 1f)
         pointerX += (pointerTargetX - pointerX) * pointerAlpha
@@ -270,15 +390,15 @@ private class SpectraGlRenderer(
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
             GLES20.glViewport(0, 0, width, height)
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-            drawScene(sceneSeconds = seconds * speed, railSeconds = seconds)
+            drawScene(sceneSeconds = seconds, railSeconds = seconds)
             return
         }
 
-        // Pass 1: render the whole SPECTRA field once into a half-resolution scene texture.
+        // Pass 1: render the shared field once, at half resolution or the adaptive lower budget.
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, sceneFramebuffer)
         GLES20.glViewport(0, 0, sceneWidth, sceneHeight)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-        drawScene(sceneSeconds = seconds * speed, railSeconds = seconds)
+        drawScene(sceneSeconds = seconds, railSeconds = seconds)
 
         // Pass 2: composite the untouched field to the phone-sized default framebuffer.
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
@@ -288,7 +408,7 @@ private class SpectraGlRenderer(
 
         // LOW is the explicit solid-glass fallback. AUTO/HIGH get at most three live optics.
         if (foregroundGlassVisible && quality != RenderQuality.LOW && opticalHandles != null) {
-            drawOpticalGlassRegions(seconds * speed, deltaSeconds)
+            drawOpticalGlassRegions(seconds, deltaSeconds)
         }
     }
 
@@ -490,8 +610,8 @@ private class SpectraGlRenderer(
             sceneFramebuffer = 0
         }
 
-        sceneWidth = (width / 2).coerceAtLeast(1)
-        sceneHeight = (height / 2).coerceAtLeast(1)
+        sceneWidth = (width * sceneScale).toInt().coerceAtLeast(1)
+        sceneHeight = (height * sceneScale).toInt().coerceAtLeast(1)
         val textures = IntArray(1)
         GLES20.glGenTextures(1, textures, 0)
         sceneTexture = textures[0]
@@ -525,7 +645,7 @@ private class SpectraGlRenderer(
         )
         sceneFramebufferReady = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER) == GLES20.GL_FRAMEBUFFER_COMPLETE
         if (!sceneFramebufferReady) {
-            Log.w("CaesarOpticalGlass", "Half-resolution scene framebuffer is unavailable; using solid glass fallback")
+            Log.w("CaesarOpticalGlass", "Scene framebuffer is unavailable; using solid glass fallback")
         }
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)

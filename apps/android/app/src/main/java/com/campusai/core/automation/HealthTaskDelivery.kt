@@ -43,7 +43,9 @@ class RoomHealthTaskConversationWriter(
         require(messages.isNotEmpty() && messages.all(String::isNotBlank))
         AiReportWriteCoordinator.withLock {
             val conversationId = HealthTaskNotificationContract.conversationId(task.id)
-            val existing = dao.getAiReport(conversationId)
+            // These tasks are device-local, with consent stored in NoBackupScheduledTaskStore.
+            // A later account login must not claim their earlier health conversations.
+            val existing = dao.getAiReport(conversationId, ownerUserId = "local_user")
             val rows = if (existing == null) {
                 JSONArray()
             } else {
@@ -75,6 +77,7 @@ class RoomHealthTaskConversationWriter(
                     messagesJson = rows.toString(),
                     createdAt = existing?.createdAt ?: createdAt,
                     updatedAt = createdAt,
+                    ownerUserId = "local_user",
                 ),
             )
             conversationId

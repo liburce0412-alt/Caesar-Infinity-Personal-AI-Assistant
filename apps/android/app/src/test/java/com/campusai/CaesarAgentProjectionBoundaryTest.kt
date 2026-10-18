@@ -33,6 +33,22 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class CaesarAgentProjectionBoundaryTest {
+    @Test fun `cloud cannot read memory while local memory results are marked private`() = runTest {
+        for (local in listOf(false, true)) {
+            val calls = AtomicInteger()
+            val delegate = UnprojectedToolDelegate("memory.list", "{}")
+            val registry = CaesarToolRegistry(listOf(readTool("memory.list", setOf("记忆")) {
+                calls.incrementAndGet()
+                CaesarToolResult.Success("{\"content\":\"private free text\"}")
+            }))
+            CaesarAgentEngine(delegate, registry).stream(request("读取记忆").copy(allowLocalMemoryRead = local)).toList()
+            assertEquals(if (local) 1 else 0, calls.get())
+            assertEquals(local, delegate.requests.first().caesarToolsJson.contains("memory.list"))
+            if (local) assertTrue(delegate.requests.last().messages.takeLast(2).all { it.cloudHealthSensitive })
+            else assertEquals("tool_not_projected", delegate.lastToolFailureCode())
+        }
+    }
+
     @Test
     fun `known registered tool outside this turn projection is denied`() = runTest {
         val blockedCalls = AtomicInteger()

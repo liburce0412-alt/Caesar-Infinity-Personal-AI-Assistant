@@ -1,5 +1,7 @@
 package com.campusai.core.model
 
+import com.campusai.core.time.CaesarTime
+
 import java.io.Serializable
 import java.time.Instant
 import java.time.LocalDate
@@ -47,7 +49,7 @@ object DailyContributionCalculator {
         year: Int,
         records: Iterable<TimeRecord>,
         targetSnapshots: Map<LocalDate, Long> = emptyMap(),
-        zoneId: ZoneId = ZoneId.systemDefault(),
+        zoneId: ZoneId = CaesarTime.zone,
         today: LocalDate = LocalDate.now(zoneId),
         defaultTargetMinutes: Long = DEFAULT_TARGET_MINUTES,
     ): List<DailyContribution> {

@@ -15,6 +15,7 @@ import com.campusai.core.model.CourseSchedule
 import com.campusai.core.model.AiMode
 import com.campusai.core.model.AiProvider
 import com.campusai.core.model.AiReport
+import com.campusai.core.model.AiReportSummary
 import com.campusai.core.model.DailyGreeting
 import java.util.UUID
 
@@ -181,7 +182,7 @@ data class CourseScheduleEntity(
     }
 }
 
-@Entity(tableName = "ai_reports")
+@Entity(tableName = "ai_reports", indices = [Index(value = ["ownerUserId", "updatedAt", "id"])])
 data class AiReportEntity(
     @PrimaryKey val id: String,
     val provider: String,
@@ -194,6 +195,7 @@ data class AiReportEntity(
     val messagesJson: String,
     val createdAt: Long,
     val updatedAt: Long,
+    @ColumnInfo(defaultValue = "'local_user'") val ownerUserId: String = "local_user",
 ) {
     fun toDomain() = AiReport(
         id = id,
@@ -207,6 +209,7 @@ data class AiReportEntity(
         messagesJson = messagesJson,
         createdAt = createdAt,
         updatedAt = updatedAt,
+        ownerUserId = ownerUserId,
     )
     companion object {
         fun fromDomain(value: AiReport) = AiReportEntity(
@@ -221,8 +224,29 @@ data class AiReportEntity(
             value.messagesJson,
             value.createdAt,
             value.updatedAt,
+            value.ownerUserId,
         )
     }
+}
+
+/** Room projection deliberately excludes messagesJson, including when history refreshes. */
+data class AiReportSummaryEntity(
+    val id: String,
+    val provider: String,
+    val mode: String,
+    val model: String,
+    val executionEngine: String,
+    val requestId: String,
+    val title: String,
+    val summary: String,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val ownerUserId: String,
+) {
+    fun toDomain() = AiReportSummary(
+        id, provider.toAiProvider(), mode.toAiMode(), model, executionEngine, requestId,
+        title, summary, createdAt, updatedAt, ownerUserId,
+    )
 }
 
 @Entity(tableName = "daily_greetings")
@@ -246,6 +270,7 @@ data class AgentMemoryEntity(
     val createdAt: Long,
     val confirmedAt: Long?,
     val expiresAt: Long?,
+    @ColumnInfo(defaultValue = "'local_user'") val ownerUserId: String = "local_user",
 )
 
 @Entity(tableName = "agent_traces", indices = [Index(value = ["sessionId", "createdAt"])])
@@ -258,6 +283,7 @@ data class AgentTraceEntity(
     val success: Boolean,
     val errorCode: String?,
     val createdAt: Long,
+    @ColumnInfo(defaultValue = "'local_user'") val ownerUserId: String = "local_user",
 )
 
 @Entity(tableName = "agent_actions")
@@ -313,8 +339,14 @@ interface CampusDao {
     @Query("UPDATE time_records SET deletedAt = :deletedAt, updatedAt = :deletedAt, version = version + 1, syncState = 'pending' WHERE id = :id AND deletedAt IS NULL")
     suspend fun softDeleteTimeRecord(id: Int, deletedAt: Long = System.currentTimeMillis())
 
+    @Query("UPDATE time_records SET deletedAt = :deletedAt, updatedAt = :deletedAt, version = version + 1, syncState = 'pending' WHERE id = :id AND deletedAt IS NULL AND (userId = :expectedOwner OR userId = 'local_user')")
+    suspend fun softDeleteOwnedTimeRecord(id: Int, expectedOwner: String, deletedAt: Long = System.currentTimeMillis()): Int
+
     @Query("UPDATE time_records SET deletedAt = NULL, updatedAt = :updatedAt, version = version + 1, syncState = 'pending' WHERE id = :id AND deletedAt IS NOT NULL")
     suspend fun undoDeleteTimeRecord(id: Int, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE time_records SET deletedAt = NULL, updatedAt = :updatedAt, version = version + 1, syncState = 'pending' WHERE id = :id AND deletedAt IS NOT NULL AND (userId = :expectedOwner OR userId = 'local_user')")
+    suspend fun undoDeleteOwnedTimeRecord(id: Int, expectedOwner: String, updatedAt: Long = System.currentTimeMillis()): Int
 
     @Query("UPDATE time_records SET title = :title, category = :category, startTime = :startTime, endTime = :endTime, durationMinutes = :durationMinutes, remark = :remark, updatedAt = :updatedAt, version = version + 1, syncState = 'pending' WHERE id = :id AND deletedAt IS NULL")
     suspend fun editTimeRecord(id: Int, title: String, category: String, startTime: Long, endTime: Long, durationMinutes: Long, remark: String, updatedAt: Long = System.currentTimeMillis())
@@ -546,6 +578,9 @@ interface CampusDao {
     @Query("UPDATE course_schedules SET deletedAt = :deletedAt, updatedAt = :deletedAt, version = version + 1, syncState = 'pending' WHERE id = :id AND deletedAt IS NULL")
     suspend fun softDeleteCourseSchedule(id: Int, deletedAt: Long = System.currentTimeMillis())
 
+    @Query("UPDATE course_schedules SET deletedAt = :deletedAt, updatedAt = :deletedAt, version = version + 1, syncState = 'pending' WHERE id = :id AND deletedAt IS NULL AND (userId = :expectedOwner OR userId = 'local_user')")
+    suspend fun softDeleteOwnedCourseSchedule(id: Int, expectedOwner: String, deletedAt: Long = System.currentTimeMillis()): Int
+
     @Query("SELECT * FROM course_schedules WHERE syncState IN ('pending', 'failed') AND userId = :activeUser ORDER BY updatedAt")
     suspend fun getPendingCourseSchedules(activeUser: String): List<CourseScheduleEntity>
 
@@ -564,17 +599,48 @@ interface CampusDao {
     @Query("DELETE FROM course_schedules WHERE deletedAt IS NOT NULL AND deletedAt < :before AND syncState = 'synced'")
     suspend fun purgeOldCourseTombstones(before: Long)
 
-    @Query("SELECT * FROM ai_reports ORDER BY updatedAt DESC")
-    fun getAiReportsFlow(): Flow<List<AiReportEntity>>
+    @Query("""
+        SELECT id, provider, mode, model, executionEngine, requestId, title, summary, createdAt, updatedAt, ownerUserId
+        FROM ai_reports WHERE ownerUserId = :ownerUserId
+        ORDER BY updatedAt DESC, id DESC LIMIT MAX(1, :limit)
+    """)
+    fun observeAiReportSummaries(ownerUserId: String, limit: Int = 40): Flow<List<AiReportSummaryEntity>>
 
-    @Query("SELECT * FROM ai_reports WHERE id = :id LIMIT 1")
-    suspend fun getAiReport(id: String): AiReportEntity?
+    @Query("""
+        SELECT id, provider, mode, model, executionEngine, requestId, title, summary, createdAt, updatedAt, ownerUserId
+        FROM ai_reports
+        WHERE ownerUserId = :ownerUserId AND (
+            :beforeUpdatedAt IS NULL OR updatedAt < :beforeUpdatedAt OR
+            (updatedAt = :beforeUpdatedAt AND id < :beforeId)
+        )
+        ORDER BY updatedAt DESC, id DESC LIMIT MAX(1, :limit)
+    """)
+    suspend fun getAiReportSummaryPage(
+        ownerUserId: String,
+        beforeUpdatedAt: Long? = null,
+        beforeId: String? = null,
+        limit: Int = 40,
+    ): List<AiReportSummaryEntity>
+
+    @Query("SELECT * FROM ai_reports WHERE id = :id AND ownerUserId = :ownerUserId LIMIT 1")
+    suspend fun getAiReport(id: String, ownerUserId: String = "local_user"): AiReportEntity?
+
+    @Query("SELECT ownerUserId FROM ai_reports WHERE id = :id LIMIT 1")
+    suspend fun getAiReportOwnerUserId(id: String): String?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertAiReport(entity: AiReportEntity)
+    suspend fun insertAiReportRow(entity: AiReportEntity)
 
-    @Query("DELETE FROM ai_reports WHERE id = :id")
-    suspend fun deleteAiReport(id: String)
+    @Transaction
+    suspend fun insertAiReport(entity: AiReportEntity) {
+        require(entity.ownerUserId.isNotBlank()) { "AI report owner is required" }
+        val storedOwner = getAiReportOwnerUserId(entity.id)
+        check(storedOwner == null || storedOwner == entity.ownerUserId) { "AI report owner cannot change" }
+        insertAiReportRow(entity)
+    }
+
+    @Query("DELETE FROM ai_reports WHERE id = :id AND ownerUserId = :ownerUserId")
+    suspend fun deleteAiReport(id: String, ownerUserId: String = "local_user")
 
     @Query("SELECT * FROM daily_greetings WHERE id = :id LIMIT 1")
     suspend fun getDailyGreeting(id: String): DailyGreetingEntity?
@@ -582,35 +648,45 @@ interface CampusDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertDailyGreeting(entity: DailyGreetingEntity)
 
-    @Query("SELECT * FROM agent_memories WHERE confirmedAt IS NOT NULL AND (expiresAt IS NULL OR expiresAt > :now) ORDER BY confirmedAt DESC LIMIT :limit")
-    suspend fun getConfirmedAgentMemories(now: Long, limit: Int = 24): List<AgentMemoryEntity>
+    @Query("SELECT * FROM agent_memories WHERE ownerUserId = :ownerUserId AND confirmedAt IS NOT NULL AND (expiresAt IS NULL OR expiresAt > :now) ORDER BY confirmedAt DESC LIMIT :limit")
+    suspend fun getConfirmedAgentMemories(now: Long, limit: Int = 24, ownerUserId: String = "local_user"): List<AgentMemoryEntity>
 
-    @Query("SELECT * FROM agent_memories ORDER BY createdAt DESC")
-    fun getAgentMemoriesFlow(): Flow<List<AgentMemoryEntity>>
+    @Query("SELECT * FROM agent_memories WHERE ownerUserId = :ownerUserId ORDER BY createdAt DESC")
+    fun getAgentMemoriesFlow(ownerUserId: String = "local_user"): Flow<List<AgentMemoryEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAgentMemory(entity: AgentMemoryEntity)
 
-    @Query("UPDATE agent_memories SET confirmedAt = :confirmedAt WHERE id = :id AND confirmedAt IS NULL")
-    suspend fun confirmAgentMemory(id: String, confirmedAt: Long = System.currentTimeMillis()): Int
+    @Query("UPDATE agent_memories SET confirmedAt = :confirmedAt WHERE id = :id AND ownerUserId = :ownerUserId AND confirmedAt IS NULL")
+    suspend fun confirmAgentMemory(id: String, confirmedAt: Long = System.currentTimeMillis(), ownerUserId: String = "local_user"): Int
 
-    @Query("UPDATE agent_memories SET content = :content WHERE id = :id")
-    suspend fun updateAgentMemoryContent(id: String, content: String): Int
+    @Query("UPDATE agent_memories SET content = :content WHERE id = :id AND ownerUserId = :ownerUserId")
+    suspend fun updateAgentMemoryContent(id: String, content: String, ownerUserId: String = "local_user"): Int
 
-    @Query("DELETE FROM agent_memories WHERE id = :id")
-    suspend fun deleteAgentMemory(id: String)
+    @Query("DELETE FROM agent_memories WHERE id = :id AND ownerUserId = :ownerUserId")
+    suspend fun deleteAgentMemory(id: String, ownerUserId: String = "local_user"): Int
 
-    @Query("DELETE FROM agent_memories")
-    suspend fun deleteAllAgentMemories()
+    @Query("DELETE FROM agent_memories WHERE ownerUserId = :ownerUserId")
+    suspend fun deleteAllAgentMemories(ownerUserId: String = "local_user")
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertAgentTrace(entity: AgentTraceEntity)
+    suspend fun insertAgentTraceRow(entity: AgentTraceEntity)
 
-    @Query("SELECT * FROM agent_traces ORDER BY createdAt DESC LIMIT :limit")
-    suspend fun getAgentTraces(limit: Int = 200): List<AgentTraceEntity>
+    /** Diagnostic events only. User reports, memories and idempotency records are never trimmed. */
+    @Transaction
+    suspend fun insertAgentTrace(entity: AgentTraceEntity) {
+        insertAgentTraceRow(entity)
+        pruneAgentTraces()
+    }
 
-    @Query("DELETE FROM agent_traces")
-    suspend fun deleteAllAgentTraces()
+    @Query("DELETE FROM agent_traces WHERE id IN (SELECT id FROM agent_traces ORDER BY createdAt DESC, id DESC LIMIT -1 OFFSET 200)")
+    suspend fun pruneAgentTraces()
+
+    @Query("SELECT * FROM agent_traces WHERE ownerUserId = :ownerUserId ORDER BY createdAt DESC, id DESC LIMIT MAX(1, MIN(:limit, 200))")
+    suspend fun getAgentTraces(limit: Int = 200, ownerUserId: String = "local_user"): List<AgentTraceEntity>
+
+    @Query("DELETE FROM agent_traces WHERE ownerUserId = :ownerUserId")
+    suspend fun deleteAllAgentTraces(ownerUserId: String = "local_user")
 
     @Query("SELECT * FROM agent_actions WHERE idempotencyKey = :key LIMIT 1")
     suspend fun getAgentAction(key: String): AgentActionEntity?
@@ -675,7 +751,7 @@ interface CampusDao {
         HealthSummaryCacheEntity::class,
         DailyGoalSnapshotEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = true
 )
 abstract class CampusDatabase : RoomDatabase() {
@@ -829,15 +905,15 @@ abstract class CampusDatabase : RoomDatabase() {
                     """
                     INSERT OR IGNORE INTO `daily_goal_snapshots` (`userId`, `localDate`, `targetMinutes`, `createdAt`)
                     SELECT `userId`,
-                           strftime('%Y-%m-%d', `endTime` / 1000, 'unixepoch', 'localtime'),
+                           strftime('%Y-%m-%d', `endTime` / 1000, 'unixepoch', '+8 hours'),
                            240,
                            MIN(`endTime`)
                     FROM `time_records`
                     WHERE `deletedAt` IS NULL
                       AND `durationMinutes` > 0
                       AND `endTime` > `startTime`
-                      AND strftime('%Y-%m-%d', `endTime` / 1000, 'unixepoch', 'localtime') IS NOT NULL
-                    GROUP BY `userId`, strftime('%Y-%m-%d', `endTime` / 1000, 'unixepoch', 'localtime')
+                      AND strftime('%Y-%m-%d', `endTime` / 1000, 'unixepoch', '+8 hours') IS NOT NULL
+                    GROUP BY `userId`, strftime('%Y-%m-%d', `endTime` / 1000, 'unixepoch', '+8 hours')
                     """.trimIndent(),
                 )
             }
@@ -879,6 +955,18 @@ abstract class CampusDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Existing history has no reliable account owner. Preserve it as local history.
+                db.execSQL("ALTER TABLE ai_reports ADD COLUMN ownerUserId TEXT NOT NULL DEFAULT 'local_user'")
+                db.execSQL("CREATE INDEX index_ai_reports_ownerUserId_updatedAt_id ON ai_reports(ownerUserId, updatedAt, id)")
+                db.execSQL("ALTER TABLE agent_traces ADD COLUMN ownerUserId TEXT NOT NULL DEFAULT 'local_user'")
+                // Unattributed legacy memories stay on this device; never claim them for a signed-in account.
+                db.execSQL("ALTER TABLE agent_memories ADD COLUMN ownerUserId TEXT NOT NULL DEFAULT 'local_user'")
+                db.execSQL("DELETE FROM agent_traces WHERE id IN (SELECT id FROM agent_traces ORDER BY createdAt DESC, id DESC LIMIT -1 OFFSET 200)")
+            }
+        }
+
         @Volatile
         private var INSTANCE: CampusDatabase? = null
 
@@ -898,6 +986,7 @@ abstract class CampusDatabase : RoomDatabase() {
                     MIGRATION_7_8,
                     MIGRATION_8_9,
                     MIGRATION_9_10,
+                    MIGRATION_10_11,
                 )
                 .build()
                 INSTANCE = instance

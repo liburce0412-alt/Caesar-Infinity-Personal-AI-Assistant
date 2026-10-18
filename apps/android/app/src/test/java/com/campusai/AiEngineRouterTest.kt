@@ -32,6 +32,8 @@ class AiEngineRouterTest {
             decideAiRoute(AiProvider.CAESAR_CLOUD_FREE, AiMode.FAST, true, false))
         assertEquals("cloud_offline", (decideAiRoute(AiProvider.CAESAR_CLOUD_FREE,
             AiMode.FAST, false, true) as AiRouteDecision.Block).code)
+        assertEquals("unsupported_mode", (decideAiRoute(AiProvider.CAESAR_CLOUD_FREE,
+            AiMode.DEEP, true, true) as AiRouteDecision.Block).code)
     }
 
     @Test fun `free cloud image capability never bypasses local content requirements`() = runTest {
@@ -68,9 +70,9 @@ class AiEngineRouterTest {
 
     @Test
     fun `empty state labels the selected cloud provider without claiming a connection`() {
-        assertEquals("DEEPSEEK · 已选择", selectedCloudProviderStatus(AiProvider.DEEPSEEK))
-        assertEquals("GEMINI · 已选择", selectedCloudProviderStatus(AiProvider.GOOGLE_GEMINI))
-        assertEquals("CODEX · 已选择", selectedCloudProviderStatus(AiProvider.CODEX))
+        assertEquals("DeepSeek", selectedCloudProviderStatus(AiProvider.DEEPSEEK))
+        assertEquals("Gemini", selectedCloudProviderStatus(AiProvider.GOOGLE_GEMINI))
+        assertEquals("Codex", selectedCloudProviderStatus(AiProvider.CODEX))
     }
 
     @Test fun `auto follows online and offline rules`() {

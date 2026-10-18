@@ -25,7 +25,7 @@ object CampusAiTaskFactory {
         courses: List<CourseSchedule>,
         userInput: String = "",
         nowMillis: Long = System.currentTimeMillis(),
-        zone: ZoneId = ZoneId.systemDefault(),
+        zone: ZoneId = com.campusai.core.time.CaesarTime.zone,
     ): CampusAiPayload {
         val range = when (task) {
             CampusAiTask.MONTH_SUMMARY -> LearningRange.MONTH

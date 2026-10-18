@@ -1,9 +1,5 @@
 package com.campusai.features.ai
 
-import android.Manifest
-import android.os.Handler
-import android.os.Looper
-import android.speech.tts.UtteranceProgressListener
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -16,33 +12,15 @@ import com.campusai.core.designsystem.CaesarGlassOrb
 import com.campusai.core.designsystem.BrandWordmark
 import com.campusai.core.designsystem.CaesarOrbSignal
 import com.campusai.core.designsystem.CaesarOrbMode
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
-import android.os.Bundle
 import android.provider.Settings
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
-import android.speech.tts.TextToSpeech
-import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -66,7 +44,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -116,7 +93,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -126,25 +102,19 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.clipPath
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -154,9 +124,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
-import androidx.core.app.ActivityCompat
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
@@ -165,24 +133,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.campusai.core.designsystem.GlassPanel
 import com.campusai.core.designsystem.CaesarSlidingSelector
-import com.campusai.core.designsystem.PageMood
 import com.campusai.core.designsystem.SpectraAction
 import com.campusai.core.designsystem.SpectraAlertDialog
 import com.campusai.core.designsystem.SpectraColors
-import com.campusai.core.designsystem.SpectraDialog
 import com.campusai.core.designsystem.SpectraModalBottomSheet
-import com.campusai.core.designsystem.SpectraStatus
-import com.campusai.core.designsystem.SpectraStatusTone
-import com.campusai.core.designsystem.SpectraSurface
 import com.campusai.core.designsystem.SpectraTheme
 import com.campusai.core.designsystem.SpectraVisualStyle
-import com.campusai.core.health.HealthAvailability
-import com.campusai.core.health.HealthFreshness
 import com.campusai.core.localai.LocalModelSelection
 import com.campusai.core.localai.LocalModelMode
 import com.campusai.core.model.AiMode
@@ -193,14 +151,9 @@ import com.campusai.core.agent.CaesarSurface
 import coil.compose.AsyncImage
 import java.io.File
 import java.time.Instant
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.launch
-import kotlin.math.PI
-import kotlin.math.cos
 import kotlin.math.roundToInt
-import kotlin.math.sin
-import java.util.Locale
 import java.util.UUID
 
 internal enum class AiVisualPreset(val label: String) {
@@ -223,7 +176,11 @@ fun AiScreen(
     val selectedLocalModel by viewModel.localModelSelection.collectAsState()
     val localModelStates by viewModel.localModelStates.collectAsState()
     val history by viewModel.history.collectAsState()
+    val historyLimit by viewModel.visibleHistoryLimit.collectAsState()
+    val viewingLocalHistory by viewModel.viewingLocalHistory.collectAsState()
     val memories by viewModel.memories.collectAsState()
+    val memoryScope by viewModel.memoryScope.collectAsState()
+    val viewingLocalMemories by viewModel.viewingLocalMemories.collectAsState()
     val healthState by viewModel.healthState.collectAsState()
     var prompt by rememberSaveable { mutableStateOf("") }
     var showHistory by rememberSaveable { mutableStateOf(false) }
@@ -253,338 +210,51 @@ fun AiScreen(
     val healthPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         viewModel.refreshHealthStatus()
     }
-    var listening by remember { mutableStateOf(false) }
-    var transcribing by remember { mutableStateOf(false) }
-    var voiceSessionActive by remember { mutableStateOf(false) }
-    var voiceMessage by remember { mutableStateOf<String?>(null) }
     val orbSignal = remember { CaesarOrbSignal() }
-    var tts by remember { mutableStateOf<TextToSpeech?>(null) }
-    var ttsReady by remember { mutableStateOf(false) }
-    var speaking by remember { mutableStateOf(false) }
-    var activeUtterance by remember { mutableStateOf<String?>(null) }
-    var playbackMessage by remember { mutableStateOf<String?>(null) }
-    val mainHandler = remember { Handler(Looper.getMainLooper()) }
-    val stopPlayback: () -> Unit = {
-        activeUtterance = null
-        speaking = false
-        tts?.stop()
-    }
+    val playback = rememberAiSpeechPlayback()
+    val stopPlayback: () -> Unit = playback::stop
     var orbAnchor by remember { mutableStateOf(Rect.Zero) }
     var orbRoot by remember { mutableStateOf(Offset.Zero) }
     val density = LocalDensity.current
-
-    var voiceStartRequest by remember { mutableIntStateOf(0) }
-    var consumedVoiceStartRequest by remember { mutableIntStateOf(0) }
-    var systemSpeechConsentGranted by rememberSaveable { mutableStateOf(false) }
-    var showSystemSpeechConsent by rememberSaveable { mutableStateOf(false) }
-    var showMicrophoneSettingsRecovery by rememberSaveable { mutableStateOf(false) }
-    var preferSystemSpeechActivity by rememberSaveable { mutableStateOf(false) }
-    var systemSpeechActivityInFlight by remember { mutableStateOf(false) }
-    var systemSpeechActivityRoute by remember { mutableStateOf(CaesarSpeechFallbackRoute.STANDARD_RECOGNITION_ACTIVITY) }
-    val xiaomiEnginePermissionRecoveryAvailable = remember(context) {
-        context.packageManager.resolveActivity(
-            Intent(XIAOMI_PUBLIC_SPEECH_ACTION),
-            PackageManager.MATCH_DEFAULT_ONLY,
-        ) != null
-    }
-    val systemSpeechActivityLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val completedRoute = systemSpeechActivityRoute
-        systemSpeechActivityRoute = CaesarSpeechFallbackRoute.STANDARD_RECOGNITION_ACTIVITY
-        systemSpeechActivityInFlight = false
-        listening = false
-        transcribing = false
-        orbSignal.reset()
-        if (completedRoute == CaesarSpeechFallbackRoute.XIAOMI_ENGINE_PERMISSION_RECOVERY) {
-            scope.launch {
-                snackbarHost.showSnackbar("完成系统语音引擎的麦克风授权后，请返回并再点一次语音。")
-            }
-        } else if (result.resultCode == Activity.RESULT_OK) {
-            val transcript = result.data
-                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-                ?.firstOrNull()
-                ?.trim()
-                .orEmpty()
-            if (transcript.isNotEmpty()) prompt = transcript
-            else scope.launch { snackbarHost.showSnackbar("没有听清，请再说一次。") }
-        }
-    }
-    val launchSystemSpeechActivity: (CaesarSpeechFallbackRoute) -> Unit = { route ->
-        if (!systemSpeechActivityInFlight) {
-            systemSpeechActivityInFlight = true
-            systemSpeechActivityRoute = route
-            listening = true
-            voiceMessage = null
-            playbackMessage = null
+    val speech = rememberAiSpeechInput(
+        ownerId = snapshot.userId,
+        blocked = state.streaming || showHistory,
+        orbSignal = orbSignal,
+        onTranscript = { prompt = it },
+        onBeforeStart = { playback.message = null; stopPlayback() },
+        onPaused = {
+            if (playback.activeUtterance != null) playback.message = "朗读已停止"
             stopPlayback()
-            orbSignal.reset()
-            runCatching {
-                val intent = caesarSpeechRecognitionIntent(preferOffline = false).apply {
-                    if (route == CaesarSpeechFallbackRoute.XIAOMI_ENGINE_PERMISSION_RECOVERY) {
-                        action = XIAOMI_PUBLIC_SPEECH_ACTION
-                    }
-                }
-                systemSpeechActivityLauncher.launch(intent)
-            }.onFailure { error ->
-                systemSpeechActivityInFlight = false
-                systemSpeechActivityRoute = CaesarSpeechFallbackRoute.STANDARD_RECOGNITION_ACTIVITY
-                listening = false
-                Log.w(SPEECH_LOG_TAG, "System recognition activity failed to start", error)
-                scope.launch { snackbarHost.showSnackbar("系统语音输入无法启动，请检查默认语音识别服务。") }
-            }
-        }
-    }
-    val audioPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) {
-            voiceStartRequest += 1
-        } else {
-            val canAskAgain = context.findActivity()?.let {
-                ActivityCompat.shouldShowRequestPermissionRationale(it, Manifest.permission.RECORD_AUDIO)
-            } == true
-            if (canAskAgain) scope.launch {
-                snackbarHost.showSnackbar("需要麦克风权限才能进行语音转写。")
-            } else {
-                showMicrophoneSettingsRecovery = true
-            }
-        }
-    }
-    val speechAvailability = remember(context) {
-        (Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) to
-            SpeechRecognizer.isRecognitionAvailable(context)
-    }
-    var onDeviceRecognizerFailed by remember { mutableStateOf(false) }
-    val speechPolicy = caesarSpeechRecognitionPolicy(
-        onDeviceAvailable = speechAvailability.first,
-        onDeviceRuntimeFailed = onDeviceRecognizerFailed,
-        systemAvailable = speechAvailability.second,
-        systemConsentGranted = systemSpeechConsentGranted,
+        },
+        onNotice = { message -> scope.launch { snackbarHost.showSnackbar(message) } },
     )
-    val speechRecognizer = remember(
-        context,
-        speechPolicy.recognizerKind,
-        speechPolicy.requiresSystemConsent,
-        preferSystemSpeechActivity,
-    ) {
-        runCatching {
-            when (speechPolicy.recognizerKind) {
-                CaesarSpeechRecognizerKind.ON_DEVICE -> if (Build.VERSION.SDK_INT >= 31) {
-                    SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
-                } else null
-                CaesarSpeechRecognizerKind.SYSTEM -> if (speechPolicy.requiresSystemConsent || preferSystemSpeechActivity) {
-                    null
-                } else {
-                    SpeechRecognizer.createSpeechRecognizer(context)
-                }
-                CaesarSpeechRecognizerKind.UNAVAILABLE -> null
-            }
-        }.onFailure { error ->
-            Log.w(SPEECH_LOG_TAG, "Failed to create ${speechPolicy.recognizerKind} recognizer", error)
-        }.getOrNull()
-    }
-    LaunchedEffect(speechPolicy.recognizerKind, speechRecognizer) {
-        if (speechPolicy.recognizerKind == CaesarSpeechRecognizerKind.ON_DEVICE && speechRecognizer == null) {
-            onDeviceRecognizerFailed = true
-        }
-    }
-    DisposableEffect(speechRecognizer) {
-        speechRecognizer?.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) { if (voiceSessionActive && !transcribing) listening = true }
-            override fun onBeginningOfSpeech() = Unit
-            override fun onRmsChanged(rmsdB: Float) { if (voiceSessionActive && listening) orbSignal.onRms(rmsdB) }
-            override fun onBufferReceived(buffer: ByteArray?) = Unit
-            override fun onEndOfSpeech() { if (voiceSessionActive) { listening = false; transcribing = true; orbSignal.reset() } }
-            override fun onError(error: Int) {
-                if (!voiceSessionActive) return
-                voiceSessionActive = false
-                listening = false
-                transcribing = false
-                orbSignal.reset()
-                voiceMessage = "语音输入未完成 · 请重试"
-                val audioPermissionGranted = ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.RECORD_AUDIO,
-                ) == PackageManager.PERMISSION_GRANTED
-                Log.w(
-                    SPEECH_LOG_TAG,
-                    "Recognizer error=$error kind=${speechPolicy.recognizerKind} appPermission=$audioPermissionGranted",
-                )
-                val shouldFallbackFromOnDevice = speechPolicy.recognizerKind == CaesarSpeechRecognizerKind.ON_DEVICE &&
-                    speechAvailability.second &&
-                    audioPermissionGranted &&
-                    error in setOf(
-                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS,
-                        SpeechRecognizer.ERROR_CLIENT,
-                        SpeechRecognizer.ERROR_SERVER,
-                    )
-                val fallbackRoute = caesarSpeechFallbackRoute(
-                    recognizerKind = speechPolicy.recognizerKind,
-                    errorCode = error,
-                    appMicrophonePermissionGranted = audioPermissionGranted,
-                    xiaomiEnginePermissionRecoveryAvailable = xiaomiEnginePermissionRecoveryAvailable,
-                )
-                val shouldFallbackToSystemActivity =
-                    fallbackRoute != CaesarSpeechFallbackRoute.NONE && !systemSpeechActivityInFlight
-                if (shouldFallbackFromOnDevice) {
-                    onDeviceRecognizerFailed = true
-                    if (systemSpeechConsentGranted) voiceStartRequest += 1
-                    else showSystemSpeechConsent = true
-                }
-                if (shouldFallbackToSystemActivity) {
-                    preferSystemSpeechActivity = true
-                    launchSystemSpeechActivity(fallbackRoute)
-                }
-                if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS && !audioPermissionGranted) {
-                    showMicrophoneSettingsRecovery = true
-                }
-                val message = when {
-                    shouldFallbackFromOnDevice -> "端侧语音服务未能启动，已为你切换到系统语音识别。"
-                    shouldFallbackToSystemActivity &&
-                        fallbackRoute != CaesarSpeechFallbackRoute.XIAOMI_ENGINE_PERMISSION_RECOVERY ->
-                        "系统语音服务不接受直接麦克风访问，已切换到系统语音输入。"
-                    shouldFallbackToSystemActivity -> null
-                    error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS && !audioPermissionGranted -> "麦克风权限已关闭，可前往系统设置恢复。"
-                    error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "系统语音服务未能打开麦克风，请重试或检查系统语音识别服务。"
-                    error == SpeechRecognizer.ERROR_NETWORK || error == SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "系统语音服务网络不可用。"
-                    error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "语音识别器正忙，请稍后重试。"
-                    error == SpeechRecognizer.ERROR_SERVER -> "系统语音服务暂时不可用。"
-                    error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "没有听清，请再说一次。"
-                    else -> null
-                }
-                message?.let { scope.launch { snackbarHost.showSnackbar(it) } }
-            }
-            override fun onResults(results: Bundle?) {
-                if (!voiceSessionActive) return
-                voiceSessionActive = false
-                listening = false
-                transcribing = false
-                orbSignal.reset()
-                results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.let { prompt = it }
-            }
-            override fun onPartialResults(partialResults: Bundle?) {
-                if (!voiceSessionActive) return
-                partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.let { prompt = it }
-            }
-            override fun onEvent(eventType: Int, params: Bundle?) = Unit
-        })
-        onDispose { speechRecognizer?.cancel(); speechRecognizer?.destroy() }
-    }
-    val lifecycleOwner = LocalLifecycleOwner.current
-    LaunchedEffect(speechRecognizer) {
+    val listening = speech.listening
+    val transcribing = speech.transcribing
+    val voiceMessage = speech.message
+    val currentSpeech by rememberUpdatedState(speech)
+    LaunchedEffect(playback) {
         AiIslandNotifications.stopRequests.collect { mode ->
-            if (mode == CaesarOrbMode.SPEAKING && activeUtterance != null) {
+            if (mode == CaesarOrbMode.SPEAKING && playback.activeUtterance != null) {
                 stopPlayback()
-                playbackMessage = "朗读已停止"
-            } else if (mode in setOf(CaesarOrbMode.LISTENING, CaesarOrbMode.TRANSCRIBING) && voiceSessionActive) {
-                voiceSessionActive = false
-                speechRecognizer?.cancel()
-                listening = false; transcribing = false; orbSignal.reset()
-                voiceMessage = "语音已结束"
+                playback.message = "朗读已停止"
+            } else if (mode in setOf(CaesarOrbMode.LISTENING, CaesarOrbMode.TRANSCRIBING) &&
+                (currentSpeech.listening || currentSpeech.transcribing)) {
+                currentSpeech.cancel("语音已结束")
             }
         }
     }
-    DisposableEffect(lifecycleOwner, speechRecognizer) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
-                voiceSessionActive = false
-                speechRecognizer?.cancel()
-                listening = false
-                transcribing = false
-                orbSignal.reset()
-                if (activeUtterance != null) playbackMessage = "朗读已停止"
-                stopPlayback()
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-    LaunchedEffect(voiceStartRequest, speechRecognizer) {
-        if (voiceStartRequest == 0 || consumedVoiceStartRequest == voiceStartRequest) return@LaunchedEffect
-        val recognizer = speechRecognizer ?: return@LaunchedEffect
-        consumedVoiceStartRequest = voiceStartRequest
-        voiceSessionActive = true
-        listening = true
-        transcribing = false
-        voiceMessage = null
-        playbackMessage = null
-        stopPlayback()
-        orbSignal.reset()
-        runCatching {
-            recognizer.startListening(caesarSpeechRecognitionIntent(speechPolicy.preferOffline))
-        }.onFailure { error ->
-            voiceSessionActive = false
-            listening = false
-            transcribing = false
-            voiceMessage = "语音输入无法启动 · 请重试"
-            Log.w(SPEECH_LOG_TAG, "Recognizer start failed for ${speechPolicy.recognizerKind}", error)
-            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                showMicrophoneSettingsRecovery = true
-            } else {
-                snackbarHost.showSnackbar("语音识别启动失败，请稍后重试。")
-            }
-        }
-    }
-    DisposableEffect(context) {
-        var alive = true
-        val engine = TextToSpeech(context) { status ->
-            mainHandler.post {
-                if (alive) {
-                    ttsReady = status == TextToSpeech.SUCCESS
-                    if (ttsReady) {
-                        val language = tts?.setLanguage(Locale.SIMPLIFIED_CHINESE)
-                        ttsReady = language != TextToSpeech.LANG_MISSING_DATA && language != TextToSpeech.LANG_NOT_SUPPORTED
-                    }
-                }
-            }
-        }
-        engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(id: String?) { mainHandler.post { if (alive && id == activeUtterance) speaking = true } }
-            private fun finish(id: String?, message: String) { mainHandler.post {
-                if (alive && id == activeUtterance) { activeUtterance = null; speaking = false; playbackMessage = message }
-            } }
-            override fun onDone(id: String?) = finish(id, "朗读结束")
-            @Deprecated("Legacy engine callback")
-            override fun onError(id: String?) = finish(id, "朗读失败 · 请重试")
-            override fun onError(id: String?, errorCode: Int) = finish(id, "朗读失败 · 请重试")
-            override fun onStop(id: String?, interrupted: Boolean) = finish(id, "已停止朗读")
-        })
-        tts = engine
-        onDispose { alive = false; activeUtterance = null; speaking = false; engine.stop(); engine.shutdown(); tts = null }
-    }
-    // A service which never returns a final result must not leave the composer stuck forever.
-    LaunchedEffect(transcribing) {
-        if (transcribing) {
-            kotlinx.coroutines.delay(12_000)
-            if (transcribing) {
-                voiceSessionActive = false
-                speechRecognizer?.cancel()
-                transcribing = false
-                voiceMessage = "转写超时 · 请重试"
-            }
-        }
-    }
-    LaunchedEffect(state.streaming, showHistory) {
-        if (state.streaming || showHistory) {
-            voiceSessionActive = false
-            speechRecognizer?.cancel()
-            listening = false; transcribing = false; orbSignal.reset()
-            stopPlayback()
-            playbackMessage = null
-            voiceMessage = null
-        }
-    }
-    val orbPresentation = aiOrbPresentation(state, listening, transcribing, speaking, voiceMessage, playbackMessage)
+    val orbPresentation = aiOrbPresentation(state, listening, transcribing, playback.speaking, voiceMessage, playback.message)
     val interactionMode = orbPresentation.mode.takeIf {
-        listening || transcribing || activeUtterance != null || playbackMessage != null || voiceMessage != null
+        listening || transcribing || playback.activeUtterance != null || playback.message != null || voiceMessage != null
     }
     LaunchedEffect(interactionMode) { onOrbInteractionChanged(interactionMode) }
     DisposableEffect(Unit) { onDispose { onOrbInteractionChanged(null) } }
     val voiceOrb = listening || transcribing
     val emptyConversation = state.messages.none { it.content.isNotBlank() || it.attachmentPaths.isNotEmpty() } && state.error == null && !state.streaming
-    val heroOrb = emptyConversation && !voiceOrb && !speaking && voiceMessage == null && playbackMessage == null
+    val heroOrb = emptyConversation && !voiceOrb && !playback.speaking && voiceMessage == null && playback.message == null
     val captureOrbAnchor: (androidx.compose.ui.layout.LayoutCoordinates) -> Unit = { orbAnchor = it.boundsInWindow() }
 
-    LaunchedEffect(showContext, showRuntime) {
-        if (showContext || showRuntime) viewModel.refreshHealthStatus()
-    }
+    RefreshHealthStatusWhenVisible(showContext || showRuntime, viewModel::refreshHealthStatus)
 
     BackHandler {
         if (showHistory) showHistory = false else onBack()
@@ -617,8 +287,8 @@ fun AiScreen(
                     onTasks = { showTasks = true },
                     onHistory = { showHistory = !showHistory },
                     onNewConversation = {
-                        voiceSessionActive = false; speechRecognizer?.cancel(); listening = false; transcribing = false
-                        stopPlayback(); orbSignal.reset(); voiceMessage = null; playbackMessage = null
+                        speech.cancel(null)
+                        stopPlayback(); playback.message = null
                         viewModel.newConversation()
                     },
                 )
@@ -631,8 +301,8 @@ fun AiScreen(
                     onRuntime = { showRuntime = true },
                     onHistory = { showHistory = !showHistory },
                     onNewConversation = {
-                        voiceSessionActive = false; speechRecognizer?.cancel(); listening = false; transcribing = false
-                        stopPlayback(); orbSignal.reset(); voiceMessage = null; playbackMessage = null
+                        speech.cancel(null)
+                        stopPlayback(); playback.message = null
                         viewModel.newConversation()
                     },
                 )
@@ -644,13 +314,17 @@ fun AiScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Spacer(Modifier.size(44.dp).onGloballyPositioned(captureOrbAnchor))
-                    Text(orbPresentation.label, Modifier.weight(1f).padding(start = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                    Text(orbPresentation.label.takeUnless { orbPresentation.mode == CaesarOrbMode.COMPLETE }.orEmpty(), Modifier.weight(1f).padding(start = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
                         style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    if (speaking) TextButton(onClick = { stopPlayback(); playbackMessage = "已停止朗读" }) { Text("停止朗读") }
+                    if (playback.speaking) TextButton(onClick = { stopPlayback(); playback.message = "已停止朗读" }) { Text("停止朗读") }
                 }
             }
             if (showHistory) {
+                if (snapshot.userId.isNotBlank()) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                    TextButton(onClick = { viewModel.showLocalHistory(false) }, enabled = viewingLocalHistory) { Text("此账号") }
+                    TextButton(onClick = { viewModel.showLocalHistory(true) }, enabled = !viewingLocalHistory) { Text("本机旧记录") }
+                }
                 LazyColumn(
                     Modifier.weight(1f).padding(horizontal = SpectraTheme.layout.pageHorizontalPadding),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 8.dp, bottom = 20.dp),
@@ -663,7 +337,7 @@ fun AiScreen(
                             preset = visualPreset,
                         )
                     }
-                    items(history, key = { it.id }) { report ->
+                    items(history.take(historyLimit), key = { it.id }) { report ->
                         GlassPanel(
                             Modifier.fillMaxWidth(),
                             radius = 16,
@@ -686,15 +360,23 @@ fun AiScreen(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                                 IconButton(onClick = {
-                                    viewModel.deleteConversation(report)
                                     scope.launch {
-                                        if (snackbarHost.showSnackbar("已删除对话", "撤销") == SnackbarResult.ActionPerformed) {
-                                            viewModel.undoDeleteConversation()
+                                        if (viewModel.deleteConversation(report)) {
+                                            if (snackbarHost.showSnackbar("已删除对话", "撤销") == SnackbarResult.ActionPerformed) {
+                                                if (!viewModel.undoDeleteConversation(report.id)) {
+                                                    snackbarHost.showSnackbar("未能恢复对话，请查看错误提示。")
+                                                }
+                                            }
+                                        } else if (viewModel.state.value.errorCode == "history_delete_failed") {
+                                            snackbarHost.showSnackbar("删除失败，请重试。")
                                         }
                                     }
                                 }) { Icon(Icons.Rounded.DeleteOutline, "删除对话", tint = MaterialTheme.colorScheme.onSurface.copy(.56f)) }
                             }
                         }
+                    }
+                    if (history.size > historyLimit) item {
+                        TextButton(onClick = viewModel::loadMoreHistory, modifier = Modifier.fillMaxWidth()) { Text("加载更多") }
                     }
                 }
                 SnackbarHost(
@@ -755,21 +437,14 @@ fun AiScreen(
                                             if (message.role == "assistant" && message.content.isNotBlank()) {
                                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                                     IconButton(onClick = {
-                                                        val engine = tts ?: return@IconButton
-                                                        if (activeUtterance != null) {
-                                                            stopPlayback(); playbackMessage = "已停止朗读"
-                                                        } else if (!ttsReady) {
+                                                        if (playback.activeUtterance != null) {
+                                                            stopPlayback(); playback.message = "已停止朗读"
+                                                        } else if (!playback.ready) {
                                                             scope.launch { snackbarHost.showSnackbar("朗读引擎尚未就绪或缺少中文语音，请稍后重试。") }
                                                         } else {
-                                                            voiceSessionActive = false
-                                                            speechRecognizer?.cancel()
-                                                            listening = false; transcribing = false; orbSignal.reset()
-                                                            voiceMessage = null; playbackMessage = "正在准备朗读"
-                                                            val utterance = UUID.randomUUID().toString()
-                                                            activeUtterance = utterance
-                                                            if (engine.speak(plainAiText(message.content), TextToSpeech.QUEUE_FLUSH, null, utterance) == TextToSpeech.ERROR) {
-                                                                activeUtterance = null; playbackMessage = "朗读失败 · 请重试"
-                                                            }
+                                                            speech.cancel(null)
+                                                            playback.message = "正在准备朗读"
+                                                            playback.speak(plainAiText(message.content))
                                                         }
                                                     }, modifier = Modifier.size(48.dp)) { Icon(Icons.Rounded.VolumeUp, "朗读或停止", modifier = Modifier.size(18.dp)) }
                                                     if (messageIndex == regeneratableAssistantIndex) {
@@ -803,7 +478,7 @@ fun AiScreen(
                         Text(orbPresentation.label, Modifier.weight(1f).padding(start = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
                             style = MaterialTheme.typography.bodyMedium, maxLines = 2)
                         if (transcribing) TextButton(onClick = {
-                            voiceSessionActive = false; speechRecognizer?.cancel(); transcribing = false; orbSignal.reset()
+                            speech.cancel(null)
                         }) { Text("取消") }
                     }
                 }
@@ -830,32 +505,17 @@ fun AiScreen(
                     },
                     onRemoveImage = viewModel::removeImage,
                     listening = listening,
-                    onVoice = {
-                        if (listening) { speechRecognizer?.stopListening(); listening = false; transcribing = true; orbSignal.reset() }
-                        else if (transcribing) { voiceSessionActive = false; speechRecognizer?.cancel(); transcribing = false; orbSignal.reset() }
-                        else if (speechPolicy.recognizerKind == CaesarSpeechRecognizerKind.UNAVAILABLE) scope.launch {
-                            snackbarHost.showSnackbar("当前设备没有可用的语音识别服务。")
-                        }
-                        else if (speechPolicy.requiresSystemConsent) showSystemSpeechConsent = true
-                        else if (speechPolicy.recognizerKind == CaesarSpeechRecognizerKind.SYSTEM && preferSystemSpeechActivity) {
-                            launchSystemSpeechActivity(CaesarSpeechFallbackRoute.STANDARD_RECOGNITION_ACTIVITY)
-                        }
-                        else if (speechRecognizer == null) scope.launch {
-                            snackbarHost.showSnackbar("系统语音识别器初始化失败，请稍后重试。")
-                        }
-                        else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) voiceStartRequest += 1
-                        else audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                    },
+                    onVoice = speech.toggle,
                     onAction = {
                         if (state.streaming) viewModel.cancel()
                         else if (prompt.isNotBlank() || state.pendingImages.isNotEmpty()) {
-                            voiceSessionActive = false
-                            speechRecognizer?.cancel()
-                            listening = false; transcribing = false; orbSignal.reset()
-                            stopPlayback(); playbackMessage = null; voiceMessage = null
+                            speech.cancel(null)
+                            stopPlayback(); playback.message = null
+                            val submittedDraft = prompt
                             val value = prompt.ifBlank { "请分析这些图片。" }
-                            prompt = ""
-                            viewModel.send(value, snapshot)
+                            viewModel.send(value, snapshot) {
+                                if (prompt == submittedDraft) prompt = ""
+                            }
                         }
                     },
                 )
@@ -870,35 +530,27 @@ fun AiScreen(
         }
     }
 
-    if (showSystemSpeechConsent) {
+    if (speech.showSystemConsent) {
         SpectraAlertDialog(
-            onDismissRequest = { showSystemSpeechConsent = false },
+            onDismissRequest = speech.dismissSystemConsent,
             title = "使用系统语音识别？",
             message = "这台设备没有可用的端侧识别器。继续后，录音可能由系统语音服务联网处理。" +
                 "Caesar∞ 不会将录音写入记忆或 Trace；本次进入 AI 页期间只询问一次。",
             confirmLabel = "同意并继续",
             dismissLabel = "取消",
-            onConfirm = {
-                showSystemSpeechConsent = false
-                systemSpeechConsentGranted = true
-                if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                    voiceStartRequest += 1
-                } else {
-                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                }
-            },
+            onConfirm = speech.confirmSystemConsent,
         )
     }
 
-    if (showMicrophoneSettingsRecovery) {
+    if (speech.showPermissionRecovery) {
         SpectraAlertDialog(
-            onDismissRequest = { showMicrophoneSettingsRecovery = false },
+            onDismissRequest = speech.dismissPermissionRecovery,
             title = "恢复麦克风权限",
             message = "麦克风权限已被关闭且系统不再显示授权弹窗。请在应用设置中将“麦克风”改为允许，返回后再点击语音。",
             confirmLabel = "打开设置",
             dismissLabel = "取消",
             onConfirm = {
-                showMicrophoneSettingsRecovery = false
+                speech.dismissPermissionRecovery()
                 context.startActivity(
                     Intent(
                         Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
@@ -958,8 +610,9 @@ fun AiScreen(
                 showTasks = false
                 if (task == CampusAiTask.TIME_PARSE) {
                     val value = prompt
-                    prompt = ""
-                    viewModel.sendTask(task, snapshot, value)
+                    viewModel.sendTask(task, snapshot, value) {
+                        if (prompt == value) prompt = ""
+                    }
                 } else viewModel.sendTask(task, snapshot)
             },
         )
@@ -970,6 +623,9 @@ fun AiScreen(
             provider = state.provider,
             healthState = healthState,
             memories = memories,
+            memoryScopeKey = "${memoryScope.first}:${memoryScope.second}",
+            viewingLocalMemories = viewingLocalMemories,
+            onShowLocalMemories = viewModel::showLocalMemories,
             onChange = viewModel::setContextSelection,
             onConfirmMemory = viewModel::confirmMemory,
             onUpdateMemory = viewModel::updateMemory,
@@ -1001,10 +657,9 @@ private fun runtimeSummary(
     resolvedModel: String,
     localModel: LocalModelSelection,
 ): String = if (provider == AiProvider.CAESAR_CLOUD_FREE) when (resolvedModel) {
-    "glm-4-flash-250414" -> "GLM-4-Flash · 免费兜底"
-    "glm-4.7-flash" -> "GLM-4.7-Flash · 免费"
-    "glm-4v-flash" -> "GLM-4V-Flash · 免费"
-    else -> "Caesar cloud free"
+    "glm-4-flash-250414" -> "GLM-4-Flash-250414"
+    "glm-4v-flash" -> "GLM-4V-Flash"
+    else -> resolvedModel.takeIf(String::isNotBlank) ?: "Caesar cloud free"
 } else resolvedModel.takeIf(String::isNotBlank) ?: when (provider) {
     AiProvider.CAESAR_CLOUD_FREE -> "Caesar cloud free"
     AiProvider.AUTO -> "自动 · ${localModel.mode.displayLabel()}优先"
@@ -1217,19 +872,7 @@ private fun AiRuntimeSheet(
             Text("选择 AI", style = MaterialTheme.typography.labelLarge)
             AiProviderChoices(provider, !streaming) { onProviderSelected(providerIndex(it)) }
             if (provider == AiProvider.CAESAR_CLOUD_FREE || provider == AiProvider.DEEPSEEK || provider == AiProvider.GOOGLE_GEMINI || provider == AiProvider.CODEX) {
-                Text("回答方式", style = MaterialTheme.typography.labelLarge)
-                CaesarSlidingSelector(
-                    options = listOf("快速", "深度"),
-                    selectedIndex = if (mode == AiMode.FAST) 0 else 1,
-                    enabled = !streaming,
-                    motionEnabled = motionEnabled,
-                    onSelected = { onModeSelected(if (it == 0) AiMode.FAST else AiMode.DEEP) },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                if (provider == AiProvider.CAESAR_CLOUD_FREE) Text(
-                    if (mode == AiMode.FAST) "快速 · 优先响应速度；拥堵时使用免费备用模型。" else "深度 · 使用 GLM-4.7-Flash，等待时间更长。",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                AiCloudAnswerMode(provider, mode, !streaming, motionEnabled, onModeSelected)
             } else {
                 Text("新会话默认", style = MaterialTheme.typography.labelLarge)
                 CaesarSlidingSelector(
@@ -1293,11 +936,11 @@ private fun providerLabel(provider: AiProvider) = when (provider) {
 }
 
 internal fun selectedCloudProviderStatus(provider: AiProvider): String = when (provider) {
-    AiProvider.CAESAR_CLOUD_FREE -> "Caesar cloud free · 已选择"
-    AiProvider.DEEPSEEK -> "DEEPSEEK · 已选择"
-    AiProvider.GOOGLE_GEMINI -> "GEMINI · 已选择"
-    AiProvider.CODEX -> "CODEX · 已选择"
-    AiProvider.LOCAL, AiProvider.AUTO -> "本机 · 已选择"
+    AiProvider.CAESAR_CLOUD_FREE -> "Caesar cloud free"
+    AiProvider.DEEPSEEK -> "DeepSeek"
+    AiProvider.GOOGLE_GEMINI -> "Gemini"
+    AiProvider.CODEX -> "Codex"
+    AiProvider.LOCAL, AiProvider.AUTO -> "本机"
 }
 
 private fun localModelStatus(selection: LocalModelSelection): String = when (val state = selection.state) {
@@ -1313,7 +956,7 @@ private fun localModelStatus(selection: LocalModelSelection): String = when (val
 }
 
 private fun historyTime(value: Long): String = runCatching {
-    DateTimeFormatter.ofPattern("MM-dd HH:mm").format(Instant.ofEpochMilli(value).atZone(ZoneId.systemDefault()))
+    DateTimeFormatter.ofPattern("MM-dd HH:mm").format(Instant.ofEpochMilli(value).atZone(com.campusai.core.time.CaesarTime.zone))
 }.getOrDefault("")
 
 @Composable
@@ -1393,406 +1036,6 @@ private fun CaesarSurfaceCard(surface: CaesarSurface, answer: String, onAction: 
                 }
             }
         }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun AiContextSheet(
-    selection: AiContextSelection,
-    provider: AiProvider,
-    healthState: CaesarHealthUiState,
-    memories: List<CaesarMemoryUiItem>,
-    onChange: (AiContextSelection) -> Unit,
-    onConfirmMemory: (String) -> Unit,
-    onUpdateMemory: (String, String) -> Unit,
-    onForgetMemory: (String) -> Unit,
-    onForgetAllMemories: () -> Unit,
-    onRefreshHealth: () -> Unit,
-    onSyncMiFitnessSteps: () -> Unit,
-    onHealthPermissions: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var editingMemory by remember { mutableStateOf<CaesarMemoryUiItem?>(null) }
-    var editedContent by remember { mutableStateOf("") }
-    var deletingMemory by remember { mutableStateOf<CaesarMemoryUiItem?>(null) }
-    var confirmForgetAll by remember { mutableStateOf(false) }
-    SpectraModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
-        ) {
-            Text("本次对话依据", style = MaterialTheme.typography.headlineMedium)
-            Text(
-                if (provider == AiProvider.LOCAL) "所选内容仅在本机处理，不会离开设备。"
-                else "所选的学习上下文可能发送给当前云端 Provider；健康摘要只有在本次请求明确勾选后才会附带。",
-                Modifier.padding(top = 5.dp, bottom = 12.dp),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface.copy(.62f),
-            )
-            HealthStatus(
-                state = healthState,
-                onRefresh = onRefreshHealth,
-                onCloudRefresh = onSyncMiFitnessSteps,
-                onPermissions = onHealthPermissions,
-            )
-            Spacer(Modifier.height(14.dp))
-            GlassPanel(Modifier.fillMaxWidth(), radius = 16, shadowed = false) {
-                Column {
-                    ContextToggle("时间记录与精确统计", selection.timeRecords) { onChange(selection.copy(timeRecords = it)) }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(.08f))
-                    ContextToggle("课程与已计算冲突", selection.courses) { onChange(selection.copy(courses = it)) }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(.08f))
-                    ContextToggle("我自己的相关动态", selection.ownPosts) { onChange(selection.copy(ownPosts = it)) }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(.08f))
-                    ContextToggle("明确加入公共树洞动态", selection.publicPosts) { onChange(selection.copy(publicPosts = it)) }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(.08f))
-                    ContextToggle("本次附带今日健康摘要（发送后自动关闭）", selection.healthSummary) {
-                        onChange(selection.copy(healthSummary = it))
-                    }
-                }
-            }
-            Spacer(Modifier.height(14.dp))
-            MemoryManagerSection(
-                memories = memories,
-                onConfirm = onConfirmMemory,
-                onEdit = { memory -> editingMemory = memory; editedContent = memory.content },
-                onDelete = { deletingMemory = it },
-                onDeleteAll = { confirmForgetAll = true },
-            )
-            Text(
-                "私聊、账号安全信息、原始健康序列与他人私有数据永不加入。",
-                Modifier.padding(top = 12.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(.52f),
-            )
-        }
-    }
-
-    editingMemory?.let { memory ->
-        SpectraDialog(onDismissRequest = { editingMemory = null }) {
-            Column(
-                Modifier.fillMaxWidth().padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text("编辑记忆", style = MaterialTheme.typography.titleLarge)
-                    Text(memoryTypeLabel(memory.type), style = MaterialTheme.typography.labelLarge, color = SpectraColors.Focus)
-                    GlassPanel(Modifier.fillMaxWidth(), radius = 16, shadowed = false) {
-                        BasicTextField(
-                            value = editedContent,
-                            onValueChange = { editedContent = it.take(1_000) },
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 96.dp).padding(14.dp),
-                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                            cursorBrush = SolidColor(SpectraColors.Focus),
-                        )
-                    }
-                    Text("${editedContent.length}/1000", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(.5f))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = { editingMemory = null }) { Text("取消") }
-                    TextButton(
-                        enabled = editedContent.isNotBlank(),
-                        onClick = {
-                            onUpdateMemory(memory.id, editedContent)
-                            editingMemory = null
-                        },
-                    ) { Text("保存") }
-                }
-            }
-        }
-    }
-    deletingMemory?.let { memory ->
-        SpectraAlertDialog(
-            onDismissRequest = { deletingMemory = null },
-            title = "删除这条记忆？",
-            message = memory.content,
-            confirmLabel = "删除",
-            dismissLabel = "取消",
-            destructive = true,
-            onConfirm = { onForgetMemory(memory.id); deletingMemory = null },
-        )
-    }
-    if (confirmForgetAll) {
-        SpectraAlertDialog(
-            onDismissRequest = { confirmForgetAll = false },
-            title = "清空全部长期记忆？",
-            message = "清空后 Caesar∞ 将不再使用这些已确认的偏好、事实、目标与习惯。",
-            confirmLabel = "全部删除",
-            dismissLabel = "取消",
-            destructive = true,
-            onConfirm = { onForgetAllMemories(); confirmForgetAll = false },
-        )
-    }
-}
-
-@Composable
-private fun MemoryManagerSection(
-    memories: List<CaesarMemoryUiItem>,
-    onConfirm: (String) -> Unit,
-    onEdit: (CaesarMemoryUiItem) -> Unit,
-    onDelete: (CaesarMemoryUiItem) -> Unit,
-    onDeleteAll: () -> Unit,
-) {
-    val now = System.currentTimeMillis()
-    SpectraSurface(Modifier.fillMaxWidth(), mood = PageMood.PERSONAL) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("长期记忆", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "只有已确认内容会进入后续对话",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(.56f),
-                )
-            }
-            if (memories.isNotEmpty()) TextButton(onClick = onDeleteAll) { Text("清空") }
-        }
-        if (memories.isEmpty()) {
-            Text("暂无记忆。你可以对 Caesar∞ 说“记住我喜欢……”，确认后才会保存。", style = MaterialTheme.typography.bodyMedium)
-        } else {
-            memories.forEachIndexed { index, memory ->
-                if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(.08f))
-                val expired = memory.expiresAt?.let { it <= now } == true
-                Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(memoryTypeLabel(memory.type), style = MaterialTheme.typography.labelLarge, color = SpectraColors.Focus, modifier = Modifier.weight(1f))
-                        SpectraStatus(
-                            when {
-                                expired -> "已过期"
-                                memory.confirmed -> "已确认"
-                                else -> "待确认"
-                            },
-                            tone = if (memory.confirmed && !expired) SpectraStatusTone.SUCCESS else SpectraStatusTone.NEUTRAL,
-                        )
-                    }
-                    Text(memory.content, style = MaterialTheme.typography.bodyMedium)
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        if (!memory.confirmed && !expired) TextButton(onClick = { onConfirm(memory.id) }) { Text("确认") }
-                        TextButton(onClick = { onEdit(memory) }) { Text("编辑") }
-                        TextButton(onClick = { onDelete(memory) }) { Text("删除", color = MaterialTheme.colorScheme.error) }
-                    }
-                }
-            }
-        }
-    }
-}
-
-private fun memoryTypeLabel(type: String): String = when (type) {
-    "preference" -> "偏好"
-    "fact" -> "事实"
-    "goal" -> "目标"
-    "routine" -> "习惯"
-    else -> "记忆"
-}
-
-@Composable
-private fun HealthStatus(
-    state: CaesarHealthUiState,
-    onRefresh: () -> Unit,
-    onCloudRefresh: () -> Unit,
-    onPermissions: () -> Unit,
-) {
-    if (state.miFitnessConfigured) {
-        MiFitnessCloudStatus(state, onCloudRefresh)
-        return
-    }
-    val hasVerifiedHealthData = state.snapshot?.metrics?.let { metrics ->
-        listOf(
-            metrics.steps,
-            metrics.distanceMeters,
-            metrics.activeCaloriesKcal,
-            metrics.heartRateAverageBpm,
-            metrics.heartRateMaximumBpm,
-            metrics.restingHeartRateBpm,
-            metrics.oxygenSaturationAveragePercent,
-            metrics.sleepMinutes,
-            metrics.sleepStageCount,
-            metrics.workoutCount,
-        ).any { it != null }
-    } == true
-    val healthLabel = when (state.availability) {
-        HealthAvailability.Available -> if (hasVerifiedHealthData) "已授权 · 数据已读取" else "已授权 · 尚无数据"
-        is HealthAvailability.MissingPermissions -> if (hasVerifiedHealthData) "部分授权 · 数据已读取" else "部分授权 · 尚无数据"
-        HealthAvailability.NeedsProvider -> "Health Connect 需更新"
-        HealthAvailability.Unsupported -> "当前系统不支持"
-        null -> if (state.loading) "正在检查 Health Connect" else "Health Connect 未检查"
-    }
-    val healthTone = when (state.availability) {
-        HealthAvailability.Available -> SpectraStatusTone.SUCCESS
-        is HealthAvailability.MissingPermissions -> SpectraStatusTone.WARNING
-        HealthAvailability.NeedsProvider, HealthAvailability.Unsupported -> SpectraStatusTone.ERROR
-        null -> SpectraStatusTone.INFO
-    }
-    SpectraSurface(
-        modifier = Modifier.fillMaxWidth(),
-        mood = PageMood.HEALTH,
-        emphasized = true,
-        shadowed = false,
-        contentPadding = PaddingValues(14.dp),
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Health Connect", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                SpectraStatus(healthLabel, tone = healthTone)
-            }
-            Text(
-                "权限 ${state.grantedPermissionCount}/${state.requiredPermissionCount}" +
-                    (state.snapshot?.lastSyncAt?.let { " · 最后同步 ${healthStatusTime(it)}" } ?: " · 暂无可验证同步时间"),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface.copy(.66f),
-            )
-            state.snapshot?.let { snapshot ->
-                val summary = buildList {
-                    snapshot.metrics.steps?.let { add("今日 $it 步") }
-                    snapshot.metrics.heartRateAverageBpm?.let { add("平均心率 $it bpm") }
-                    snapshot.metrics.sleepMinutes?.let { add("睡眠 $it 分钟") }
-                }
-                if (summary.isNotEmpty()) Text(summary.joinToString(" · "), style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    "来源：${snapshot.originPackages.takeIf { it.isNotEmpty() }?.joinToString() ?: "尚未观测到数据源"} · ${healthFreshnessLabel(snapshot.freshness)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(.56f),
-                )
-            }
-            state.healthError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SpectraAction("刷新", onRefresh, Modifier.weight(1f), enabled = !state.loading, mood = PageMood.HEALTH)
-                SpectraAction("授权", onPermissions, Modifier.weight(1f), mood = PageMood.HEALTH)
-            }
-            Text(
-                "Health Connect 只读取用户已授权的历史健康记录；缺失指标保持为未知，不会回退显示为 0。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(.52f),
-            )
-        }
-    }
-}
-
-@Composable
-private fun MiFitnessCloudStatus(
-    state: CaesarHealthUiState,
-    onRefresh: () -> Unit,
-) {
-    val snapshot = state.snapshot
-    val cloudSnapshot = snapshot?.takeIf {
-        com.campusai.core.health.mifitness.MiFitnessSummaryHealthGateway.SOURCE_ID in it.originPackages
-    }
-    val failed = state.miFitnessStatus in setOf(
-        MiFitnessUiStatus.NO_DATA,
-        MiFitnessUiStatus.AUTH_ERROR,
-        MiFitnessUiStatus.NETWORK_ERROR,
-        MiFitnessUiStatus.STORAGE_ERROR,
-    )
-    val cloudMetricSummary = buildList {
-        cloudSnapshot?.metrics?.steps?.let { add("步数 $it 步") }
-        cloudSnapshot?.metrics?.distanceMeters?.let { add("距离 ${it.roundToInt()} 米") }
-        cloudSnapshot?.metrics?.activeCaloriesKcal?.let { add("消耗 ${it.roundToInt()} 千卡") }
-        cloudSnapshot?.metrics?.activityDurationMinutes?.let { add("活动 $it 分钟") }
-        cloudSnapshot?.metrics?.sleepMinutes?.let { add("睡眠 $it 分钟") }
-        cloudSnapshot?.metrics?.heartRateAverageBpm?.let { add("平均心率 $it bpm") }
-        cloudSnapshot?.metrics?.oxygenSaturationAveragePercent?.let { add("平均血氧 ${it.roundToInt()}%") }
-        cloudSnapshot?.metrics?.stressAverage?.let { add("平均压力 $it") }
-        cloudSnapshot?.metrics?.workoutCount?.let { add("训练 $it 次") }
-    }
-    SpectraSurface(
-        modifier = Modifier.fillMaxWidth(),
-        mood = PageMood.HEALTH,
-        emphasized = true,
-        shadowed = false,
-        contentPadding = PaddingValues(14.dp),
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Mi Fitness", style = MaterialTheme.typography.titleLarge)
-                    Text(
-                        "今日健康",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(.52f),
-                    )
-                }
-                SpectraStatus(
-                    when {
-                        state.miFitnessSyncing -> "正在同步"
-                        state.miFitnessStatus == MiFitnessUiStatus.NO_DATA -> "今天暂无记录"
-                        failed && cloudSnapshot != null -> "缓存可用 · 刷新失败"
-                        failed -> "刷新失败"
-                        cloudSnapshot != null -> "已更新"
-                        else -> "待同步"
-                    },
-                    tone = when {
-                        state.miFitnessStatus == MiFitnessUiStatus.NO_DATA -> SpectraStatusTone.WARNING
-                        failed -> SpectraStatusTone.ERROR
-                        cloudSnapshot != null -> SpectraStatusTone.SUCCESS
-                        else -> SpectraStatusTone.INFO
-                    },
-                )
-            }
-            if (cloudMetricSummary.isNotEmpty()) {
-                Text(cloudMetricSummary.joinToString(" · "), style = MaterialTheme.typography.titleMedium)
-            } else Text(
-                "今天还没有可显示的健康数据。",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface.copy(.66f),
-            )
-            cloudSnapshot?.lastSyncAt?.let {
-                Text(
-                    "更新 ${healthStatusTime(it)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(.56f),
-                )
-            }
-            if (failed) {
-                Text(
-                    when (state.miFitnessStatus) {
-                        MiFitnessUiStatus.NO_DATA -> "今天还没有同步到健康数据。"
-                        MiFitnessUiStatus.AUTH_ERROR -> "身份验证失败，请在个人页更新凭据。"
-                        MiFitnessUiStatus.NETWORK_ERROR -> "网络异常，请稍后重试。"
-                        MiFitnessUiStatus.STORAGE_ERROR -> "系统安全存储暂不可用。"
-                        else -> "本次刷新未完成。"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-            state.actionMessage?.takeUnless { failed }?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = SpectraColors.Success)
-            }
-            SpectraAction(
-                text = if (state.miFitnessSyncing) "正在同步" else "同步今日健康",
-                onClick = onRefresh,
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !state.loading && !state.miFitnessSyncing,
-                mood = PageMood.HEALTH,
-            )
-            Text(
-                "CampusAI 不连接手环，也不需要 Health Connect 权限。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(.52f),
-            )
-        }
-    }
-}
-
-private fun healthFreshnessLabel(value: HealthFreshness): String = when (value) {
-    HealthFreshness.LIVE -> "实时"
-    HealthFreshness.FRESH -> "新鲜"
-    HealthFreshness.STALE -> "已过期"
-    HealthFreshness.UNKNOWN -> "新鲜度未知"
-}
-
-private fun healthStatusTime(value: Long): String = runCatching {
-    DateTimeFormatter.ofPattern("MM-dd HH:mm").format(Instant.ofEpochMilli(value).atZone(ZoneId.systemDefault()))
-}.getOrDefault("未知")
-
-@Composable
-private fun ContextToggle(title: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-        Switch(checked = checked, onCheckedChange = onChange)
     }
 }
 
@@ -2453,20 +1696,3 @@ private fun plainAiText(value: String): String = value
     .replace("__", "")
     .replace(Regex("(?m)^\\s*#{1,6}\\s+"), "")
     .replace(Regex("(?m)^\\s*[-*]\\s+"), "• ")
-
-private tailrec fun Context.findActivity(): Activity? = when (this) {
-    is Activity -> this
-    is ContextWrapper -> baseContext.findActivity()
-    else -> null
-}
-
-private const val SPEECH_LOG_TAG = "CaesarSpeech"
-
-private fun caesarSpeechRecognitionIntent(preferOffline: Boolean): Intent =
-    Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-        putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.SIMPLIFIED_CHINESE.toLanguageTag())
-        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-        putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-        if (preferOffline) putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-    }

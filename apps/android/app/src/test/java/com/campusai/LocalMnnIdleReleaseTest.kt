@@ -3,7 +3,7 @@ package com.campusai
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.Configuration
-import androidx.work.WorkManager
+import androidx.work.impl.WorkManagerImpl
 import com.campusai.core.localai.LocalMnnAiEngine
 import com.campusai.core.localai.LocalModelManager
 import kotlinx.coroutines.test.runTest
@@ -18,7 +18,9 @@ class LocalMnnIdleReleaseTest {
     @Test fun `releasing an unused engine never initializes the native library`() = runTest {
         // This JVM has no MNN JNI. The same idle release is called during memory trim.
         val context = ApplicationProvider.getApplicationContext<Context>()
-        WorkManager.initialize(context, Configuration.Builder().build())
+        if (WorkManagerImpl.getInstance() == null) {
+            WorkManagerImpl.initialize(context, Configuration.Builder().build())
+        }
         val manager = LocalModelManager(context)
         val engine = LocalMnnAiEngine(context, manager)
         try {

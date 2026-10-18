@@ -1,5 +1,7 @@
 package com.campusai.features.schedule
 
+import com.campusai.core.time.CaesarTime
+
 import android.app.Notification
 import android.content.Context
 import android.os.Bundle
@@ -9,7 +11,6 @@ import android.widget.RemoteViews
 import com.campusai.core.designsystem.CaesarOrbArtwork
 import com.campusai.R
 import java.time.Instant
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /** RemoteViews rendered by HyperOS itself, including the expanded native island. */
@@ -45,7 +46,7 @@ internal object CourseIslandExpandedCard {
         val period = if (item.course.periodStart > 0) {
             context.getString(R.string.course_island_period, item.course.periodStart, item.course.periodEnd)
         } else context.getString(R.string.course_island_reminder)
-        val time = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
+        val time = DateTimeFormatter.ofPattern("HH:mm").withZone(CaesarTime.zone)
         val range = "${time.format(Instant.ofEpochMilli(item.start))} — ${time.format(Instant.ofEpochMilli(item.end))}"
         val foreground = if (dark) 0xfff1f3ff.toInt() else 0xff182537.toInt()
         val secondary = if (dark) 0xffaebcd0.toInt() else 0xff506078.toInt()

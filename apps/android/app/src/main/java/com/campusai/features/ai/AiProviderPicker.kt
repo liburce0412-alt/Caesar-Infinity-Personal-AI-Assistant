@@ -31,8 +31,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.campusai.core.designsystem.GlassPanel
+import com.campusai.core.designsystem.CaesarSlidingSelector
 import com.campusai.core.designsystem.SpectraModalBottomSheet
 import com.campusai.core.model.AiProvider
+import com.campusai.core.model.AiMode
 
 fun AiProvider.displayName(): String = when (this) {
     AiProvider.CAESAR_CLOUD_FREE -> "Caesar cloud free"
@@ -41,6 +43,31 @@ fun AiProvider.displayName(): String = when (this) {
     AiProvider.DEEPSEEK -> "DeepSeek"
     AiProvider.GOOGLE_GEMINI -> "Google Gemini"
     AiProvider.CODEX -> "Codex"
+}
+
+@Composable
+internal fun AiCloudAnswerMode(
+    provider: AiProvider,
+    mode: AiMode,
+    enabled: Boolean,
+    motionEnabled: Boolean,
+    onSelect: (AiMode) -> Unit,
+) {
+    Text("回答方式", style = MaterialTheme.typography.labelLarge)
+    if (provider == AiProvider.CAESAR_CLOUD_FREE) {
+        Text("快速回答 · GLM-4-Flash-250414", style = MaterialTheme.typography.bodyMedium)
+        Text("免费文本不提供深度思考模式；图片使用 GLM-4V-Flash。",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    } else {
+        CaesarSlidingSelector(
+            options = listOf("快速", "深度"),
+            selectedIndex = if (mode == AiMode.FAST) 0 else 1,
+            enabled = enabled,
+            motionEnabled = motionEnabled,
+            onSelected = { onSelect(if (it == 0) AiMode.FAST else AiMode.DEEP) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 }
 
 /** A single entry in the page; the complete names live in a scrollable radio list. */

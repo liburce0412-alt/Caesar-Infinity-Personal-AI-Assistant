@@ -1,5 +1,7 @@
 package com.campusai.core.health.mifitness
 
+import com.campusai.core.time.CaesarTime
+
 import android.content.Context
 import com.campusai.core.health.HealthMetricKey
 import com.campusai.core.health.HealthMetricStatus
@@ -168,14 +170,14 @@ class MiFitnessStepsSyncService internal constructor(
         transport: MiFitnessStepsTransport,
         cache: MiFitnessStepsCache,
         clock: Clock,
-    ) : this(credentialStore, transport, cache, clock, ZoneId.systemDefault())
+    ) : this(credentialStore, transport, cache, clock, CaesarTime.zone)
 
     constructor(context: Context) : this(
         credentialStore = MiFitnessCredentialStore(context),
         transport = MiFitnessReadOnlyTransportAdapter(),
         cache = MiFitnessStepsCache(context),
         clock = Clock.systemUTC(),
-        zoneId = ZoneId.systemDefault(),
+        zoneId = CaesarTime.zone,
     )
 
     suspend fun syncToday(): Result<MiFitnessStepsSummary> = serialized {

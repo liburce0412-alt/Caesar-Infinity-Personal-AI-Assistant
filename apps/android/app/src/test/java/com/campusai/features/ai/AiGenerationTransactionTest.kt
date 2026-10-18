@@ -3,10 +3,12 @@ package com.campusai.features.ai
 import com.campusai.core.ai.AiEvent
 import com.campusai.core.ai.AiExecutionEngine
 import com.campusai.core.ai.ResolvedExecution
+import com.campusai.core.ai.aiModeForProvider
 import com.campusai.core.model.AiMode
 import com.campusai.core.model.AiProvider
 import com.campusai.core.model.AiReport
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -71,8 +73,36 @@ class AiGenerationTransactionTest {
         )
 
         assertTrue(opened.provider == AiProvider.DEEPSEEK)
+        assertEquals(AiMode.DEEP, opened.mode)
         assertTrue(opened.resolvedProvider == AiProvider.GOOGLE_GEMINI)
         assertTrue(opened.execution?.provider == AiProvider.GOOGLE_GEMINI)
+    }
+
+    @Test fun `only free cloud normalizes an inherited deep choice`() {
+        for (provider in AiProvider.entries) {
+            for (mode in AiMode.entries) {
+                assertEquals(if (provider == AiProvider.CAESAR_CLOUD_FREE) AiMode.FAST else mode,
+                    aiModeForProvider(provider, mode))
+            }
+        }
+    }
+
+    @Test fun `old deep history continues in free fast mode without rewriting its original execution`() {
+        val history = AiReport(
+            id = "old-free-deep", provider = AiProvider.CAESAR_CLOUD_FREE,
+            mode = AiMode.DEEP, model = "glm-4.7-flash", requestId = "original-request",
+            title = "历史", summary = "原回答", messagesJson = "[]", createdAt = 1L, updatedAt = 2L,
+        )
+        val opened = AiUiState().withOpenedConversation(history, emptyList(), AiProvider.CAESAR_CLOUD_FREE, null)
+        assertEquals(AiMode.FAST, opened.mode)
+        assertEquals(AiMode.DEEP, history.mode)
+        assertEquals(history.model, opened.model)
+        assertEquals(history.model, opened.execution?.model)
+        assertEquals(history.requestId, opened.execution?.requestId)
+        assertEquals(history.provider, opened.resolvedProvider)
+        for (provider in AiProvider.entries.filter { it != AiProvider.CAESAR_CLOUD_FREE }) {
+            assertEquals(AiMode.DEEP, AiUiState().withOpenedConversation(history, emptyList(), provider, null).mode)
+        }
     }
 
     @Test fun `failed turn keeps the execution that actually emitted metadata`() {

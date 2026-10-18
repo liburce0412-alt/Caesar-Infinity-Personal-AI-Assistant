@@ -47,13 +47,13 @@ import java.util.concurrent.atomic.AtomicLong
 
 /** Lives beside the ViewModel host, so a generation remains visible after leaving the AI page. */
 @Composable
-internal fun AiIslandStatusHost(state: AiUiState, interaction: CaesarOrbMode?) {
+internal fun AiIslandStatusHost(state: AiRuntimeState, interaction: CaesarOrbMode?) {
     val context = LocalContext.current.applicationContext
     val auth by remember(context) { AuthRepository.getInstance(context).state }.collectAsState()
     val owner = auth.userId.takeIf { auth.signedIn && it.isNotBlank() } ?: "local_user"
     val store = remember(context) { CourseReminderStore(context) }
     var xiaomiEnabled by remember(owner) { mutableStateOf(store.read(owner).xiaomi) }
-    val mode = interaction ?: aiOrbPresentation(state, false, false, false, null, null).mode
+    val mode = interaction ?: state.orbMode
     // An ongoing interaction belongs to the account which started it, across mode changes.
     val activityOwner = remember(AiIslandNotifications.active(mode)) { owner }
     var wasActive by remember(owner) { mutableStateOf(false) }

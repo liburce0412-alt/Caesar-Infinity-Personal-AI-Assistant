@@ -84,7 +84,7 @@ class CaesarImageProcessor(context: Context) {
         val available = message.attachmentRefs.mapNotNull(::resolve)
         message.copy(
             attachmentPaths = available.map(File::getAbsolutePath),
-            missingAttachmentCount = message.attachmentRefs.size - available.size,
+            missingAttachmentCount = maxOf(message.missingAttachmentCount, message.attachmentRefs.size - available.size),
         )
     }
 
@@ -97,11 +97,14 @@ class CaesarImageProcessor(context: Context) {
                 val available = message.attachmentRefs.mapNotNull(::resolve)
                 return@map message.copy(
                     attachmentPaths = available.map(File::getAbsolutePath),
-                    missingAttachmentCount = message.attachmentRefs.size - available.size,
+                    missingAttachmentCount = maxOf(message.missingAttachmentCount, message.attachmentRefs.size - available.size),
                 )
             }
             val migrated = message.attachmentPaths.take(MAX_IMAGES_PER_MESSAGE).mapNotNull { legacyPath ->
-                File(legacyPath).takeIf(File::isFile)?.let { migrateLegacyJpeg(it, conversationId) }
+                val source = File(legacyPath).takeIf(File::isFile) ?: return@mapNotNull null
+                // An existing source must remain retryable if copying fails. Do not persist
+                // a missing-image marker in place of its only recoverable reference.
+                migrateLegacyJpeg(source, conversationId) ?: error("历史图片迁移失败，请重试；原图片仍保留。")
             }
             message.copy(
                 attachmentPaths = migrated.mapNotNull(::resolve).map(File::getAbsolutePath),
@@ -111,6 +114,37 @@ class CaesarImageProcessor(context: Context) {
                 ).coerceAtMost(MAX_IMAGES_PER_MESSAGE),
             )
         }
+    }
+
+    /** A continued local-history conversation owns its own copies, including unsent images. */
+    suspend fun copyForConversation(
+        conversationId: String,
+        messages: List<AiConversationMessage>,
+        pendingImages: List<CaesarImageAttachment>,
+    ): Pair<List<AiConversationMessage>, List<CaesarImageAttachment>> = withContext(Dispatchers.IO) {
+        fun copy(source: File): LocalImageRef = migrateLegacyJpeg(source, conversationId)
+            ?: error("无法复制历史图片，请重试；原对话仍保留。")
+        val copiedMessages = messages.map { message ->
+            val sources = if (message.attachmentRefs.isNotEmpty()) {
+                message.attachmentRefs.map(::resolve)
+            } else message.attachmentPaths.map { File(it).takeIf(File::isFile) }
+            val refs = sources.mapNotNull { it?.let(::copy) }
+            // Already missing images remain explicitly missing; a failed copy aborts the fork.
+            val missing = maxOf(message.missingAttachmentCount, sources.count { it == null })
+            message.copy(
+                attachmentRefs = refs,
+                attachmentPaths = refs.map { resolve(it)?.absolutePath ?: error("图片复制未完成。") },
+                missingAttachmentCount = missing,
+            )
+        }
+        val copiedPending = pendingImages.map { attachment ->
+            val source = attachment.imageRef?.let(::resolve)
+                ?: File(attachment.localPath).takeIf(File::isFile)
+                ?: error("待发送图片已不可用，请重新添加；原对话仍保留。")
+            val ref = copy(source)
+            attachment.copy(localPath = resolve(ref)?.absolutePath ?: error("图片复制未完成。"), imageRef = ref)
+        }
+        copiedMessages to copiedPending
     }
 
     fun deleteConversation(conversationId: String) {

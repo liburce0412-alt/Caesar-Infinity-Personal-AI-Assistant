@@ -21,6 +21,7 @@ data class CaesarTraceEvent(
     val durationMs: Long,
     val success: Boolean,
     val errorCode: String? = null,
+    val ownerUserId: String = "local_user",
 )
 
 class CaesarAgentEngine(
@@ -34,22 +35,31 @@ class CaesarAgentEngine(
     override fun stream(request: AiRequest): Flow<AiEvent> = flow {
         val sessionId = request.sessionId.ifBlank { UUID.randomUUID().toString() }
         val prompt = request.userPrompt.ifBlank { request.messages.lastOrNull { it.role == "user" }?.content.orEmpty() }
+        val turnRequest = request.copy(
+            sessionId = sessionId,
+            toolActionScope = request.toolActionScope.ifBlank {
+                "turn-${request.messages.count { it.role == "user" }.coerceAtLeast(1)}"
+            },
+        )
         // Device health tools may expose source packages, timestamps and minute-level details.
         // Only requests already forced onto the local engine may see them; cloud turns receive
         // the separately typed, consented daily summary carried by CloudHealthDisclosure.
         val projected = tools.project(prompt).filter { definition ->
+            (request.allowedToolNames == null || definition.name in request.allowedToolNames) &&
+            (definition.name != "memory.list" || request.requiresLocal || request.allowLocalMemoryRead) &&
             (request.requiresLocal || !definition.name.startsWith(HEALTH_TOOL_PREFIX)) &&
                 (!definition.name.startsWith(WEB_TOOL_PREFIX) ||
                     (request.allowWebSearch && !request.requiresLocal))
         }
         val projectedToolNames = projected.mapTo(linkedSetOf()) { it.name }
-        val current = request.copy(
-            sessionId = sessionId,
+        val current = turnRequest.copy(
             userPrompt = prompt,
             caesarToolsJson = tools.promptSchema(projected),
+            structuredContextJson = JSONObject(request.structuredContextJson)
+                .put("clock", com.campusai.core.time.AiClock.context()).toString(),
         )
         pendingConfirmation.set(null)
-        runLoop(request.copy(sessionId = sessionId), current, CaesarDagState(), projectedToolNames).collect { emit(it) }
+        runLoop(turnRequest, current, CaesarDagState(), projectedToolNames).collect { emit(it) }
     }
 
     fun confirm(actionId: String): Flow<AiEvent> = flow {
@@ -135,7 +145,9 @@ class CaesarAgentEngine(
                 emit(AiEvent.Error(error.message ?: "dag_limit_reached", "任务图已达安全上限，已停止执行。"))
                 return@flow
             }
-            val idempotencyKey = CaesarIntentEvidence.idempotencyKey(request.sessionId, call.name, canonicalArguments)
+            val idempotencyKey = CaesarIntentEvidence.idempotencyKey(
+                request.sessionId, call.name, canonicalArguments, request.ownerUserId, request.toolActionScope,
+            )
             val executed = execute(request, call, arguments, projectedToolNames, confirmationGranted = false)
             val result = executed.result
             val elapsedMs = executed.elapsedMs
@@ -195,6 +207,8 @@ class CaesarAgentEngine(
             request.sessionId,
             call.name,
             CaesarIntentEvidence.canonicalArguments(arguments),
+            request.ownerUserId,
+            request.toolActionScope,
         )
         val context = ToolExecutionContext(
             sessionId = request.sessionId,
@@ -211,7 +225,7 @@ class CaesarAgentEngine(
             CaesarToolResult.Denied("tool_not_projected", "本轮未授权执行这个工具。")
         }
         val elapsedMs = (System.nanoTime() - started) / 1_000_000L
-        traceSink.record(CaesarTraceEvent(request.sessionId, "tool", call.name, elapsedMs, result is CaesarToolResult.Success, result.errorCode()))
+        traceSink.record(CaesarTraceEvent(request.sessionId, "tool", call.name, elapsedMs, result is CaesarToolResult.Success, result.errorCode(), request.ownerUserId.ifBlank { "local_user" }))
         return ExecutedTool(result, elapsedMs)
     }
 
@@ -219,15 +233,18 @@ class CaesarAgentEngine(
         // OpenAI chat completions are stateless: a Codex vision turn must resend its current-turn
         // image while completing a tool loop. Saved historical images are never placed here.
         imagePaths = if (allowCodexImageUpload) imagePaths else emptyList(),
-        messages = messages + AiConversationMessage("assistant", call.rawContent) + AiConversationMessage("tool", resultJson),
+        messages = messages + AiConversationMessage("assistant", call.rawContent, cloudHealthSensitive = call.isLocalPrivateRead()) +
+            AiConversationMessage("tool", resultJson, cloudHealthSensitive = call.isLocalPrivateRead()),
     )
 
     private fun AiRequest.withToolFailure(call: AiEvent.ToolCallRequested, code: String, message: String) = copy(
         imagePaths = if (allowCodexImageUpload) imagePaths else emptyList(),
         messages = messages +
-            AiConversationMessage("assistant", call.rawContent) +
-            AiConversationMessage("tool", JSONObject().put("ok", false).put("code", code).put("message", message).toString()),
+            AiConversationMessage("assistant", call.rawContent, cloudHealthSensitive = call.isLocalPrivateRead()) +
+            AiConversationMessage("tool", JSONObject().put("ok", false).put("code", code).put("message", message).toString(), cloudHealthSensitive = call.isLocalPrivateRead()),
     )
+
+    private fun AiEvent.ToolCallRequested.isLocalPrivateRead() = name == "memory.list" || name.startsWith(HEALTH_TOOL_PREFIX)
 
     private companion object {
         const val HEALTH_TOOL_PREFIX = "health."

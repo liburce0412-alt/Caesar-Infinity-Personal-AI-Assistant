@@ -1,5 +1,7 @@
 package com.campusai.features.schedule
 
+import com.campusai.core.time.CaesarTime
+
 import android.app.Notification
 import android.content.Context
 import android.content.res.Configuration
@@ -9,7 +11,6 @@ import com.campusai.core.designsystem.CaesarOrbArtwork
 import com.campusai.R
 import org.json.JSONObject
 import java.time.Instant
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /** Native HyperOS templates: the system owns expansion, timers and touch targets. */
@@ -34,7 +35,7 @@ internal object CourseIslandStyle {
         val active = now >= item.start
         val target = if (active) item.end else item.start
         val stage = if (active) "上课中" else "即将上课"
-        val time = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
+        val time = DateTimeFormatter.ofPattern("HH:mm").withZone(CaesarTime.zone)
         val range = "${time.format(Instant.ofEpochMilli(item.start))} — ${time.format(Instant.ofEpochMilli(item.end))}"
         val room = item.course.location.substringAfterLast('[').substringBefore(']').ifBlank { "教室待补充" }
         val period = if (item.course.periodStart > 0) "第 ${item.course.periodStart}–${item.course.periodEnd} 节" else "课程提醒"

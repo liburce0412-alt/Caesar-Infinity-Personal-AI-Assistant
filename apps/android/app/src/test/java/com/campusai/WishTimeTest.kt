@@ -15,11 +15,17 @@ class WishTimeTest {
         assertEquals("今天，给这个愿望一点时间", wishDateMessage("2026-09-06", today))
         assertEquals("慢慢来，它还在这里", wishDateMessage("2026-09-05", today))
     }
-    @Test fun `recording time is displayed in local time`() {
-        val local = today.atTime(9, 30).atZone(ZoneId.systemDefault()).toOffsetDateTime().toString()
+    @Test fun `recording time is displayed in Beijing time`() {
+        val local = today.atTime(9, 30).atZone(ZoneId.of("Asia/Shanghai")).toOffsetDateTime().toString()
         assertEquals("今天记下", wishRecordedTime(local, today))
         assertEquals("昨天记下", wishRecordedTime(local, today.plusDays(1)))
         assertTrue(wishRecordedTime(local, today, full = true).contains("2026年9月6日 09:30"))
+    }
+    @Test fun `UTC recording crosses Beijing midnight and unknown time stays unknown`() {
+        assertEquals("今天记下", wishRecordedTime("2026-09-05T16:00:00Z", today))
+        assertEquals("昨天记下", wishRecordedTime("2026-09-05T15:59:59Z", today))
+        assertEquals("记录时间未知", wishRecordedTime("", today))
+        assertEquals("记录时间未知", wishRecordedTime("2026-09-06T08:00:00", today))
     }
     @Test fun `revisiting uses only the owners genuinely older wishes`() {
         fun wish(id: String, owner: String, time: String) = MarketplaceListing(id, owner, "我", "旧心愿", "", null, "", "", "active", "approved", time)

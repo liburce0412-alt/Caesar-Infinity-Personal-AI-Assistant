@@ -1,13 +1,9 @@
 package com.campusai.features.ai
 
 import android.content.Context
-import androidx.lifecycle.LiveData
-import androidx.lifecycle.Observer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import androidx.work.WorkInfo
-import androidx.work.WorkManager
 import com.campusai.core.ai.AiEngine
 import com.campusai.core.ai.AiEngineRouter
 import com.campusai.core.ai.AiEvent
@@ -15,11 +11,11 @@ import com.campusai.core.ai.AiExecutionEngine
 import com.campusai.core.ai.AiRequest
 import com.campusai.core.ai.AiRoutingException
 import com.campusai.core.ai.CloudAiProvider
-import com.campusai.core.ai.CloudDailyHealthSummary
 import com.campusai.core.ai.CloudHealthDisclosure
 import com.campusai.core.ai.NetworkAvailability
 import com.campusai.core.ai.PersonalCloudAiEngine
 import com.campusai.core.ai.ResolvedExecution
+import com.campusai.core.ai.aiModeForProvider
 import com.campusai.core.agent.CaesarAgentEngine
 import com.campusai.core.agent.CaesarAppTools
 import com.campusai.core.agent.CaesarIdempotencyStore
@@ -31,22 +27,13 @@ import com.campusai.core.database.CampusDao
 import com.campusai.core.database.DailyGreetingEntity
 import com.campusai.core.localai.LocalModelManager
 import com.campusai.core.localai.LocalModelMode
-import com.campusai.core.health.HealthAvailability
 import com.campusai.core.health.HealthGateway
 import com.campusai.core.health.HealthGatewayFactory
-import com.campusai.core.health.HealthPeriods
-import com.campusai.core.health.HealthSnapshot
-import com.campusai.core.health.mifitness.MiFitnessAccountException
-import com.campusai.core.health.mifitness.MiFitnessAccountService
-import com.campusai.core.health.mifitness.MiFitnessCredentialStore
-import com.campusai.core.health.mifitness.MiFitnessStepsSyncException
-import com.campusai.core.health.mifitness.MiFitnessStepsSyncScheduler
-import com.campusai.core.health.mifitness.MiFitnessStepsSyncWorker
-import com.campusai.core.health.mifitness.MiFitnessSummaryHealthGateway
 import com.campusai.core.model.AiConversationMessage
 import com.campusai.core.model.AiMode
 import com.campusai.core.model.AiProvider
 import com.campusai.core.model.AiReport
+import com.campusai.core.model.AiReportSummary
 import com.campusai.core.model.DailyGreeting
 import com.campusai.core.network.PersonalCloudClient
 import com.campusai.core.network.CaesarCloudFreeEngine
@@ -55,7 +42,6 @@ import com.campusai.core.security.PersonalAiProviderStore
 import com.campusai.core.profile.ProfileRepository
 import com.campusai.features.community.CampusRepository
 import java.time.LocalDate
-import java.time.ZoneId
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -63,12 +49,16 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -102,41 +92,6 @@ data class AiUiState(
     val lockedLocalModelId: String? = null,
 )
 
-data class CaesarHealthUiState(
-    val loading: Boolean = false,
-    val miFitnessConfigured: Boolean = false,
-    val miFitnessSyncing: Boolean = false,
-    val miFitnessStatus: MiFitnessUiStatus = MiFitnessUiStatus.IDLE,
-    val miFitnessLastSyncAt: Long? = null,
-    val miFitnessFormResetKey: Long = 0L,
-    val availability: HealthAvailability? = null,
-    val grantedPermissionCount: Int = 0,
-    val requiredPermissionCount: Int = 0,
-    val snapshot: HealthSnapshot? = null,
-    val healthError: String? = null,
-    val actionMessage: String? = null,
-)
-
-enum class MiFitnessUiStatus {
-    IDLE,
-    VALIDATING,
-    REFRESHING,
-    DELETING,
-    SUCCESS,
-    NO_DATA,
-    AUTH_ERROR,
-    NETWORK_ERROR,
-    STORAGE_ERROR,
-}
-
-data class CaesarMemoryUiItem(
-    val id: String,
-    val type: String,
-    val content: String,
-    val confirmed: Boolean,
-    val expiresAt: Long?,
-)
-
 class AiViewModel(
     private val dao: CampusDao,
     context: Context,
@@ -161,9 +116,6 @@ class AiViewModel(
     private val network = NetworkAvailability(appContext)
     private val imageProcessor = CaesarImageProcessor(appContext)
     private val memoryStore = CaesarMemoryStore(dao)
-    private val miFitnessCredentialStore = MiFitnessCredentialStore(appContext)
-    private val miFitnessAccountService = MiFitnessAccountService(appContext)
-    private val workManager = WorkManager.getInstance(appContext)
     private val healthGateway: HealthGateway = HealthGatewayFactory.create(appContext)
     private val router = AiEngineRouter(
         personalDeepSeek = personalDeepSeekEngine,
@@ -192,18 +144,36 @@ class AiViewModel(
     )
     private val _state = MutableStateFlow(AiUiState())
     val state: StateFlow<AiUiState> = _state.asStateFlow()
-    private val _healthState = MutableStateFlow(
-        CaesarHealthUiState(miFitnessConfigured = miFitnessCredentialStore.hasCredentials()),
-    )
-    val healthState: StateFlow<CaesarHealthUiState> = _healthState.asStateFlow()
+    val runtimeState = state.map(AiUiState::runtimeState).distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AiRuntimeState())
+    private val healthController = AiHealthController(appContext, viewModelScope, healthGateway)
+    val healthState = healthController.healthState
     val localModelSelection = modelManager.selection
     val localModelStates = modelManager.states
     fun localModelFor(modelId: String) = modelManager.runtimeFor(modelId).selection
-    val history: StateFlow<List<AiReport>> = dao.getAiReportsFlow().map { rows -> rows.map(AiReportEntity::toDomain) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-    val memories: StateFlow<List<CaesarMemoryUiItem>> = dao.getAgentMemoriesFlow().map { rows ->
-        rows.map { row -> CaesarMemoryUiItem(row.id, row.type, row.content, row.confirmedAt != null, row.expiresAt) }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    private val historyController = AiHistoryController(dao, viewModelScope) {
+        _state.value = _state.value.copy(error = "历史记录读取失败，请重新打开。", errorCode = "history_load_failed")
+    }
+    val viewingLocalHistory = historyController.viewingLocal
+    val history = historyController.history
+    val visibleHistoryLimit = historyController.limit
+    fun loadMoreHistory() = historyController.loadMore()
+    fun showLocalHistory(local: Boolean) {
+        historyController.selectOwner(if (local) "local_user" else activeOwnerUserId.ifBlank { "local_user" })
+    }
+    private val memoryQuery = MutableStateFlow("local_user" to 0L)
+    val memoryScope = memoryQuery.asStateFlow()
+    private val _memories = MutableStateFlow<List<CaesarMemoryUiItem>>(emptyList())
+    val memories = _memories.asStateFlow()
+    private val _viewingLocalMemories = MutableStateFlow(true)
+    val viewingLocalMemories = _viewingLocalMemories.asStateFlow()
+
+    fun showLocalMemories(local: Boolean) {
+        val owner = if (local) "local_user" else activeOwnerUserId.ifBlank { "local_user" }
+        _memories.value = emptyList()
+        _viewingLocalMemories.value = owner == "local_user"
+        memoryQuery.value = owner to (memoryQuery.value.second + 1)
+    }
     private val _dailyGreeting = MutableStateFlow<DailyGreeting?>(null)
     val dailyGreeting: StateFlow<DailyGreeting?> = _dailyGreeting.asStateFlow()
 
@@ -214,6 +184,7 @@ class AiViewModel(
     private var activeGenerationRollback: (() -> Unit)? = null
     private var greetingJob: Job? = null
     private var greetingAttemptedDate: String? = null
+    private var greetingRevision = 0L
     private var conversationId = UUID.randomUUID().toString()
     private var conversationCreatedAt = System.currentTimeMillis()
     private var conversationTitle = ""
@@ -221,21 +192,42 @@ class AiViewModel(
     private var recentlyDeleted: AiReport? = null
     private var recentlyDeletedCleanup: Job? = null
     private var activeOwnerUserId: String = ""
-    private val healthLoadEpoch = AtomicLong(0L)
-    private var miFitnessWorkLiveData: LiveData<WorkInfo?>? = null
-    private var miFitnessWorkObserver: Observer<WorkInfo?>? = null
+    private var conversationOwnerUserId: String = "local_user"
+    private var openHistoryJob: Job? = null
+    private var conversationRevision = 0L
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private fun observeMemories() = viewModelScope.launch {
+        memoryQuery.flatMapLatest { query ->
+            dao.getAgentMemoriesFlow(query.first).map { rows ->
+                query to rows.filter { it.ownerUserId == query.first }.map { row ->
+                    CaesarMemoryUiItem(row.id, row.type, row.content, row.confirmedAt != null, row.expiresAt)
+                }
+            }.catch {
+                if (memoryQuery.value == query) _state.value = _state.value.copy(error = "记忆读取失败，请重新打开。", errorCode = "memory_load_failed")
+            }
+        }.collect { (query, rows) ->
+            if (memoryQuery.value == query) _memories.value = rows
+        }
+    }
 
     init {
+        observeMemories()
         viewModelScope.launch {
             preferences.preferences.collect { value ->
                 provider.set(value.aiProvider)
-                _state.value = _state.value.copy(provider = value.aiProvider)
+                _state.value = _state.value.copy(
+                    provider = value.aiProvider,
+                    mode = aiModeForProvider(value.aiProvider, _state.value.mode),
+                )
             }
         }
     }
 
     fun setMode(mode: AiMode) {
-        if (!_state.value.streaming) _state.value = _state.value.copy(mode = mode, error = null, errorCode = null)
+        if (!_state.value.streaming) _state.value = _state.value.copy(
+            mode = aiModeForProvider(provider.get(), mode), error = null, errorCode = null,
+        )
     }
 
     fun selectLocalModel(mode: LocalModelMode) {
@@ -248,7 +240,7 @@ class AiViewModel(
         provider.set(value)
         _state.value = _state.value.copy(
             provider = value,
-            mode = if (value == AiProvider.LOCAL) AiMode.FAST else _state.value.mode,
+            mode = if (value == AiProvider.LOCAL) AiMode.FAST else aiModeForProvider(value, _state.value.mode),
             model = "",
             resolvedProvider = null,
             error = null,
@@ -265,233 +257,19 @@ class AiViewModel(
     }
 
     fun setContextSelection(value: AiContextSelection) {
-        if (!_state.value.streaming) _state.value = _state.value.copy(contextSelection = value)
-    }
-
-    fun refreshHealthStatus() {
-        if (_healthState.value.loading) return
-        viewModelScope.launch { loadHealthStatus() }
-    }
-
-    fun saveMiFitnessCredentials(userId: String, passToken: String) {
-        if (_healthState.value.miFitnessSyncing) return
-        healthLoadEpoch.incrementAndGet()
-        _healthState.value = _healthState.value.copy(
-            loading = false,
-            miFitnessSyncing = true,
-            miFitnessStatus = MiFitnessUiStatus.VALIDATING,
-            healthError = null,
-            actionMessage = "正在验证 Mi Fitness 凭据。",
-        )
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                miFitnessAccountService.validateAndSave(userId, passToken)
-            }.fold(
-                onSuccess = { summary ->
-                    val previous = _healthState.value
-                    _healthState.value = previous.copy(
-                        miFitnessConfigured = true,
-                        miFitnessSyncing = false,
-                        miFitnessStatus = MiFitnessUiStatus.SUCCESS,
-                        miFitnessLastSyncAt = summary.lastSyncAt,
-                        miFitnessFormResetKey = previous.miFitnessFormResetKey + 1L,
-                        actionMessage = "Mi Fitness 已连接，今日健康已同步。",
-                    )
-                    loadHealthStatus("Mi Fitness 今日健康已同步。")
-                },
-                onFailure = { error ->
-                    val previous = _healthState.value
-                    val configured = miFitnessCredentialStore.hasCredentials()
-                    val savedWithoutCloudData = configured &&
-                        (error as? MiFitnessStepsSyncException)?.code == "no_cloud_data"
-                    if (savedWithoutCloudData) {
-                        val message = "Mi Fitness 已连接；今天还没有同步到健康数据。"
-                        _healthState.value = previous.afterMiFitnessNoDataCredentialSave(message)
-                        loadHealthStatus(message)
-                    } else {
-                        _healthState.value = previous.copy(
-                            miFitnessConfigured = configured,
-                            loading = false,
-                            miFitnessSyncing = false,
-                            miFitnessStatus = error.toMiFitnessUiStatus(),
-                            actionMessage = null,
-                        )
-                    }
-                },
-            )
+        if (!_state.value.streaming) {
+            val current = _state.value
+            val clearHealthNotice = !value.healthSummary && current.errorCode == "health_summary_unavailable"
+            _state.value = current.copy(contextSelection = value,
+                error = if (clearHealthNotice) null else current.error,
+                errorCode = if (clearHealthNotice) null else current.errorCode)
         }
     }
 
-    fun refreshMiFitnessSteps() {
-        if (_healthState.value.miFitnessSyncing) return
-        if (!miFitnessCredentialStore.hasCredentials()) {
-            _healthState.value = _healthState.value.copy(
-                miFitnessConfigured = false,
-                miFitnessStatus = MiFitnessUiStatus.AUTH_ERROR,
-                actionMessage = null,
-            )
-            return
-        }
-        if (!network.isOnline()) {
-            _healthState.value = _healthState.value.copy(
-                miFitnessStatus = MiFitnessUiStatus.NETWORK_ERROR,
-                actionMessage = null,
-            )
-            return
-        }
-        healthLoadEpoch.incrementAndGet()
-        val requestId = runCatching { MiFitnessStepsSyncScheduler.enqueue(appContext) }
-            .getOrElse {
-                _healthState.value = _healthState.value.copy(
-                    miFitnessStatus = MiFitnessUiStatus.STORAGE_ERROR,
-                    actionMessage = null,
-                )
-                return
-            }
-        _healthState.value = _healthState.value.copy(
-            loading = false,
-            miFitnessConfigured = true,
-            miFitnessSyncing = true,
-            miFitnessStatus = MiFitnessUiStatus.REFRESHING,
-            healthError = null,
-            actionMessage = "正在同步 Mi Fitness 今日健康。",
-        )
-        observeMiFitnessWork(requestId)
-    }
-
-    fun deleteMiFitnessCredentials() {
-        if (
-            _healthState.value.miFitnessSyncing &&
-            _healthState.value.miFitnessStatus != MiFitnessUiStatus.REFRESHING
-        ) return
-        healthLoadEpoch.incrementAndGet()
-        detachMiFitnessWorkObserver()
-        workManager.cancelUniqueWork(MiFitnessStepsSyncScheduler.UNIQUE_WORK)
-        _healthState.value = _healthState.value.copy(
-            loading = false,
-            miFitnessSyncing = true,
-            miFitnessStatus = MiFitnessUiStatus.DELETING,
-            actionMessage = null,
-        )
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) { miFitnessAccountService.delete() }.fold(
-                onSuccess = {
-                    val previous = _healthState.value
-                    _healthState.value = previous.copy(
-                        miFitnessConfigured = false,
-                        miFitnessSyncing = false,
-                        miFitnessStatus = MiFitnessUiStatus.IDLE,
-                        miFitnessLastSyncAt = null,
-                        miFitnessFormResetKey = previous.miFitnessFormResetKey + 1L,
-                        snapshot = previous.snapshot?.takeUnless {
-                            MiFitnessSummaryHealthGateway.SOURCE_ID in it.originPackages
-                        },
-                        actionMessage = "Mi Fitness 凭据与本地健康缓存已删除。",
-                    )
-                    loadHealthStatus("Mi Fitness 凭据与本地健康缓存已删除。")
-                },
-                onFailure = {
-                    _healthState.value = _healthState.value.copy(
-                        miFitnessConfigured = miFitnessCredentialStore.hasCredentials(),
-                        loading = false,
-                        miFitnessSyncing = false,
-                        miFitnessStatus = MiFitnessUiStatus.STORAGE_ERROR,
-                    )
-                },
-            )
-        }
-    }
-
-    private suspend fun loadHealthStatus(actionMessage: String? = _healthState.value.actionMessage) {
-        val requestEpoch = healthLoadEpoch.incrementAndGet()
-        _healthState.value = _healthState.value.copy(loading = true)
-        val availability = healthGateway.availability()
-        val granted = runCatching { healthGateway.grantedPermissions() }.getOrDefault(emptySet())
-        val healthResult = healthGateway.snapshot(HealthPeriods.parse("today"))
-        if (healthLoadEpoch.get() != requestEpoch) return
-        val configured = miFitnessCredentialStore.hasCredentials()
-        val previous = _healthState.value
-        val cloudLastSync = healthResult.getOrNull()
-            ?.takeIf { MiFitnessSummaryHealthGateway.SOURCE_ID in it.originPackages }
-            ?.lastSyncAt
-        _healthState.value = CaesarHealthUiState(
-            loading = false,
-            miFitnessConfigured = configured,
-            miFitnessSyncing = previous.miFitnessSyncing,
-            miFitnessStatus = previous.miFitnessStatus,
-            miFitnessLastSyncAt = cloudLastSync ?: previous.miFitnessLastSyncAt,
-            miFitnessFormResetKey = previous.miFitnessFormResetKey,
-            availability = availability,
-            grantedPermissionCount = granted.size,
-            requiredPermissionCount = healthGateway.readPermissions.size,
-            snapshot = healthResult.getOrNull(),
-            healthError = healthResult.exceptionOrNull()?.let { "当前没有可读取的健康缓存。" },
-            actionMessage = actionMessage,
-        )
-    }
-
-    private fun observeMiFitnessWork(requestId: UUID) {
-        detachMiFitnessWorkObserver()
-        val liveData = workManager.getWorkInfoByIdLiveData(requestId)
-        lateinit var observer: Observer<WorkInfo?>
-        observer = Observer { info ->
-            if (info == null || !info.state.isFinished) return@Observer
-            liveData.removeObserver(observer)
-            if (miFitnessWorkObserver === observer) {
-                miFitnessWorkLiveData = null
-                miFitnessWorkObserver = null
-            }
-            viewModelScope.launch {
-                if (info.state == WorkInfo.State.SUCCEEDED) {
-                    _healthState.value = _healthState.value.copy(
-                        miFitnessSyncing = false,
-                        miFitnessStatus = MiFitnessUiStatus.SUCCESS,
-                    )
-                    loadHealthStatus("Mi Fitness 今日健康已同步。")
-                } else {
-                    val code = info.outputData.getString(MiFitnessStepsSyncWorker.KEY_ERROR_CODE)
-                    _healthState.value = _healthState.value.copy(
-                        miFitnessConfigured = miFitnessCredentialStore.hasCredentials(),
-                        miFitnessSyncing = false,
-                        miFitnessStatus = code.toMiFitnessUiStatus(),
-                        actionMessage = null,
-                    )
-                }
-            }
-        }
-        miFitnessWorkLiveData = liveData
-        miFitnessWorkObserver = observer
-        liveData.observeForever(observer)
-    }
-
-    private fun detachMiFitnessWorkObserver() {
-        val liveData = miFitnessWorkLiveData
-        val observer = miFitnessWorkObserver
-        if (liveData != null && observer != null) liveData.removeObserver(observer)
-        miFitnessWorkLiveData = null
-        miFitnessWorkObserver = null
-    }
-
-    private fun Throwable.toMiFitnessUiStatus(): MiFitnessUiStatus = when (
-        (this as? MiFitnessStepsSyncException)?.code ?: (this as? MiFitnessAccountException)?.code
-    ) {
-        "invalid_credentials", "authentication_failed", "validation_failed", "credentials_missing" ->
-            MiFitnessUiStatus.AUTH_ERROR
-        "no_cloud_data" -> MiFitnessUiStatus.NO_DATA
-        "network_failed", "rate_limited", "server_unavailable", "response_invalid", "record_out_of_window", "record_limit",
-        "cursor_missing", "cursor_limit", "cursor_repeated", "page_limit", "aggregation_invalid",
-        "sync_failed" -> MiFitnessUiStatus.NETWORK_ERROR
-        else -> MiFitnessUiStatus.STORAGE_ERROR
-    }
-
-    private fun String?.toMiFitnessUiStatus(): MiFitnessUiStatus = when (this) {
-        "credentials_missing", "authentication_failed" -> MiFitnessUiStatus.AUTH_ERROR
-        "no_cloud_data" -> MiFitnessUiStatus.NO_DATA
-        "network_failed", "rate_limited", "server_unavailable", "response_invalid", "record_out_of_window", "record_limit",
-        "cursor_missing", "cursor_limit", "cursor_repeated", "page_limit", "aggregation_invalid",
-        "sync_failed" -> MiFitnessUiStatus.NETWORK_ERROR
-        else -> MiFitnessUiStatus.STORAGE_ERROR
-    }
+    fun refreshHealthStatus() = healthController.refreshHealthStatus()
+    fun saveMiFitnessCredentials(userId: String, passToken: String) = healthController.saveMiFitnessCredentials(userId, passToken)
+    fun refreshMiFitnessSteps() = healthController.refreshMiFitnessSteps()
+    fun deleteMiFitnessCredentials() = healthController.deleteMiFitnessCredentials()
 
     fun attachImage(uri: android.net.Uri, externalShare: Boolean = false): Boolean {
         if (_state.value.streaming || _state.value.importingImage || _state.value.pendingImages.size >= 4) return false
@@ -558,19 +336,16 @@ class AiViewModel(
     }
 
     fun performSurfaceAction(actionId: String) {
-        if (_state.value.streaming) return
+        if (_state.value.streaming || _state.value.importingImage) return
         if (actionId.startsWith("memory.confirm:")) {
             val id = actionId.removePrefix("memory.confirm:")
-            viewModelScope.launch {
-                val confirmed = memoryStore.confirm(id)
-                _state.value = _state.value.copy(
-                    error = if (confirmed) null else "这条记忆已过期或不存在。",
-                    errorCode = if (confirmed) null else "memory_confirmation_failed",
-                )
-            }
+            val owner = activeOwnerUserId.ifBlank { "local_user" }
+            mutateMemory("memory_confirmation_failed") { memoryStore.confirm(id, owner) }
             return
         }
         if (!actionId.startsWith("confirm:")) return
+        invalidateHistoryLoad()
+        cancelGreeting()
         val messagesBeforeAction = _state.value.messages
         val pendingImagesBeforeAction = _state.value.pendingImages
         val executionBeforeAction = _state.value.execution
@@ -596,7 +371,8 @@ class AiViewModel(
         launchGeneration { token ->
             val completion = AiGenerationCompletionTracker()
             try {
-                caesarEngine.confirm(actionId).collect { event ->
+                caesarEngine.confirm(actionId).batchTextUpdates().collect { event ->
+                    if (!generationEpoch.isCurrent(token)) return@collect
                     completion.accept(event)
                     consumeEvent(event)
                 }
@@ -621,30 +397,47 @@ class AiViewModel(
     }
 
     fun confirmMemory(id: String) {
-        viewModelScope.launch {
-            val confirmed = memoryStore.confirm(id)
-            if (!confirmed) _state.value = _state.value.copy(error = "这条记忆已过期或不存在。", errorCode = "memory_confirmation_failed")
-        }
+        val owner = memoryQuery.value.first
+        mutateMemory("memory_confirmation_failed") { memoryStore.confirm(id, owner) }
     }
 
     fun updateMemory(id: String, content: String) {
-        viewModelScope.launch {
-            val result = runCatching { memoryStore.updateContent(id, content) }
-            if (result.getOrNull() != true) {
-                _state.value = _state.value.copy(
-                    error = result.exceptionOrNull()?.message ?: "这条记忆已不存在。",
-                    errorCode = "memory_update_failed",
-                )
-            }
-        }
+        val owner = memoryQuery.value.first
+        mutateMemory("memory_update_failed") { memoryStore.updateContent(id, content, owner) }
     }
 
     fun forgetMemory(id: String) {
-        viewModelScope.launch { memoryStore.forget(id) }
+        val owner = memoryQuery.value.first
+        mutateMemory("memory_delete_failed") { memoryStore.forget(id, owner) }
     }
 
     fun forgetAllMemories() {
-        viewModelScope.launch { memoryStore.forgetAll() }
+        val owner = memoryQuery.value.first
+        mutateMemory("memory_delete_failed") { memoryStore.forgetAll(owner); true }
+    }
+
+    private fun mutateMemory(errorCode: String, action: suspend () -> Boolean) {
+        val ownerAtStart = activeOwnerUserId
+        val query = memoryQuery.value
+        viewModelScope.launch {
+            try {
+                // A queued UI callback must not write after an account/scope change.
+                if (activeOwnerUserId != ownerAtStart || memoryQuery.value != query) return@launch
+                val success = action()
+                if (activeOwnerUserId == ownerAtStart && memoryQuery.value == query) {
+                    _state.value = _state.value.copy(
+                        error = if (success) null else "这条记忆已过期、不存在或不属于当前范围。",
+                        errorCode = if (success) null else errorCode,
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                if (activeOwnerUserId == ownerAtStart && memoryQuery.value == query) {
+                    _state.value = _state.value.copy(error = error.message ?: "记忆操作失败，请重试。", errorCode = errorCode)
+                }
+            }
+        }
     }
 
     fun clearError() {
@@ -661,60 +454,85 @@ class AiViewModel(
         )
     }
 
+    fun setActiveOwner(userId: String) {
+        val owner = userId.ifBlank { "local_user" }
+        if (activeOwnerUserId.ifBlank { "local_user" } == owner) return
+        if (_state.value.streaming) cancel()
+        caesarEngine.cancel()
+        cancelGreeting()
+        activeOwnerUserId = userId
+        expireDeletedConversation()
+        _dailyGreeting.value = null
+        greetingAttemptedDate = null
+        newConversation()
+        showLocalHistory(false)
+        showLocalMemories(false)
+    }
+
     fun newConversation() {
         if (_state.value.streaming) return
+        invalidateHistoryLoad()
+        caesarEngine.cancel()
         imageImportGate.invalidate()
         pendingRegeneratedTail = null
         val referenced = _state.value.messages.flatMap { it.attachmentRefs }.map { it.relativePath }.toSet()
         _state.value.pendingImages.forEach { imageProcessor.delete(it, referenced) }
         conversationId = UUID.randomUUID().toString()
+        conversationOwnerUserId = activeOwnerUserId.ifBlank { "local_user" }
         conversationCreatedAt = System.currentTimeMillis()
         conversationTitle = ""
         conversationLocalModelId = null
         _state.value = AiUiState(
-            mode = _state.value.mode,
+            mode = aiModeForProvider(provider.get(), _state.value.mode),
             provider = provider.get(),
             contextSelection = _state.value.contextSelection,
         )
     }
 
-    fun send(prompt: String, snapshot: AiContextSnapshot) {
-        activeOwnerUserId = snapshot.userId
-        CaesarDeterministicReply.forPrompt(prompt, hasImages = _state.value.pendingImages.isNotEmpty())?.let { reply ->
-            _state.value = _state.value.copy(
-                contextSelection = _state.value.contextSelection.copy(healthSummary = false),
-            )
-            appendDeterministicReply(prompt, reply)
-            return
+    fun send(prompt: String, snapshot: AiContextSnapshot, onAccepted: () -> Unit = {}) {
+        setActiveOwner(snapshot.userId)
+        if (prompt.isBlank() || _state.value.streaming || _state.value.importingImage || rejectUnavailableHealthSelection()) return
+        prepareConversationForWrite {
+            if (rejectUnavailableHealthSelection()) return@prepareConversationForWrite
+            val reply = CaesarDeterministicReply.forPrompt(prompt, hasImages = _state.value.pendingImages.isNotEmpty(), provider = provider.get())
+            if (reply != null) {
+                _state.value = _state.value.copy(
+                    contextSelection = _state.value.contextSelection.copy(healthSummary = false),
+                )
+                appendDeterministicReply(prompt, reply)
+                onAccepted()
+            } else {
+                val base = CampusAiTaskFactory.create(CampusAiTask.CHAT, snapshot.records, snapshot.courses, prompt)
+                sendInternal(base.withContext(CampusAiTask.CHAT, prompt, snapshot), cloudOnce = false, onAccepted = onAccepted)
+            }
         }
-        val base = CampusAiTaskFactory.create(CampusAiTask.CHAT, snapshot.records, snapshot.courses, prompt)
-        sendInternal(base.withContext(CampusAiTask.CHAT, prompt, snapshot), cloudOnce = false)
     }
 
     fun regenerateLastResponse(snapshot: AiContextSnapshot) {
-        if (_state.value.streaming || _state.value.importingImage) return
-        val originalMessages = _state.value.messages
-        val plan = planAiRegeneration(originalMessages) ?: return
-        activeOwnerUserId = snapshot.userId
-        pendingRegeneratedTail = plan.replacedTail
-        _state.value = _state.value.copy(
-            messages = plan.history,
-            error = null,
-            errorCode = null,
-        )
-        val base = CampusAiTaskFactory.create(CampusAiTask.CHAT, snapshot.records, snapshot.courses, plan.prompt.content)
-        sendInternal(
-            payload = base.withContext(CampusAiTask.CHAT, plan.prompt.content, snapshot),
-            cloudOnce = false,
-            failureMessagesOverride = originalMessages,
-        )
+        setActiveOwner(snapshot.userId)
+        if (planAiRegeneration(_state.value.messages) == null) return
+        if (_state.value.streaming || _state.value.importingImage || rejectUnavailableHealthSelection()) return
+        prepareConversationForWrite {
+            if (rejectUnavailableHealthSelection()) return@prepareConversationForWrite
+            val originalMessages = _state.value.messages
+            val plan = planAiRegeneration(originalMessages) ?: return@prepareConversationForWrite
+            pendingRegeneratedTail = plan.replacedTail
+            _state.value = _state.value.copy(messages = plan.history, error = null, errorCode = null)
+            val base = CampusAiTaskFactory.create(CampusAiTask.CHAT, snapshot.records, snapshot.courses, plan.prompt.content)
+            sendInternal(
+                payload = base.withContext(CampusAiTask.CHAT, plan.prompt.content, snapshot),
+                cloudOnce = false,
+                failureMessagesOverride = originalMessages,
+            )
+        }
     }
 
     private fun appendDeterministicReply(prompt: String, reply: String) {
         val displayPrompt = prompt.trim()
         if (displayPrompt.isBlank() || _state.value.streaming) return
-        greetingJob?.cancel()
-        greetingJob = null
+        invalidateHistoryLoad()
+        cancelGreeting()
+        caesarEngine.cancel()
         val existing = _state.value.messages.dropLastWhile { it.role == "assistant" && it.content.isBlank() }
         if (conversationTitle.isBlank()) conversationTitle = displayPrompt.take(42)
         _state.value = _state.value.copy(
@@ -742,13 +560,16 @@ class AiViewModel(
             pendingCloudHealthDisclosure = null,
             elapsedMs = 0,
         )
-        viewModelScope.launch { saveReport() }
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) { saveReport() }
     }
 
-    fun sendTask(task: CampusAiTask, snapshot: AiContextSnapshot, userInput: String = "") {
-        activeOwnerUserId = snapshot.userId
-        val base = CampusAiTaskFactory.create(task, snapshot.records, snapshot.courses, userInput)
-        sendInternal(base.withContext(task, userInput, snapshot), cloudOnce = false)
+    fun sendTask(task: CampusAiTask, snapshot: AiContextSnapshot, userInput: String = "", onAccepted: () -> Unit = {}) {
+        setActiveOwner(snapshot.userId)
+        if (_state.value.streaming || _state.value.importingImage || rejectUnavailableHealthSelection()) return
+        prepareConversationForWrite {
+            val base = CampusAiTaskFactory.create(task, snapshot.records, snapshot.courses, userInput)
+            sendInternal(base.withContext(task, userInput, snapshot), cloudOnce = false, onAccepted = onAccepted)
+        }
     }
 
     private fun CampusAiPayload.withContext(
@@ -780,8 +601,109 @@ class AiViewModel(
         )
     }
 
-    fun openConversation(report: AiReport) {
+    private fun invalidateHistoryLoad() {
+        conversationRevision++
+        openHistoryJob?.cancel()
+        openHistoryJob = null
+    }
+
+    private fun cancelGreeting() {
+        greetingRevision++
+        greetingJob?.cancel()
+        greetingJob = null
+    }
+
+    /** Local legacy history remains intact. Continuing it creates an account-owned copy. */
+    private fun prepareConversationForWrite(onReady: () -> Unit) {
+        if (_state.value.streaming || _state.value.importingImage) return
+        invalidateHistoryLoad()
+        val owner = activeOwnerUserId.ifBlank { "local_user" }
+        if (conversationOwnerUserId == owner) {
+            onReady()
+            return
+        }
+        if (conversationOwnerUserId != "local_user") return
+        caesarEngine.cancel()
+        val revision = conversationRevision
+        val sourceId = conversationId
+        val sourceState = _state.value
+        val targetId = UUID.randomUUID().toString()
+        _state.value = sourceState.copy(importingImage = true, error = null, errorCode = null)
+        openHistoryJob = viewModelScope.launch {
+            var saved = false
+            try {
+                val (messages, pendingImages) = imageProcessor.copyForConversation(targetId, sourceState.messages, sourceState.pendingImages)
+                if (conversationRevision != revision || activeOwnerUserId.ifBlank { "local_user" } != owner) return@launch
+                val now = System.currentTimeMillis()
+                AiReportWriteCoordinator.withLock {
+                    val source = dao.getAiReport(sourceId, "local_user")?.toDomain()
+                        ?: error("原对话已不存在，请新建对话。")
+                    if (conversationRevision != revision || activeOwnerUserId.ifBlank { "local_user" } != owner) return@withLock
+                    // Finish the write and saved flag together even if a new owner cancels this job.
+                    withContext(NonCancellable) {
+                        dao.insertAiReport(AiReportEntity.fromDomain(source.copy(
+                            id = targetId,
+                            ownerUserId = owner,
+                            messagesJson = AiConversationCodec.encode(messages),
+                            createdAt = now,
+                            updatedAt = now,
+                        )))
+                        saved = true
+                    }
+                }
+                if (!saved || conversationRevision != revision || activeOwnerUserId.ifBlank { "local_user" } != owner) return@launch
+                conversationId = targetId
+                conversationOwnerUserId = owner
+                conversationCreatedAt = now
+                _state.value = sourceState.copy(messages = messages, pendingImages = pendingImages, importingImage = false)
+                val originalRefs = sourceState.messages.flatMap { it.attachmentRefs }.map { it.relativePath }.toSet()
+                sourceState.pendingImages.forEach { imageProcessor.delete(it, originalRefs) }
+                openHistoryJob = null
+                onReady()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                if (conversationRevision == revision) {
+                    _state.value = _state.value.copy(importingImage = false, error = error.message ?: "无法继续这条旧对话，请重试。", errorCode = "history_fork_failed")
+                }
+            } finally {
+                if (!saved) withContext(NonCancellable + Dispatchers.IO) { imageProcessor.deleteConversation(targetId) }
+                if (conversationRevision == revision) openHistoryJob = null
+            }
+        }
+    }
+
+    fun openConversation(report: AiReportSummary) = openConversationById(report.id, report.ownerUserId)
+
+    fun openConversationById(id: String, owner: String) {
+        if (_state.value.streaming || owner !in setOf("local_user", activeOwnerUserId.ifBlank { "local_user" })) return
+        invalidateHistoryLoad()
+        caesarEngine.cancel()
+        imageImportGate.invalidate()
+        _state.value = _state.value.copy(importingImage = false)
+        val activeOwner = activeOwnerUserId
+        val revision = conversationRevision
+        openHistoryJob = viewModelScope.launch {
+            try {
+                val report = dao.getAiReport(id, owner)?.toDomain() ?: error("这条对话已不存在。")
+                if (activeOwnerUserId == activeOwner && conversationRevision == revision && !_state.value.streaming) {
+                    openHistoryJob = null
+                    openConversation(report)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                if (activeOwnerUserId == activeOwner && conversationRevision == revision) {
+                    _state.value = _state.value.copy(error = error.message ?: "对话读取失败，请重试。", errorCode = "history_open_failed")
+                }
+            }
+        }
+    }
+
+    private fun openConversation(report: AiReport) {
         if (_state.value.streaming) return
+        caesarEngine.cancel()
+        val revision = ++conversationRevision
         imageImportGate.invalidate()
         pendingRegeneratedTail = null
         val previousRefs = _state.value.messages.flatMap { it.attachmentRefs }.map { it.relativePath }.toSet()
@@ -792,6 +714,7 @@ class AiViewModel(
             message.attachmentRefs.isEmpty() && message.attachmentPaths.isNotEmpty()
         }
         conversationId = report.id
+        conversationOwnerUserId = report.ownerUserId
         conversationCreatedAt = report.createdAt
         conversationTitle = report.title
         conversationLocalModelId = modelManager.modelIdFromLabel(report.model)
@@ -806,7 +729,7 @@ class AiViewModel(
             var migratedForUi: List<AiConversationMessage>? = null
             val migrationFailure = runCatching {
                 AiReportWriteCoordinator.withLock {
-                    val latest = dao.getAiReport(report.id)?.toDomain() ?: return@withLock
+                    val latest = dao.getAiReport(report.id, report.ownerUserId)?.toDomain() ?: return@withLock
                     val latestDecoded = parseMessages(latest.messagesJson)
                     val migrated = imageProcessor.migrateLegacy(latest.id, latestDecoded)
                     migratedForUi = migrated
@@ -816,7 +739,7 @@ class AiViewModel(
                 }
             }.exceptionOrNull()
             withContext(Dispatchers.Main) {
-                if (conversationId == report.id && !_state.value.streaming) {
+                if (conversationId == report.id && conversationRevision == revision && !_state.value.streaming) {
                     _state.value = _state.value.copy(
                         messages = migratedForUi ?: messages,
                         importingImage = false,
@@ -828,97 +751,139 @@ class AiViewModel(
         }
     }
 
-    fun deleteConversation(report: AiReport) {
-        if (_state.value.streaming) return
-        val displaced = recentlyDeleted
-        recentlyDeletedCleanup?.cancel()
-        if (displaced != null && displaced.id != report.id) {
-            viewModelScope.launch(Dispatchers.IO) { imageProcessor.deleteConversation(displaced.id) }
-        }
-        recentlyDeleted = report
-        viewModelScope.launch {
-            AiReportWriteCoordinator.withLock { dao.deleteAiReport(report.id) }
-            if (report.id == conversationId) newConversation()
-            recentlyDeletedCleanup = viewModelScope.launch {
-                delay(DELETED_CONVERSATION_UNDO_MILLIS)
-                if (recentlyDeleted?.id == report.id) {
-                    recentlyDeleted = null
-                    withContext(Dispatchers.IO) { imageProcessor.deleteConversation(report.id) }
+    suspend fun deleteConversation(summary: AiReportSummary): Boolean {
+        if (_state.value.streaming || summary.ownerUserId !in setOf("local_user", activeOwnerUserId.ifBlank { "local_user" })) return false
+        val ownerAtStart = activeOwnerUserId
+        // A completed deletion must always register undo/cleanup even if its sheet is dismissed.
+        return withContext(NonCancellable) {
+            try {
+                val report = AiReportWriteCoordinator.withLock {
+                    val full = dao.getAiReport(summary.id, summary.ownerUserId)?.toDomain()
+                        ?: error("这条对话已不存在。")
+                    if (activeOwnerUserId != ownerAtStart || _state.value.streaming) return@withLock null
+                    dao.deleteAiReport(full.id, full.ownerUserId)
+                    full
+                } ?: return@withContext false
+                if (activeOwnerUserId != ownerAtStart) {
+                    cleanupDeletedImages(report)
+                    return@withContext false
                 }
+                expireDeletedConversation()
+                recentlyDeleted = report
+                if (report.id == conversationId) newConversation()
+                recentlyDeletedCleanup = viewModelScope.launch {
+                    delay(DELETED_CONVERSATION_UNDO_MILLIS)
+                    if (recentlyDeleted?.id == report.id) expireDeletedConversation()
+                }
+                true
+            } catch (error: Throwable) {
+                if (activeOwnerUserId == ownerAtStart) {
+                    _state.value = _state.value.copy(error = "删除失败，请重试。", errorCode = "history_delete_failed")
+                }
+                false
             }
         }
     }
 
-    fun undoDeleteConversation() {
-        val report = recentlyDeleted ?: return
-        recentlyDeleted = null
+    private fun expireDeletedConversation() {
+        val report = recentlyDeleted
         recentlyDeletedCleanup?.cancel()
         recentlyDeletedCleanup = null
-        viewModelScope.launch {
+        recentlyDeleted = null
+        if (report != null) cleanupDeletedImages(report)
+    }
+
+    private fun cleanupDeletedImages(report: AiReport) {
+        viewModelScope.launch(Dispatchers.IO) {
             AiReportWriteCoordinator.withLock {
-                val current = dao.getAiReport(report.id)?.toDomain()
-                val restored = if (current == null) {
-                    report
-                } else {
-                    val merged = mergePersistedConversationMessages(
-                        current = parseMessages(report.messagesJson),
-                        persisted = parseMessages(current.messagesJson),
-                    )
-                    current.copy(
-                        summary = merged.lastOrNull { it.role == "assistant" }?.content.orEmpty().take(160),
-                        messagesJson = AiConversationCodec.encode(merged),
-                        createdAt = minOf(report.createdAt, current.createdAt),
-                        updatedAt = maxOf(report.updatedAt, current.updatedAt),
-                    )
+                if (dao.getAiReport(report.id, report.ownerUserId) == null) imageProcessor.deleteConversation(report.id)
+            }
+        }
+    }
+
+    suspend fun undoDeleteConversation(id: String): Boolean {
+        val report = recentlyDeleted?.takeIf { it.id == id } ?: return false
+        if (report.ownerUserId !in setOf("local_user", activeOwnerUserId.ifBlank { "local_user" })) return false
+        val ownerAtStart = activeOwnerUserId
+        recentlyDeletedCleanup?.cancel()
+        recentlyDeletedCleanup = null
+        return withContext(NonCancellable) {
+            try {
+                val restored = AiReportWriteCoordinator.withLock {
+                    if (recentlyDeleted !== report || activeOwnerUserId != ownerAtStart) return@withLock false
+                    val current = dao.getAiReport(report.id, report.ownerUserId)?.toDomain()
+                    val restored = if (current == null) report else {
+                        val merged = mergePersistedConversationMessages(
+                            current = parseMessages(report.messagesJson),
+                            persisted = parseMessages(current.messagesJson),
+                        )
+                        current.copy(
+                            summary = merged.lastOrNull { it.role == "assistant" }?.content.orEmpty().take(160),
+                            messagesJson = AiConversationCodec.encode(merged),
+                            createdAt = minOf(report.createdAt, current.createdAt),
+                            updatedAt = maxOf(report.updatedAt, current.updatedAt),
+                        )
+                    }
+                    dao.insertAiReport(AiReportEntity.fromDomain(restored))
+                    true
                 }
-                dao.insertAiReport(AiReportEntity.fromDomain(restored))
+                if (recentlyDeleted === report) recentlyDeleted = null
+                restored
+            } catch (error: Throwable) {
+                if (activeOwnerUserId == ownerAtStart) {
+                    _state.value = _state.value.copy(error = "恢复失败，请重试。", errorCode = "history_restore_failed")
+                }
+                // Keep the recoverable report and its files after a failed undo.
+                false
             }
         }
     }
 
     fun ensureDailyGreeting(snapshot: AiContextSnapshot) {
-        val zone = ZoneId.systemDefault()
+        val owner = snapshot.userId.ifBlank { "local_user" }
+        if (owner != activeOwnerUserId.ifBlank { "local_user" }) return
+        val zone = com.campusai.core.time.CaesarTime.zone
         val date = LocalDate.now(zone)
         val cacheId = "${snapshot.userId.ifBlank { "local" }}:$date"
-        val dateKey = date.toString()
         val current = _dailyGreeting.value
         if (current?.localDate == date.toString() && DailyGreetingPolicy.isGrounded(current.text, snapshot, zone = zone)) return
-        if (greetingAttemptedDate == dateKey) return
+        if (greetingAttemptedDate == cacheId) return
         if (greetingJob?.isActive == true) return
-        greetingAttemptedDate = dateKey
+        greetingAttemptedDate = cacheId
+        val revision = ++greetingRevision
+        fun ownsGreeting() = greetingRevision == revision &&
+            owner == activeOwnerUserId.ifBlank { "local_user" } && LocalDate.now(zone) == date
         greetingJob = viewModelScope.launch {
-            dao.getDailyGreeting(cacheId)?.toDomain()?.let { cached ->
-                val isOldFallback = cached.text == DailyGreetingPolicy.fallback(snapshot.displayName, date)
-                if (!isOldFallback && DailyGreetingPolicy.isGrounded(cached.text, snapshot, zone = zone)) {
-                    _dailyGreeting.value = cached
-                    greetingJob = null
-                    return@launch
-                }
-            }
             val fallback = DailyGreetingPolicy.fallback(snapshot.displayName, date)
-            _dailyGreeting.value = DailyGreeting(date.toString(), fallback, AiProvider.LOCAL, System.currentTimeMillis())
-            if (_state.value.streaming || provider.get() == AiProvider.CAESAR_CLOUD_FREE) {
-                greetingJob = null
-                return@launch
-            }
-
-            val context = AiContextAssembler.greetingContext(snapshot)
-            val request = AiRequest(
-                mode = AiMode.FAST,
-                messages = listOf(
-                    AiConversationMessage(
-                        "user",
-                        "随机创作一句 12 至 20 个汉字的首页短副文案。用行动感或克制意象，不写问句；不要写具体钟点、天气、校园状态，缺少课程就绝不提上课或课程。风格示例仅供理解：把注意力交给眼前这一件事。不要照抄示例。灵感编号：${UUID.randomUUID().toString().take(8)}",
+            try {
+                dao.getDailyGreeting(cacheId)?.toDomain()?.let { cached ->
+                    val isOldFallback = cached.text == fallback
+                    if (!isOldFallback && DailyGreetingPolicy.isGrounded(cached.text, snapshot, zone = zone)) {
+                        if (ownsGreeting()) _dailyGreeting.value = cached
+                        return@launch
+                    }
+                }
+                if (!ownsGreeting()) return@launch
+                _dailyGreeting.value = DailyGreeting(date.toString(), fallback, AiProvider.LOCAL, System.currentTimeMillis())
+                if (_state.value.streaming || provider.get() == AiProvider.CAESAR_CLOUD_FREE) return@launch
+                val context = AiContextAssembler.greetingContext(snapshot)
+                val request = AiRequest(
+                    mode = AiMode.FAST,
+                    ownerUserId = owner,
+                    messages = listOf(
+                        AiConversationMessage(
+                            "user",
+                            "随机创作一句 12 至 20 个汉字的首页短副文案。用行动感或克制意象，不写问句；不要写具体钟点、天气、校园状态，缺少课程就绝不提上课或课程。风格示例仅供理解：把注意力交给眼前这一件事。不要照抄示例。灵感编号：${UUID.randomUUID().toString().take(8)}",
+                        ),
                     ),
-                ),
-                structuredContextJson = context.toString(),
-                maxOutputTokens = 48,
-            )
-            val answer = StringBuilder()
-            var resolved = AiProvider.LOCAL
-            var failed = false
-            runCatching {
+                    structuredContextJson = context.toString(),
+                    maxOutputTokens = 48,
+                )
+                val answer = StringBuilder()
+                var resolved = AiProvider.LOCAL
+                var failed = false
                 router.stream(request).collect { event ->
+                    if (!ownsGreeting()) throw CancellationException("Greeting owner/date changed")
                     when (event) {
                         is AiEvent.Meta -> resolved = event.provider
                         is AiEvent.Delta -> answer.append(event.text)
@@ -926,22 +891,27 @@ class AiViewModel(
                         else -> Unit
                     }
                 }
-            }.onFailure { failed = true }
-            val candidate = if (failed) "" else sanitizeGreeting(answer.toString())
-            val text = candidate.takeIf { it.isNotBlank() && DailyGreetingPolicy.isGrounded(it, snapshot, zone = zone) } ?: fallback
-            if (text == fallback) {
-                _dailyGreeting.value = DailyGreeting(date.toString(), fallback, AiProvider.LOCAL, System.currentTimeMillis())
-            } else {
-                persistGreeting(cacheId, date, text, resolved)
+                if (!ownsGreeting()) return@launch
+                val candidate = if (failed) "" else sanitizeGreeting(answer.toString())
+                val text = candidate.takeIf { it.isNotBlank() && DailyGreetingPolicy.isGrounded(it, snapshot, zone = zone) } ?: fallback
+                if (text != fallback) {
+                    val greeting = persistGreeting(cacheId, date, text, resolved)
+                    if (ownsGreeting()) _dailyGreeting.value = greeting
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                if (ownsGreeting()) _dailyGreeting.value = DailyGreeting(date.toString(), fallback, AiProvider.LOCAL, System.currentTimeMillis())
+            } finally {
+                if (greetingRevision == revision) greetingJob = null
             }
-            greetingJob = null
         }
     }
 
-    private suspend fun persistGreeting(id: String, date: LocalDate, text: String, source: AiProvider) {
+    private suspend fun persistGreeting(id: String, date: LocalDate, text: String, source: AiProvider): DailyGreeting {
         val generatedAt = System.currentTimeMillis()
         dao.insertDailyGreeting(DailyGreetingEntity(id, date.toString(), text, source.name, generatedAt))
-        _dailyGreeting.value = DailyGreeting(date.toString(), text, source, generatedAt)
+        return DailyGreeting(date.toString(), text, source, generatedAt)
     }
 
     private fun sanitizeGreeting(raw: String): String = raw
@@ -974,12 +944,18 @@ class AiViewModel(
         cloudOnceProvider: AiProvider = AiProvider.DEEPSEEK,
         cloudHealthDisclosureOverride: CloudHealthDisclosure? = null,
         failureMessagesOverride: List<AiConversationMessage>? = null,
+        onAccepted: () -> Unit = {},
     ) {
         val prompt = payload.prompt
         val displayPrompt = payload.displayPrompt.ifBlank { prompt }
         if (prompt.isBlank() || _state.value.streaming || _state.value.importingImage) return
-        greetingJob?.cancel()
-        greetingJob = null
+        if (rejectUnavailableHealthSelection(cloudHealthDisclosureOverride)) {
+            if (failureMessagesOverride != null) _state.value = _state.value.copy(messages = failureMessagesOverride)
+            pendingRegeneratedTail = null
+            return
+        }
+        invalidateHistoryLoad()
+        cancelGreeting()
         router.cancel()
         if (cloudOnce && !network.isOnline()) {
             _state.value = _state.value.copy(
@@ -1007,11 +983,8 @@ class AiViewModel(
         if (conversationTitle.isBlank()) conversationTitle = displayPrompt.trim().take(42)
         val cloudHealthDisclosure = cloudHealthDisclosureOverride ?: currentCloudHealthDisclosure()
         val selectedProviderForTurn = if (cloudOnce) cloudOnceProvider else provider.get()
-        val allowWebSearch = selectedProviderForTurn in setOf(
-            AiProvider.DEEPSEEK,
-            AiProvider.GOOGLE_GEMINI,
-            AiProvider.CODEX,
-        )
+        val modeForTurn = aiModeForProvider(selectedProviderForTurn, _state.value.mode)
+        val capabilities = com.campusai.core.ai.aiCapabilities(selectedProviderForTurn, attachments.isNotEmpty())
         val cloudHealthSensitive = cloudHealthDisclosure is CloudHealthDisclosure.Included
         val initial = existing +
             AiConversationMessage(
@@ -1028,9 +1001,10 @@ class AiViewModel(
                 cloudHealthSensitive = cloudHealthSensitive,
             )
         _state.value = _state.value.copy(
+            mode = modeForTurn,
             messages = initial,
             streaming = true,
-            stage = "思考中",
+            stage = if (selectedProviderForTurn == AiProvider.CAESAR_CLOUD_FREE) "正在生成回复" else "思考中",
             error = null,
             errorCode = null,
             canUseCloudOnce = false,
@@ -1062,7 +1036,11 @@ class AiViewModel(
             cloudOnce = cloudOnce,
             allowCodexImageUpload = !cloudOnce && provider.get() == AiProvider.CODEX,
             allowCloudFreeImageUpload = !cloudOnce && provider.get() == AiProvider.CAESAR_CLOUD_FREE,
-        ).withCloudHealthDisclosure(cloudHealthDisclosure).copy(allowWebSearch = allowWebSearch)
+        ).withCloudHealthDisclosure(cloudHealthDisclosure).copy(
+            allowWebSearch = capabilities.webSearch,
+            allowedToolNames = capabilities.allowedToolNames,
+            allowLocalMemoryRead = capabilities.localMemoryRead,
+        )
         activeGenerationRollback = {
             val failed = _state.value
             _state.value = failed.withFailureExecutionFallback(
@@ -1080,11 +1058,17 @@ class AiViewModel(
             )
             pendingRegeneratedTail = null
         }
+        onAccepted()
         launchGeneration { token ->
             val completion = AiGenerationCompletionTracker()
-            val requestWithMemory = if (cloudOnce) request else request.copy(
+            val localMemories = if (cloudOnce || !request.requiresLocal) emptyList() else {
+                memoryStore.context(ownerUserId = request.ownerUserId.ifBlank { "local_user" })
+            }
+            if (!generationEpoch.isCurrent(token)) return@launchGeneration
+            if (localMemories.isNotEmpty()) markCurrentTurnCloudHealthSensitive()
+            val requestWithMemory = if (localMemories.isEmpty()) request else request.copy(
                 structuredContextJson = JSONObject(request.structuredContextJson)
-                    .put("confirmedMemories", JSONArray(memoryStore.context().map { memory ->
+                    .put("confirmedMemories", JSONArray(localMemories.map { memory ->
                         JSONObject().put("id", memory.id).put("type", memory.type).put("content", memory.content).put("confidence", memory.confidence)
                     }))
                     .toString(),
@@ -1095,7 +1079,8 @@ class AiViewModel(
                 } else {
                     caesarEngine.stream(requestWithMemory)
                 }
-                events.collect { event ->
+                events.batchTextUpdates().collect { event ->
+                    if (!generationEpoch.isCurrent(token)) return@collect
                     completion.accept(event)
                     consumeEvent(event)
                 }
@@ -1139,24 +1124,24 @@ class AiViewModel(
         if (personalProviderStore.hasCredential(CloudAiProvider.CODEX)) add(AiProvider.CODEX)
     }
 
-    private fun currentCloudHealthDisclosure(): CloudHealthDisclosure {
-        if (!_state.value.contextSelection.healthSummary) return CloudHealthDisclosure.Excluded
-        val metrics = _healthState.value.snapshot?.metrics ?: return CloudHealthDisclosure.Excluded
-        return CloudHealthDisclosure.Included(
-            CloudDailyHealthSummary(
-                localDate = LocalDate.now(ZoneId.systemDefault()).toString(),
-                steps = metrics.steps,
-                distanceMeters = metrics.distanceMeters,
-                activeCaloriesKcal = metrics.activeCaloriesKcal,
-                activityMinutes = metrics.activityDurationMinutes,
-                sleepMinutes = metrics.sleepMinutes,
-                averageHeartRateBpm = metrics.heartRateAverageBpm?.toDouble(),
-                averageOxygenSaturationPercent = metrics.oxygenSaturationAveragePercent,
-                averageStressScore = metrics.stressAverage?.toDouble(),
-                workoutCount = metrics.workoutCount?.toLong(),
-            ),
+    /** An explicitly selected attachment must exist before any prompt or other context leaves the device. */
+    private fun rejectUnavailableHealthSelection(disclosureOverride: CloudHealthDisclosure? = null): Boolean {
+        if (!_state.value.contextSelection.healthSummary && disclosureOverride !is CloudHealthDisclosure.Included) return false
+        val disclosure = disclosureOverride ?: currentCloudHealthDisclosure()
+        if (disclosure is CloudHealthDisclosure.Included && disclosure.summary.hasShareableMetrics) return false
+        _state.value = _state.value.copy(
+            error = "今天暂无可用于总结的健康指标，缺失值仍为未知。本次未发送问题或健康摘要，草稿已保留；可在“本次对话依据”关闭健康摘要后继续提问，或同步有数据后重试。",
+            errorCode = "health_summary_unavailable",
+            canUseCloudOnce = false,
+            cloudOnceProviders = emptyList(),
+            pendingCloudHealthDisclosure = null,
         )
+        return true
     }
+
+    private fun currentCloudHealthDisclosure() = currentCloudHealthDisclosure(
+        healthState.value.snapshot, _state.value.contextSelection.healthSummary,
+    )
 
     private fun launchGeneration(block: suspend (token: Long) -> Unit) {
         val token = generationEpoch.begin()
@@ -1208,7 +1193,7 @@ class AiViewModel(
             )
             is AiEvent.ToolCallRequested -> Unit
             is AiEvent.ToolStarted -> {
-                if (event.name.startsWith("health.")) markCurrentTurnCloudHealthSensitive()
+                if (event.name.startsWith("health.") || event.name == "memory.list") markCurrentTurnCloudHealthSensitive()
                 _state.value = _state.value.copy(stage = "正在执行 ${event.name}")
             }
             is AiEvent.ToolFinished -> _state.value = _state.value.copy(stage = if (event.success) "正在整理结果" else "工具执行未完成")
@@ -1233,6 +1218,9 @@ class AiViewModel(
     private suspend fun saveReport() {
         val final = _state.value
         val savingConversationId = conversationId
+        val savingOwner = conversationOwnerUserId
+        val savingRevision = conversationRevision
+        val replacedTail = pendingRegeneratedTail.orEmpty()
         val savingTitle = conversationTitle.ifBlank { "新的对话" }
         val savingCreatedAt = conversationCreatedAt
         val messagesToPersist = final.messages.filterNot {
@@ -1242,7 +1230,7 @@ class AiViewModel(
         if (summary.isBlank()) return
         val now = System.currentTimeMillis()
         val merged = AiReportWriteCoordinator.withLock {
-            val persisted = dao.getAiReport(savingConversationId)
+            val persisted = dao.getAiReport(savingConversationId, savingOwner)
                 ?.toDomain()
                 ?.messagesJson
                 ?.let(::parseMessages)
@@ -1250,7 +1238,7 @@ class AiViewModel(
             val mergedMessages = mergePersistedConversationMessages(
                 current = messagesToPersist,
                 persisted = persisted,
-                replacedTail = pendingRegeneratedTail.orEmpty(),
+                replacedTail = replacedTail,
             )
             val mergedSummary = mergedMessages.lastOrNull { it.role == "assistant" }?.content.orEmpty()
             if (mergedSummary.isBlank()) return@withLock messagesToPersist
@@ -1272,13 +1260,14 @@ class AiViewModel(
                 messagesJson = AiConversationCodec.encode(mergedMessages),
                 createdAt = savingCreatedAt,
                 updatedAt = now,
+                ownerUserId = savingOwner,
             )
             dao.insertAiReport(AiReportEntity.fromDomain(report))
             mergedMessages
         }
-        pendingRegeneratedTail = null
-        if (merged != messagesToPersist && conversationId == savingConversationId) {
-            _state.value = _state.value.copy(messages = imageProcessor.hydrate(merged))
+        if (conversationRevision == savingRevision && conversationId == savingConversationId && conversationOwnerUserId == savingOwner) {
+            pendingRegeneratedTail = null
+            if (merged != messagesToPersist) _state.value = _state.value.copy(messages = imageProcessor.hydrate(merged))
         }
     }
 
@@ -1291,11 +1280,12 @@ class AiViewModel(
         }
 
     override fun onCleared() {
-        detachMiFitnessWorkObserver()
+        healthController.close()
         greetingJob?.cancel()
         recentlyDeletedCleanup?.cancel()
         generationEpoch.invalidate()
         pendingRegeneratedTail = null
+        caesarEngine.cancel()
         router.cancel()
         super.onCleared()
     }
@@ -1314,7 +1304,7 @@ internal fun AiUiState.withOpenedConversation(
     selectedProvider: AiProvider,
     localModelId: String?,
 ): AiUiState = copy(
-    mode = report.mode,
+    mode = aiModeForProvider(selectedProvider, report.mode),
     provider = selectedProvider,
     resolvedProvider = report.provider,
     execution = ResolvedExecution(

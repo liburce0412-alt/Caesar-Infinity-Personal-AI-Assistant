@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.campusai.core.model.CourseSchedule
+import com.campusai.core.time.CaesarTime
 import com.campusai.features.schedule.courseClock
 import com.campusai.features.schedule.courseTimeLabel
 
@@ -31,6 +32,7 @@ internal fun PeriodCourseGrid(
     onSelect: (CourseSchedule) -> Unit,
     onOverlap: (List<CourseSchedule>) -> Unit,
     weekMonday: java.time.LocalDate? = null,
+    today: java.time.LocalDate = CaesarTime.today(),
 ) {
     val periods = maxOf(12, courses.maxOfOrNull { it.periodEnd } ?: 12)
     val starts = remember(courses) {
@@ -63,7 +65,7 @@ internal fun PeriodCourseGrid(
                 (1..7).forEach { day ->
                     Column(Modifier.width(column), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("周${"一二三四五六日"[day - 1]}", style = MaterialTheme.typography.labelSmall)
-                        WeekDateLabel(weekMonday, day)
+                        WeekDateLabel(weekMonday, day, today)
                     }
                 }
             }

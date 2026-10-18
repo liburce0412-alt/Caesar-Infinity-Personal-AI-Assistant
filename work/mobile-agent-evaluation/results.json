@@ -1,0 +1,374 @@
+{
+  "run_at_beijing": "2026-10-18T11:41:17.675533+08:00",
+  "mode": "offline_fixed_actions_synthetic_state",
+  "model_calls": 0,
+  "device_calls": 0,
+  "network_calls": 0,
+  "production_integration": false,
+  "temporary_database_removed": true,
+  "passed": 17,
+  "official_protocol_replay": {
+    "commit": "11cea575561fb7800b5fb6b6cafa56f7a91de11f",
+    "source_url": "https://raw.githubusercontent.com/X-PLUG/MobileAgent/11cea575561fb7800b5fb6b6cafa56f7a91de11f/Mobile-Agent-v3.5/mobile_use/run_gui_owl_1_5_for_mobile.py",
+    "executed_functions_only": [
+      "parse_action",
+      "rescale_coordinates"
+    ],
+    "distinct_protocol_outputs_replayed": 7,
+    "action_names_checked_against_official_dispatch": true,
+    "coordinate_cases": 2,
+    "malformed_input_cases": 1,
+    "upstream_main_executed": false,
+    "model_or_device_success_claimed": false
+  },
+  "cases": [
+    {
+      "name": "tool_write_and_observed_database",
+      "status": "verified_complete",
+      "actions": 1,
+      "records": 1,
+      "notes": 0,
+      "trace": [
+        {
+          "step": 0,
+          "result": "record_written",
+          "before_screen": "home",
+          "after_screen": "home",
+          "record_count": 1,
+          "note_count": 0
+        },
+        {
+          "step": 1,
+          "result": "verified_complete",
+          "before_screen": "home",
+          "after_screen": "home",
+          "record_count": 1,
+          "note_count": 0
+        }
+      ]
+    },
+    {
+      "name": "bounded_gui_write_and_observed_database",
+      "status": "verified_complete",
+      "actions": 3,
+      "records": 0,
+      "notes": 1,
+      "trace": [
+        {
+          "step": 0,
+          "result": "clicked",
+          "before_screen": "home",
+          "after_screen": "offline_notes",
+          "record_count": 0,
+          "note_count": 0
+        },
+        {
+          "step": 1,
+          "result": "typed_draft",
+          "before_screen": "offline_notes",
+          "after_screen": "offline_notes",
+          "record_count": 0,
+          "note_count": 0
+        },
+        {
+          "step": 2,
+          "result": "clicked",
+          "before_screen": "offline_notes",
+          "after_screen": "saved_note",
+          "record_count": 0,
+          "note_count": 1
+        },
+        {
+          "step": 3,
+          "result": "verified_complete",
+          "before_screen": "saved_note",
+          "after_screen": "saved_note",
+          "record_count": 0,
+          "note_count": 1
+        }
+      ]
+    },
+    {
+      "name": "tool_retry_is_idempotent",
+      "status": "verified_complete",
+      "actions": 1,
+      "records": 1,
+      "notes": 0,
+      "trace": [
+        {
+          "step": 0,
+          "result": "record_written",
+          "before_screen": "home",
+          "after_screen": "home",
+          "record_count": 1,
+          "note_count": 0
+        },
+        {
+          "step": 1,
+          "result": "duplicate_ignored",
+          "before_screen": "home",
+          "after_screen": "home",
+          "record_count": 1,
+          "note_count": 0
+        },
+        {
+          "step": 2,
+          "result": "verified_complete",
+          "before_screen": "home",
+          "after_screen": "home",
+          "record_count": 1,
+          "note_count": 0
+        }
+      ]
+    },
+    {
+      "name": "stop_before_first_action",
+      "status": "cancelled",
+      "actions": 0,
+      "records": 0,
+      "notes": 0,
+      "trace": []
+    },
+    {
+      "name": "stop_mid_gui_discards_remaining_actions",
+      "status": "cancelled",
+      "actions": 1,
+      "records": 0,
+      "notes": 0,
+      "trace": [
+        {
+          "step": 0,
+          "result": "clicked",
+          "before_screen": "home",
+          "after_screen": "offline_notes",
+          "record_count": 0,
+          "note_count": 0
+        }
+      ]
+    },
+    {
+      "name": "tool_write_requires_exact_confirmation",
+      "status": "confirmation_required",
+      "actions": 0,
+      "records": 0,
+      "notes": 0,
+      "trace": [
+        {
+          "step": 0,
+          "result": "confirmation_required",
+          "before_screen": "home",
+          "after_screen": "home",
+          "record_count": 0,
+          "note_count": 0
+        }
+      ]
+    },
+    {
+      "name": "changed_arguments_invalidate_confirmation",
+      "status": "confirmation_required",
+      "actions": 0,
+      "records": 0,
+      "notes": 0,
+      "trace": [
+        {
+          "step": 0,
+          "result": "confirmation_required",
+          "before_screen": "home",
+          "after_screen": "home",
+          "record_count": 0,
+          "note_count": 0
+        }
+      ]
+    },
+    {
+      "name": "account_switch_stops_write",
+      "status": "account_changed",
+      "actions": 0,
+      "records": 0,
+      "notes": 0,
+      "trace": [
+        {
+          "step": 0,
+          "result": "account_changed",
+          "before_screen": "home",
+          "after_screen": "home",
+          "record_count": 0,
+          "note_count": 0
+        }
+      ]
+    },
+    {
+      "name": "model_claim_is_not_completion",
+      "status": "unverified_claim",
+      "actions": 0,
+      "records": 0,
+      "notes": 0,
+      "trace": [
+        {
+          "step": 0,
+          "result": "unverified_claim",
+          "before_screen": "home",
+          "after_screen": "home",
+          "record_count": 0,
+          "note_count": 0
+        }
+      ]
+    },
+    {
+      "name": "invalid_coordinates_are_rejected",
+      "status": "invalid_coordinate",
+      "actions": 0,
+      "records": 0,
+      "notes": 0,
+      "trace": [
+        {
+          "step": 0,
+          "result": "invalid_coordinate"
+        }
+      ]
+    },
+    {
+      "name": "arbitrary_shell_is_rejected",
+      "status": "unsupported_action",
+      "actions": 0,
+      "records": 0,
+      "notes": 0,
+      "trace": [
+        {
+          "step": 0,
+          "result": "unsupported_action",
+          "before_screen": "home",
+          "after_screen": "home",
+          "record_count": 0,
+          "note_count": 0
+        }
+      ]
+    },
+    {
+      "name": "bounded_steps_stop_repeated_waits",
+      "status": "step_limit",
+      "actions": 0,
+      "records": 0,
+      "notes": 0,
+      "trace": [
+        {
+          "step": 0,
+          "result": "wait_observed",
+          "before_screen": "home",
+          "after_screen": "home",
+          "record_count": 0,
+          "note_count": 0
+        },
+        {
+          "step": 1,
+          "result": "wait_observed",
+          "before_screen": "home",
+          "after_screen": "home",
+          "record_count": 0,
+          "note_count": 0
+        }
+      ]
+    },
+    {
+      "name": "observed_page_instructions_remain_data",
+      "status": "wait_observed",
+      "actions": 0,
+      "records": 0,
+      "notes": 0,
+      "trace": [
+        {
+          "step": 0,
+          "result": "wait_observed",
+          "before_screen": "home",
+          "after_screen": "home",
+          "record_count": 0,
+          "note_count": 0
+        }
+      ]
+    },
+    {
+      "name": "ambiguous_multiple_actions_are_rejected",
+      "status": "invalid_action",
+      "actions": 0,
+      "records": 0,
+      "notes": 0,
+      "trace": [
+        {
+          "step": 0,
+          "result": "invalid_action"
+        }
+      ]
+    },
+    {
+      "name": "gui_draft_does_not_publish_without_confirmation",
+      "status": "confirmation_required",
+      "actions": 2,
+      "records": 0,
+      "notes": 0,
+      "trace": [
+        {
+          "step": 0,
+          "result": "clicked",
+          "before_screen": "home",
+          "after_screen": "offline_notes",
+          "record_count": 0,
+          "note_count": 0
+        },
+        {
+          "step": 1,
+          "result": "typed_draft",
+          "before_screen": "offline_notes",
+          "after_screen": "offline_notes",
+          "record_count": 0,
+          "note_count": 0
+        },
+        {
+          "step": 2,
+          "result": "confirmation_required",
+          "before_screen": "offline_notes",
+          "after_screen": "offline_notes",
+          "record_count": 0,
+          "note_count": 0
+        }
+      ]
+    },
+    {
+      "name": "health_tool_unavailable_to_gui_probe",
+      "status": "unsupported_tool",
+      "actions": 0,
+      "records": 0,
+      "notes": 0,
+      "trace": [
+        {
+          "step": 0,
+          "result": "unsupported_tool"
+        }
+      ]
+    },
+    {
+      "name": "unobserved_tap_target_is_rejected",
+      "status": "target_not_observed",
+      "actions": 0,
+      "records": 0,
+      "notes": 0,
+      "trace": [
+        {
+          "step": 0,
+          "result": "target_not_observed",
+          "before_screen": "home",
+          "after_screen": "home",
+          "record_count": 0,
+          "note_count": 0
+        }
+      ]
+    }
+  ],
+  "not_tested": [
+    "model visual grounding",
+    "model planning",
+    "Android or external app execution",
+    "actual CaesarAppTools Kotlin execution",
+    "real account or health data",
+    "cloud cost or latency"
+  ]
+}

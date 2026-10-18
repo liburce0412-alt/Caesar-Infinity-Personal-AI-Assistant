@@ -74,6 +74,8 @@ data class AiReport(
     val messagesJson: String,
     val createdAt: Long,
     val updatedAt: Long,
+    /** Legacy device history keeps local_user; never infer ownership from a later login. */
+    val ownerUserId: String = "local_user",
 )
 
 data class DailyGreeting(

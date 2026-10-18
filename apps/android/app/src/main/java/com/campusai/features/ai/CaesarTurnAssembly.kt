@@ -43,6 +43,8 @@ internal fun assembleCaesarTurnRequest(
         sessionId = sessionId,
         ownerUserId = ownerUserId,
         userPrompt = displayPrompt.trim(),
+        // Count before any provider filtering. Regeneration rebuilds the same user turn.
+        toolActionScope = "turn-${existingMessages.count { it.role == "user" } + 1}",
         requiresLocal = !cloudOnce && CaesarLocalityPolicy.requiresLocal(
             prompt = displayPrompt,
             hasImages = attachments.isNotEmpty() && !allowCodexImageUpload && !allowCloudFreeImageUpload,

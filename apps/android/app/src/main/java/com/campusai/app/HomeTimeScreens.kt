@@ -159,8 +159,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
-import java.util.Date
+import com.campusai.core.time.CaesarTime
+import com.campusai.core.time.rememberCaesarDate
+import java.time.Instant
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -188,6 +189,7 @@ fun HomeScreen(
     val healthPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         onRefreshHealth()
     }
+    val today by rememberCaesarDate()
     val todayRecords = TimeRecordCalendar.inRange(records, "日")
     val totalMinutes = todayRecords.sumOf { it.durationMinutes }
     val goalMinutes = 240L
@@ -199,9 +201,8 @@ fun HomeScreen(
         SpectraEnvironment.EMBER -> if (dark) Color(0xFFFFBC93) else Color(0xFF974B27)
         SpectraEnvironment.AURORA -> if (dark) SpectraColors.AuroraLight else SpectraColors.Aurora
     }
-    val streak = remember(records) { calculateStreak(records) }
+    val streak = remember(records, today) { calculateStreak(records) }
     var announcementsExpanded by rememberSaveable { mutableStateOf(false) }
-    val categories = todayRecords.map { it.category }.filter(String::isNotBlank).distinct().take(3)
     val topCategory = todayRecords
         .groupBy { it.category }
         .maxByOrNull { (_, items) -> items.sumOf { it.durationMinutes } }
@@ -228,7 +229,7 @@ fun HomeScreen(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(SimpleDateFormat("M月d日 EEEE", Locale.CHINA).format(Date()), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(today.format(java.time.format.DateTimeFormatter.ofPattern("M月d日 EEEE", Locale.CHINA)), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text("${timeGreeting()}，${displayName.ifBlank { "Caesar 用户" }}", style = MaterialTheme.typography.headlineSmall)
                     }
                     SpectraSurface(
@@ -250,8 +251,8 @@ fun HomeScreen(
                         }
                     }
                 }
-                Text(
-                    dailyText.ifBlank { "先完成一件最重要的小事" },
+                if (dailyText.isNotBlank()) Text(
+                    dailyText,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -266,16 +267,37 @@ fun HomeScreen(
                     Text("今日行动", Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(12.dp))
                     SpectraProgress(totalMinutes = totalMinutes, goalMinutes = goalMinutes)
-                    if (categories.isNotEmpty()) {
+                    if (topCategory != null) {
                         Spacer(Modifier.height(12.dp))
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(categories) { category -> SpectraStatus(category, tone = SpectraStatusTone.NEUTRAL) }
-                        }
+                        Text("主要投入：$topCategory", style = MaterialTheme.typography.bodySmall)
                     }
                     Spacer(Modifier.height(16.dp))
                     SpectraPrimaryButton("开始记录", onStartRecord, Modifier.fillMaxWidth(), icon = Icons.Rounded.Timer)
                 }
             }
+            }
+            }
+            }
+        }
+        item {
+            CollapsibleComponent(OptionalComponent.INSIGHTS, OptionalComponent.INSIGHTS.name in collapsedComponents, { onExpandComponent(OptionalComponent.INSIGHTS.name) }) {
+            SpectraSurface(Modifier.fillMaxWidth(), shadowed = false, onClick = onOpenAi,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CaesarGlassOrb(size = 48.dp, motionEnabled = SpectraTheme.tokens.motion.enabled)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    BrandWordmark(width = 124.dp)
+                    Text(
+                        "回顾今天，理清下一步",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Icon(Icons.Rounded.KeyboardArrowRight, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             }
             }
@@ -294,44 +316,12 @@ fun HomeScreen(
         }
         item {
             CollapsibleComponent(OptionalComponent.STREAK, OptionalComponent.STREAK.name in collapsedComponents, { onExpandComponent(OptionalComponent.STREAK.name) }) {
-            SpectraSurface(Modifier.fillMaxWidth(), shadowed = false, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.LocalFireDepartment, null, tint = SpectraColors.Warm, modifier = Modifier.size(22.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("连续 $streak 天", style = MaterialTheme.typography.titleMedium)
-                    }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.LocalFireDepartment, null, tint = SpectraColors.Warm, modifier = Modifier.size(18.dp))
+                    Text("连续记录 $streak 天", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-            }
-            }
-        }
-        item {
-            CollapsibleComponent(OptionalComponent.INSIGHTS, OptionalComponent.INSIGHTS.name in collapsedComponents, { onExpandComponent(OptionalComponent.INSIGHTS.name) }) {
-            SpectraSurface(Modifier.fillMaxWidth(), shadowed = false, onClick = onOpenAi,
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp)) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                CaesarGlassOrb(size = 48.dp, motionEnabled = SpectraTheme.tokens.motion.enabled)
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    BrandWordmark(width = 124.dp)
-                    Text(
-                        if (todayRecords.isEmpty()) {
-                            "聊一聊，理清下一步"
-                        } else {
-                            buildString {
-                                append("今日 ${todayRecords.size} 条 · ${formatDuration(totalMinutes)}")
-                                if (topCategory != null) append("\n主要投入：$topCategory")
-                            }
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Icon(Icons.Rounded.KeyboardArrowRight, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            }
             }
         }
         item {
@@ -359,13 +349,13 @@ fun HomeScreen(
                 UiState.Loading -> SpectraStatePane(
                     kind = SpectraStateKind.LOADING,
                     title = "正在读取最新公告",
-                    detail = "时间记录仍在本机可用。",
+                    detail = "正在同步最新消息。",
                     modifier = Modifier.fillMaxWidth(),
                 )
                 UiState.Empty -> SpectraStatePane(
                     kind = SpectraStateKind.EMPTY,
                     title = "目前没有新公告",
-                    detail = "已检查最新消息；你仍可继续记录今日进度。",
+                    detail = "已同步最新消息。",
                     modifier = Modifier.fillMaxWidth(),
                     actionLabel = "重新检查",
                     onAction = onRefreshAnnouncements,
@@ -960,11 +950,11 @@ private fun HealthFreshness.compactLabel(): String = when (this) {
 }
 
 private fun compactHealthTime(value: Long): String = runCatching {
-    SimpleDateFormat("MM-dd HH:mm", Locale.CHINA).format(Date(value))
+    CaesarTime.format(value)
 }.getOrDefault("未知")
 
 private fun compactHealthClock(value: Long): String = runCatching {
-    SimpleDateFormat("HH:mm", Locale.CHINA).format(Date(value))
+    CaesarTime.format(value, "HH:mm")
 }.getOrDefault("未知")
 
 @Composable
@@ -1136,15 +1126,23 @@ fun TimeScreen(
         importError = null
         showImport = false
     }
-    val currentDay = java.time.LocalDate.now()
+    val currentDay by rememberCaesarDate()
     val filtered = remember(records, range, currentDay) { TimeRecordCalendar.inRange(records, range) }
-    var deleted by remember { mutableStateOf<TimeRecord?>(null) }
-    LaunchedEffect(deleted) {
+    var deleted by remember(importOwner) { mutableStateOf<TimeRecord?>(null) }
+    LaunchedEffect(importOwner, deleted) {
         val record = deleted ?: return@LaunchedEffect
-        if (onMessage("已删除“${record.title}”", "撤销") == SnackbarResult.ActionPerformed) {
-            viewModel.undoDeleteTimeRecord(record.id)
-        } else viewModel.confirmDeleteTimeRecord()
-        deleted = null
+        val owner = importOwner
+        try {
+            val result = onMessage("已删除“${record.title}”", "撤销")
+            if (owner != viewModel.activeUserId.value) return@LaunchedEffect
+            if (result == SnackbarResult.ActionPerformed) viewModel.undoDeleteTimeRecord(record.id, expectedOwner = owner)
+            else viewModel.confirmDeleteTimeRecord(expectedOwner = owner)
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) {
+            if (owner == viewModel.activeUserId.value) onMessage("撤销失败：${failure.message ?: "请重新读取记录"}", null)
+        } finally {
+            if (owner == viewModel.activeUserId.value) deleted = null
+        }
     }
 
     SpectraPageScaffold(mood = PageMood.FOCUS) {
@@ -1160,7 +1158,7 @@ fun TimeScreen(
             ) {
             item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) { Text("时间", style = MaterialTheme.typography.headlineLarge); Text("今天的轨迹，清楚而不嘈杂", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    Text("时间", Modifier.weight(1f), style = MaterialTheme.typography.headlineLarge)
                     if (timetableExpanded) SpectraIconAction(
                         icon = Icons.Rounded.FileOpen,
                         label = "导入课程表",
@@ -1172,9 +1170,20 @@ fun TimeScreen(
                 item { CollapsibleComponent(OptionalComponent.TIMETABLE, true, onExpandTimetable) {} }
             } else if (courses.isNotEmpty()) {
                 item {
-                    CourseTimetable(courses = courses, onRemove = { viewModel.deleteCourse(it.id) }, onEdit = { editingCourse = it }, onImport = { showImport = true },
-                        semesterMonday = reminderConfig.semesterMonday, semesterWeeks = reminderConfig.semesterWeeks, onReminderSettings = { showReminderSettings = true },
-                        initialCourseId = initialCourseId, onCourseConsumed = onCourseConsumed)
+                    androidx.compose.runtime.key(importOwner) {
+                        CourseTimetable(courses = courses, onRemove = { course ->
+                            val owner = importOwner
+                            scope.launch {
+                                try { viewModel.deleteCourse(course.id, expectedOwner = owner) }
+                                catch (cancelled: CancellationException) { throw cancelled }
+                                catch (failure: Exception) {
+                                    if (owner == viewModel.activeUserId.value) onMessage("删除失败：${failure.message ?: "请重新读取课程"}", null)
+                                }
+                            }
+                        }, onEdit = { editingCourse = it }, onImport = { showImport = true },
+                            semesterMonday = reminderConfig.semesterMonday, semesterWeeks = reminderConfig.semesterWeeks, onReminderSettings = { showReminderSettings = true },
+                            initialCourseId = initialCourseId, onCourseConsumed = onCourseConsumed)
+                    }
                 }
             } else if (timetableExpanded) {
                 item {
@@ -1245,7 +1254,18 @@ fun TimeScreen(
                 items(filtered, key = { "time-${it.id}" }) { record ->
                     Column(Modifier.fillMaxWidth()) {
                         TimelineRow(record, onEdit = { editing = record },
-                            onDelete = { viewModel.deleteTimeRecord(record.id); deleted = record })
+                            onDelete = {
+                                val owner = importOwner
+                                scope.launch {
+                                    try {
+                                        viewModel.deleteTimeRecord(record.id, expectedOwner = owner)
+                                        if (owner == viewModel.activeUserId.value) deleted = record
+                                    } catch (cancelled: CancellationException) { throw cancelled }
+                                    catch (failure: Exception) {
+                                        if (owner == viewModel.activeUserId.value) onMessage("删除失败：${failure.message ?: "请重新读取记录"}", null)
+                                    }
+                                }
+                            })
                     }
                 }
             }
@@ -1345,7 +1365,7 @@ fun TimeScreen(
 internal fun TimelineRow(record: TimeRecord, onEdit: () -> Unit, onDelete: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(record.title, style = MaterialTheme.typography.titleMedium)
-        Text("${record.category} · ${SimpleDateFormat("HH:mm", Locale.CHINA).format(Date(record.startTime))}",
+        Text("${record.category} · ${CaesarTime.format(record.startTime, "HH:mm")}",
             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(formatDuration(record.durationMinutes), Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
@@ -1614,7 +1634,7 @@ private fun formatDuration(minutes: Long): String = when {
     else -> "${minutes}m"
 }
 
-private fun timeGreeting(): String = when (java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)) {
+private fun timeGreeting(): String = when (Instant.now().atZone(CaesarTime.zone).hour) {
     in 5..11 -> "早上好"
     in 12..17 -> "下午好"
     else -> "晚上好"
