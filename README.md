@@ -20,9 +20,9 @@
   <a href="docs/local-ai-architecture.md">架构文档</a>
 </p>
 
-**3.0.0 / versionCode 14：[版本说明](docs/releases/v3.0.0.md) · [下载 APK](https://github.com/liburce0412-alt/Caesar-Infinity-Personal-AI-Assistant/releases/tag/v3.0.0)**
+**最新正式版 3.0.0 / versionCode 14：[版本说明](docs/releases/v3.0.0.md) · [下载 APK](https://github.com/liburce0412-alt/Caesar-Infinity-Personal-AI-Assistant/releases/tag/v3.0.0)**
 
-3.0 带来北京时间与 AI 时钟、受控免费云端工具、历史分页、账号隔离和自适应渲染。生产 relay 已部署直用 GLM-4-Flash-250414 的路由，服务处于 active；Android 正式 APK 与更新源仍以发布流程的实际产物为准。验证范围见 [3.0 验收清单](docs/caesar-3.0-acceptance.md)。
+3.0 带来北京时间与 AI 时钟、受控免费云端工具、历史分页、账号隔离和自适应渲染。生产 relay 已部署直用 GLM-4-Flash-250414 的路由，服务处于 active；正式 APK 已由发布工作流签名生成，GitHub 与国内更新源已同步。验证范围见 [3.0 验收清单](docs/caesar-3.0-acceptance.md)。
 
 免费文字直接使用 GLM-4-Flash-250414，图片保留 GLM-4V-Flash；不增加付费兜底、GLM-OCR 或每日次数限制。覆盖安装保留本地记录和已有 Provider 选择。历史版本见 [v2.2.2 发布说明](docs/releases/v2.2.2.md)；此前的滚动与高刷新率优化保留，历史[性能记录](docs/android-performance-20261011.md)不代表新版已达到稳定 120 fps。
 

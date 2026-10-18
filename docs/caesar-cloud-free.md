@@ -1,6 +1,6 @@
 # Caesar cloud free
 
-**3.0.0 / versionCode 14。** 生产relay已实际部署免费文本直用`glm-4-flash-250414`和受控文字工具协议，`caesar-cloud-free.service`处于active。4.7优先/回退链和8秒首字切换等待已移除；Android免费深度入口移除，旧免费DEEP状态按FAST处理，图片仍用4V。工具执行继续由App权限、确认策略、按用户轮次幂等和账号边界控制，图片不使用工具。正式APK与更新源以发布流程的实际结果为准；服务active不代替最终生产请求检查或APK发布证据。见[3.0工具协议与验证](caesar-3.0-cloud-tools.md)及[总验收清单](caesar-3.0-acceptance.md)。
+**3.0.0 / versionCode 14。** 生产relay已实际部署免费文本直用`glm-4-flash-250414`和受控文字工具协议，`caesar-cloud-free.service`处于active。4.7优先/回退链和8秒首字切换等待已移除；Android免费深度入口移除，旧免费DEEP状态按FAST处理，图片仍用4V。工具执行继续由App权限、确认策略、按用户轮次幂等和账号边界控制，图片不使用工具。正式手机HTTPS只读工具往返已返回4条250分钟；发布CI成功，正式APK和双下载源已核验。见[3.0工具协议与验证](caesar-3.0-cloud-tools.md)及[总验收清单](caesar-3.0-acceptance.md)。
 
 历史状态（2026-10-14）：已配置服务器Key、部署杭州中转并保留数据安装到测试手机。主机OOM恢复后，手机真实登录下的快速文本免费兜底、GLM-4V-Flash图片理解及停止生成通过；当时深度仍受4.7拥堵影响。以下历史记录保留原结论，不代表当前路由或长期可用性。
 
