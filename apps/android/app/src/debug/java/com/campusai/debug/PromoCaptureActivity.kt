@@ -192,8 +192,8 @@ class PromoCaptureActivity : ComponentActivity() {
                                 onListCloudProviderModels = { Result.success(listOf(CloudProviderModel("deepseek-chat"), CloudProviderModel("deepseek-reasoner"))) },
                                 healthAutomationConfig = demoAutomation,
                                 healthAutomationMessage = demoMessage,
-                                onSaveHealthAutomation = { provider, model, interval, consent ->
-                                    demoAutomation = ScheduledTaskConfig("promo-only", ScheduledTaskType.HEALTH_CLOUD_STATUS, true, interval, provider, model, consent)
+                                onSaveHealthAutomation = { provider, model, interval, consent, options ->
+                                    demoAutomation = ScheduledTaskConfig("promo-only", ScheduledTaskType.HEALTH_CLOUD_STATUS, true, interval, provider, model, consent, options = options)
                                     demoMessage = "离线演示：启用状态示例，未进行联网验证"
                                 },
                                 onDisableHealthAutomation = {

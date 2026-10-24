@@ -675,7 +675,7 @@ class AiViewModel(
 
     fun openConversation(report: AiReportSummary) = openConversationById(report.id, report.ownerUserId)
 
-    fun openConversationById(id: String, owner: String) {
+    fun openConversationById(id: String, owner: String, onLoaded: () -> Unit = {}) {
         if (_state.value.streaming || owner !in setOf("local_user", activeOwnerUserId.ifBlank { "local_user" })) return
         invalidateHistoryLoad()
         caesarEngine.cancel()
@@ -689,12 +689,14 @@ class AiViewModel(
                 if (activeOwnerUserId == activeOwner && conversationRevision == revision && !_state.value.streaming) {
                     openHistoryJob = null
                     openConversation(report)
+                    onLoaded()
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
                 if (activeOwnerUserId == activeOwner && conversationRevision == revision) {
                     _state.value = _state.value.copy(error = error.message ?: "对话读取失败，请重试。", errorCode = "history_open_failed")
+                    onLoaded()
                 }
             }
         }

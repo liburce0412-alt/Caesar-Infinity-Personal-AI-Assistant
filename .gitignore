@@ -35,6 +35,7 @@ supabase/.temp/
 # Local device/build investigation output. These folders can contain APKs,
 # decoded application data, screenshots, logs, and device-specific reports.
 /artifacts/
+/apps/android/app/src/test/resources/timetables/web-grid.jpg
 /outputs/
 /.storage-analysis.json
 /.phone-storage-analysis.json

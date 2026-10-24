@@ -56,6 +56,22 @@ import org.robolectric.annotation.GraphicsMode
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class AiHistoryRaceTest {
+    @Test fun `external local conversation is consumed only after owner initialization and loading`() = runTest {
+        val saved = report("automation-health-daily", "local_user", "旧问题", "已保存回复")
+        reports[saved.id] = saved
+        val vm = viewModel()
+        var consumed = false
+        vm.openConversationById(saved.id, "local_user") { consumed = true }
+        vm.setActiveOwner("alice")
+        runCurrent()
+        assertFalse(consumed)
+        vm.openConversationById(saved.id, "local_user") { consumed = true }
+        assertFalse(consumed)
+        runCurrent()
+        assertTrue(consumed)
+        assertEquals("已保存回复", vm.state.value.messages.last().content)
+    }
+
     private val store = ViewModelStore()
     private var manager: LocalModelManager? = null
     private val reports = linkedMapOf<String, AiReportEntity>()

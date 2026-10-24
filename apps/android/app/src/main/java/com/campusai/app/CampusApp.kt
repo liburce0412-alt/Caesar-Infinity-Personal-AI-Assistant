@@ -106,6 +106,8 @@ import com.campusai.core.automation.ForegroundHealthTaskRunResult
 import com.campusai.core.automation.ForegroundHealthTaskRuntime
 import com.campusai.core.automation.HealthTaskDefaults
 import com.campusai.core.automation.ScheduledTaskConfig
+import com.campusai.core.automation.HealthTaskAiMode
+import com.campusai.core.automation.HealthAutomationScheduler
 import com.campusai.core.automation.healthTaskNotificationsEnabled
 import com.campusai.core.automation.mergeDisabledHealthTaskConfig
 import com.campusai.core.automation.mergeEnabledHealthTaskConfig
@@ -266,8 +268,9 @@ fun CampusApp(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val preferencesRepository = remember { UserPreferencesRepository(context.applicationContext) }
-    val localModelManager = remember { LocalModelManager(context.applicationContext) }
-    val localAiEngine = remember { LocalMnnAiEngine(context.applicationContext, localModelManager) }
+    val localRuntime = remember { com.campusai.core.localai.LocalAiRuntime.get(context.applicationContext) }
+    val localModelManager = localRuntime.manager
+    val localAiEngine = localRuntime.engine
     val agentLocalAiEngine = remember {
         MnnAgentEngineFactory.create(localAiEngine, localModelManager::manifestFor)
     }
@@ -276,12 +279,6 @@ fun CampusApp(
     val profileRepository = remember { ProfileRepository() }
     val campusRepository = remember { CampusRepository() }
     val profileState by profileRepository.state.collectAsState()
-    DisposableEffect(localModelManager, localAiEngine) {
-        onDispose {
-            localAiEngine.shutdown()
-            localModelManager.close()
-        }
-    }
     val authRepository = remember { AuthRepository.getInstance(context.applicationContext) }
     val authState by authRepository.state.collectAsState()
     val loadedPreferences by preferencesRepository.preferences.collectAsState(initial = null)
@@ -401,12 +398,13 @@ fun CampusApp(
         }
     }
 
-    LaunchedEffect(initialAutomationConversationId, aiRuntimeState.streaming) {
+    LaunchedEffect(initialAutomationConversationId, aiRuntimeState.streaming, authState.signedIn, authState.userId) {
         val conversationId = initialAutomationConversationId ?: return@LaunchedEffect
         if (aiRuntimeState.streaming) return@LaunchedEffect
-        aiViewModel.openConversationById(conversationId, "local_user")
+        // Initialize the account before loading; changing owner cancels pending history reads.
+        aiViewModel.setActiveOwner(authState.userId.takeIf { authState.signedIn }.orEmpty())
+        aiViewModel.openConversationById(conversationId, "local_user", onAutomationConversationConsumed)
         navigateTo(AppSurface.Ai(appSurface.returnDestination))
-        onAutomationConversationConsumed()
     }
 
     LaunchedEffect(lifecycleOwner, authState.signedIn, authState.userId) {
@@ -419,6 +417,14 @@ fun CampusApp(
         }
     }
 
+    LaunchedEffect(foregroundHealthRuntime) {
+        runCatching { foregroundHealthRuntime.store.read(HealthTaskDefaults.TASK_ID) }.onSuccess { saved ->
+            HealthAutomationScheduler.apply(context, saved).onFailure {
+                healthAutomationMessage = "后台定时暂未注册，请重新保存健康自动化设置。"
+                healthAutomationMessageIsError = true
+            }
+        }
+    }
     LaunchedEffect(foregroundHealthRuntime, lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (isActive) {
@@ -429,6 +435,7 @@ fun CampusApp(
                     if (config?.enabled == true) {
                         when (foregroundHealthRuntime.runner.run(HealthTaskDefaults.TASK_ID)) {
                             is ForegroundHealthTaskRunResult.Updated,
+                            ForegroundHealthTaskRunResult.Synced,
                             is ForegroundHealthTaskRunResult.Unchanged -> aiViewModel.refreshHealthStatus()
                             else -> Unit
                         }
@@ -631,6 +638,7 @@ fun CampusApp(
                                  miFitnessSyncing = healthState.miFitnessSyncing,
                                  miFitnessLastSyncAtMillis = healthState.miFitnessLastSyncAt,
                                  miFitnessStatus = healthState.miFitnessStatus.toSettingsStatus(),
+                                 miFitnessDeviceSyncStatus = healthState.miFitnessDeviceSyncStatus,
                                  miFitnessFormResetKey = healthState.miFitnessFormResetKey,
                                  onSaveMiFitnessCredentials = aiViewModel::saveMiFitnessCredentials,
                                  onRefreshMiFitnessSteps = aiViewModel::refreshMiFitnessSteps,
@@ -657,17 +665,21 @@ fun CampusApp(
                                  healthAutomationNotificationsEnabled = healthAutomationNotificationsEnabled,
                                  healthAutomationMessage = healthAutomationMessage,
                                  healthAutomationMessageIsError = healthAutomationMessageIsError,
-                                 onSaveHealthAutomation = saveAutomation@ { provider, rawModelId, intervalMinutes, includeSummary ->
+                                 onSaveHealthAutomation = saveAutomation@ { provider, rawModelId, intervalMinutes, includeSummary, draftOptions ->
                                      if (healthAutomationSaving) return@saveAutomation
                                      healthAutomationSaving = true
                                      healthAutomationMessage = null
                                      healthAutomationMessageIsError = false
                                      appScope.launch {
-                                         val modelId = provider.normalizeModelId(rawModelId)
-                                         val validation = if (includeSummary) {
-                                             foregroundHealthRuntime.aiClient.validate(provider, modelId)
-                                         } else {
-                                             Result.failure(IllegalArgumentException("需要先允许附带必要的今日汇总。"))
+                                         val modelId = if (draftOptions.aiMode == HealthTaskAiMode.PERSONAL_CLOUD) provider.normalizeModelId(rawModelId) else rawModelId
+                                         val options = draftOptions.copy(cloudFreeOwnerUserId = if (draftOptions.aiMode == HealthTaskAiMode.CAESAR_CLOUD_FREE) authState.userId else "")
+                                         val validation = when {
+                                             !healthState.miFitnessConfigured -> Result.failure(IllegalArgumentException("请先配置 Mi Fitness。"))
+                                             options.syncOnly -> Result.success(Unit)
+                                             options.aiMode == HealthTaskAiMode.LOCAL -> foregroundHealthRuntime.aiClient.validateLocal(modelId)
+                                             !includeSummary -> Result.failure(IllegalArgumentException("需要先允许附带必要的今日汇总。"))
+                                             options.aiMode == HealthTaskAiMode.CAESAR_CLOUD_FREE -> foregroundHealthRuntime.aiClient.validateCaesarCloudFree(options.cloudFreeOwnerUserId)
+                                             else -> foregroundHealthRuntime.aiClient.validate(provider, modelId)
                                          }
                                          validation.fold(
                                              onSuccess = {
@@ -679,15 +691,20 @@ fun CampusApp(
                                                          provider = provider,
                                                          modelId = modelId,
                                                          intervalMinutes = intervalMinutes,
-                                                         includeHealthSummary = true,
+                                                         includeHealthSummary = includeSummary,
+                                                         options = options,
                                                      )
                                                  }.fold(
                                                      onSuccess = { mutation ->
                                                          val saved = checkNotNull(mutation.updated)
                                                          val wasEnabled = mutation.previous?.enabled == true
                                                          healthAutomationConfig = saved
-                                                         healthAutomationMessage = "已启用，回到前台后会立即检查小米云。"
+                                                         healthAutomationMessage = if (saved.options.runInBackground) "已保存，后台按系统调度执行；前台到时也会检查。" else "已保存，将在 App 前台按间隔执行。"
                                                          healthAutomationMessageIsError = false
+                                                         HealthAutomationScheduler.apply(context, saved).onFailure {
+                                                             healthAutomationMessage = "设置已保存，但后台定时注册失败，请重新保存。"
+                                                             healthAutomationMessageIsError = true
+                                                         }
                                                          if (
                                                              !wasEnabled &&
                                                              Build.VERSION.SDK_INT >= 33 &&
@@ -725,6 +742,10 @@ fun CampusApp(
                                                   healthAutomationConfig = mutation.updated
                                                   healthAutomationMessage = "定时任务已停用。"
                                                  healthAutomationMessageIsError = false
+                                                 HealthAutomationScheduler.apply(context, mutation.updated).onFailure {
+                                                     healthAutomationMessage = "任务已停用，后台任务取消暂未确认；运行前仍会检查停用状态。"
+                                                     healthAutomationMessageIsError = true
+                                                 }
                                              },
                                              onFailure = { error ->
                                                  healthAutomationMessage = error.message ?: "停用失败，请重试。"

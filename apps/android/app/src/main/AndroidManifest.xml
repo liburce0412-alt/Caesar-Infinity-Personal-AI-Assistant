@@ -27,6 +27,7 @@
     <queries>
         <package android:name="miui.systemui.plugin" />
         <package android:name="com.google.android.apps.healthdata" />
+        <package android:name="com.mi.health" />
         <intent>
             <action android:name="android.speech.RecognitionService" />
         </intent>

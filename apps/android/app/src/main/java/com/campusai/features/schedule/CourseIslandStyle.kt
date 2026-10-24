@@ -54,7 +54,8 @@ internal object CourseIslandStyle {
             .put("dismissIsland", false).put("needCloseAnimation", true)
             .put("bigIslandArea", JSONObject()
                 .put("imageTextInfoLeft", JSONObject().put("type", 1).put("picInfo", islandPicture)
-                    .put("textInfo", text(if (active) "上课" else "待上课").put("colorTitle", "#FFFFFF")))
+                    // An en space keeps the final glyph clear of the camera cutout.
+                    .put("textInfo", text((if (active) "上课" else "待上课") + "\u2002").put("colorTitle", "#FFFFFF")))
                 .put("sameWidthDigitInfo", JSONObject().put("timerInfo", timer).put("content", "")
                     .put("colorDigit", accent).put("showHighlightColor", true).put("turnAnim", true)))
             .put("smallIslandArea", JSONObject().put("combinePicInfo", JSONObject().put("picInfo", islandPicture)
@@ -79,8 +80,8 @@ internal object CourseIslandStyle {
                 .put("colorTitle", lightAccent).put("colorTitleDark", accent)
                 .put("colorContent", "#445167").put("colorContentDark", "#BED5DB")
                 .put("colorSubContent", "#445167").put("colorSubContentDark", "#BAC8D9")
-                .put("actionInfo", JSONObject().put("action", OPEN).put("actionTitle", "查看课表")
-                    .put("actionIntentType", 1)))
+                // URI-action fields override the bundled PendingIntent on HyperOS.
+                .put("actionInfo", JSONObject().put("action", OPEN).put("actionTitle", "查看课表")))
         return JSONObject().put("param_v2", body)
     }
 

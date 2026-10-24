@@ -149,6 +149,7 @@ import com.campusai.core.health.HealthPermissionActivity
 import com.campusai.core.health.mifitness.MiFitnessSummaryHealthGateway
 import com.campusai.features.ai.CaesarHealthUiState
 import com.campusai.features.ai.MiFitnessUiStatus
+import com.campusai.features.ai.MiFitnessSyncNotice
 import com.campusai.features.community.CampusAnnouncement
 import com.campusai.features.time.TimeViewModel
 import com.campusai.features.schedule.CourseDraft
@@ -547,6 +548,7 @@ private fun HealthOverviewCard(
                                 emphasized = true,
                                 mood = PageMood.HEALTH,
                             )
+                            MiFitnessSyncNotice(state.miFitnessDeviceSyncStatus, state.miFitnessSyncing)
                         } else {
                             SpectraAction(
                                 text = if (needsPermission) "授权健康数据" else "刷新数据",
@@ -571,7 +573,7 @@ private fun HealthOverviewCard(
                                 }
                                 if (cloudConfigured) {
                                     HealthDetailRow("同步范围", "今日健康")
-                                    HealthDetailRow("手环连接", "CampusAI 不连接手环")
+                                    HealthDetailRow("手环连接", "由小米运动健康后台同步")
                                     HealthDetailRow("本机存储", "健康摘要加密保存")
                                     if (cloudFailure) {
                                         HealthDetailRow("最近同步", miFitnessFailureLabel(state.miFitnessStatus), error = true)
@@ -1008,6 +1010,7 @@ fun TimeScreen(
     onExpandTimetable: () -> Unit = {},
     initialCourseId: Int? = null,
     onCourseConsumed: () -> Unit = {},
+    onOpenIslandSettings: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val layout = SpectraTheme.layout
@@ -1015,16 +1018,11 @@ fun TimeScreen(
     val enabledNow by rememberUpdatedState(timetableExpanded)
     val courses by viewModel.courses.collectAsState()
     val importOwner by viewModel.activeUserId.collectAsState()
-    var showReminderSettings by rememberSaveable(importOwner) { mutableStateOf(false) }
     var reminderConfig by remember(importOwner) { mutableStateOf(com.campusai.features.schedule.CourseReminderStore(context).read(importOwner)) }
-    LaunchedEffect(initialCourseId) {
-        if (initialCourseId == -1) { showReminderSettings = true; onCourseConsumed() }
+    DisposableEffect(importOwner) {
+        val subscription = com.campusai.features.schedule.CourseReminderStore(context).observe(importOwner) { reminderConfig = it }
+        onDispose { subscription.close() }
     }
-    if (showReminderSettings) CourseReminderSettingsDialog(importOwner, courses,
-        onDismiss = { showReminderSettings = false }, onSaved = {
-            reminderConfig = com.campusai.features.schedule.CourseReminderStore(context).read(importOwner)
-            showReminderSettings = false
-        })
     var range by rememberSaveable { mutableStateOf("日") }
     var focusPreset by rememberSaveable { mutableIntStateOf(50) }
     var showAdd by rememberSaveable(importOwner) { mutableStateOf(false) }
@@ -1039,6 +1037,7 @@ fun TimeScreen(
     var importProgress by remember { mutableStateOf("") }
     var importSaving by remember { mutableStateOf(false) }
     var importSaveError by remember { mutableStateOf<String?>(null) }
+    var importNotice by remember { mutableStateOf<String?>(null) }
     var importJob by remember { mutableStateOf<Job?>(null) }
     var importRequest by remember { mutableLongStateOf(0L) }
     var pickerOwner by rememberSaveable { mutableStateOf<String?>(null) }
@@ -1053,33 +1052,32 @@ fun TimeScreen(
         val request = importRequest
         importing = true
         importError = null
+        importSaveError = null
+        importNotice = null
+        importDrafts = null
         importJob = scope.launch {
-            var inserted = 0
-            var duplicates = 0
+            val pending = mutableListOf<CourseDraft>()
             val failures = mutableListOf<Int>()
-            val weeks = mutableSetOf<String>()
             try {
                 val images = uris.distinct()
                 images.forEachIndexed { index, uri ->
-                    importProgress = "正在识别第 ${index + 1} / ${images.size} 张 · 已保存 $inserted 项"
+                    importProgress = "正在识别第 ${index + 1} / ${images.size} 张 · 待核对 ${pending.size} 项"
                     try {
                         val drafts = ScheduleImporter.fromImage(context, uri)
                         if (request != importRequest || owner != viewModel.activeUserId.value || !enabledNow) return@launch
                         if (drafts.isEmpty()) failures.add(index + 1)
-                        else {
-                            val result = viewModel.importCourses(drafts.map { it.toCourse() }, expectedOwner = owner)
-                            inserted += result.inserted
-                            duplicates += result.duplicates
-                            weeks.addAll(drafts.map { it.weeks }.filter { it.isNotBlank() })
-                        }
+                        else pending.addAll(drafts)
                     } catch (cancelled: CancellationException) { throw cancelled }
                     catch (_: Exception) { failures.add(index + 1) }
                 }
                 if (request == importRequest && owner == viewModel.activeUserId.value && enabledNow) {
                     importing = false
-                    if (failures.isNotEmpty()) importError = "已保存 $inserted 项课程。第 ${failures.joinToString("、")} 张未能导入，请重新选择清晰完整的截图。成功的周次已可使用。"
-                    onMessage("已导入 $inserted 项课程" + (if (weeks.isNotEmpty()) " · ${weeks.size} 个周次" else "") +
-                        (if (duplicates > 0) "，跳过 $duplicates 项重复课程" else ""), null)
+                    val notice = if (failures.isNotEmpty()) "第 ${failures.joinToString("、")} 张未能识别，请重新选择清晰完整的截图。" else null
+                    if (pending.isEmpty()) importError = notice ?: "未识别到课程，请选择完整原图。"
+                    else {
+                        importNotice = notice
+                        importDrafts = pending.toList()
+                    }
                 }
             } finally {
                 if (request == importRequest) { importing = false; importJob = null }
@@ -1093,6 +1091,7 @@ fun TimeScreen(
         importProgress = "正在读取日历文件"
         importError = null
         importSaveError = null
+        importNotice = null
         importJob = scope.launch {
             try {
                 val drafts = withContext(Dispatchers.IO) { ScheduleImporter.fromIcs(context, uri) }
@@ -1123,6 +1122,7 @@ fun TimeScreen(
         importDrafts = null
         importSaving = false
         importSaveError = null
+        importNotice = null
         importError = null
         showImport = false
     }
@@ -1181,7 +1181,7 @@ fun TimeScreen(
                                 }
                             }
                         }, onEdit = { editingCourse = it }, onImport = { showImport = true },
-                            semesterMonday = reminderConfig.semesterMonday, semesterWeeks = reminderConfig.semesterWeeks, onReminderSettings = { showReminderSettings = true },
+                            semesterMonday = reminderConfig.semesterMonday, semesterWeeks = reminderConfig.semesterWeeks, onReminderSettings = onOpenIslandSettings,
                             initialCourseId = initialCourseId, onCourseConsumed = onCourseConsumed)
                     }
                 }
@@ -1308,14 +1308,14 @@ fun TimeScreen(
         onDismiss = { showImport = false },
         onImage = { showImport = false; pickerOwner = importOwner; imagePicker.launch("image/*") },
         onIcs = { showImport = false; pickerOwner = importOwner; icsPicker.launch(arrayOf("text/calendar", "application/ics", "application/octet-stream")) },
-        onManual = { showImport = false; importSaveError = null; importDrafts = listOf(CourseDraft("新课程", 1, 8*60, 9*60+40)) },
+        onManual = { showImport = false; importSaveError = null; importNotice = null; importDrafts = listOf(CourseDraft("新课程", 1, 8*60, 9*60+40)) },
     )
     if (importing) SpectraDialog(onDismissRequest = { cancelRead() }) {
         Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("正在读取课程表", style = MaterialTheme.typography.titleLarge)
             androidx.compose.material3.LinearProgressIndicator(Modifier.fillMaxWidth())
             Text(importProgress)
-            Text("自动按截图周次保存；取消时保留已导入的课程。", style = MaterialTheme.typography.bodySmall)
+            Text("识别完成后核对确认；取消读取不会保存课程。", style = MaterialTheme.typography.bodySmall)
             TextButton(onClick = { cancelRead() }) { Text("取消读取") }
         }
     }
@@ -1335,6 +1335,7 @@ fun TimeScreen(
         initial = drafts,
         isSaving = importSaving,
         saveError = importSaveError,
+        sourceNotice = importNotice,
         onDismiss = { importDrafts = null },
         onConfirm = { edited ->
             if (!importSaving) {

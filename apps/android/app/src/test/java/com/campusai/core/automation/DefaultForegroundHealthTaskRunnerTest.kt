@@ -23,6 +23,71 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DefaultForegroundHealthTaskRunnerTest {
+    @Test fun health_summary_and_saved_messages_reach_progress_in_order() = runTest {
+        val stages = mutableListOf<Pair<HealthTaskStage, String?>>()
+        val progress = object : HealthTaskProgressPublisher {
+            override suspend fun publish(stage: HealthTaskStage, preview: String?) { stages += stage to preview }
+            override fun clear() = Unit
+        }
+        val fixture = fixture(progress = progress)
+        fixture.runner.run(TASK_ID)
+        assertEquals(listOf(HealthTaskStage.SYNCING, HealthTaskStage.REFRESHED,
+            HealthTaskStage.GENERATING, HealthTaskStage.SENDING, HealthTaskStage.COMPLETE), stages.map { it.first })
+        assertTrue(stages[1].second!!.contains("974"))
+        assertEquals(fixture.writer.batches.single().joinToString("\n"), stages[3].second)
+    }
+
+    @Test fun sync_only_requests_device_and_refreshes_without_ai_conversation_or_messages() = runTest {
+        val fixture = fixture()
+        fixture.store.config = fixture.store.config.copy(includeHealthSummary = false,
+            options = HealthTaskOptions(syncOnly = true))
+        assertEquals(ForegroundHealthTaskRunResult.Synced, fixture.runner.run(TASK_ID))
+        assertEquals(1, fixture.source.deviceRequests)
+        assertTrue(fixture.source.requestedBeforeRead)
+        assertEquals(0, fixture.ai.calls)
+        assertTrue(fixture.writer.batches.isEmpty())
+        assertTrue(fixture.notifier.batches.isEmpty())
+        assertEquals(ScheduledTaskRunStatus.SYNCED, fixture.store.config.lastStatus)
+    }
+
+    @Test fun free_cloud_and_local_use_their_selected_route_without_personal_cloud_fallback() = runTest {
+        for (mode in listOf(HealthTaskAiMode.CAESAR_CLOUD_FREE, HealthTaskAiMode.LOCAL)) {
+            val fixture = fixture()
+            fixture.store.config = fixture.store.config.copy(
+                modelId = if (mode == HealthTaskAiMode.LOCAL) "qwen3.5-2b-mnn" else ScheduledTaskConfig.CLOUD_FREE_MODEL,
+                includeHealthSummary = mode != HealthTaskAiMode.LOCAL,
+                options = HealthTaskOptions(aiMode = mode, cloudFreeOwnerUserId = "owner"),
+            )
+            assertTrue(fixture.runner.run(TASK_ID) is ForegroundHealthTaskRunResult.Updated)
+            assertEquals(1, fixture.source.deviceRequests)
+            assertTrue(fixture.source.requestedBeforeRead)
+            assertEquals(0, fixture.ai.calls)
+            assertEquals(if (mode == HealthTaskAiMode.LOCAL) 1 else 0, fixture.ai.localCalls)
+            assertEquals(if (mode == HealthTaskAiMode.CAESAR_CLOUD_FREE) 1 else 0, fixture.ai.freeCalls)
+        }
+    }
+
+    @Test fun changing_to_sync_only_before_free_cloud_submission_revokes_the_old_send() = runTest {
+        val fixture = fixture()
+        fixture.store.config = fixture.store.config.copy(modelId = ScheduledTaskConfig.CLOUD_FREE_MODEL,
+            options = HealthTaskOptions(aiMode = HealthTaskAiMode.CAESAR_CLOUD_FREE, cloudFreeOwnerUserId = "owner"))
+        fixture.ai.beforeSubmission = {
+            fixture.store.config = fixture.store.config.copy(options = fixture.store.config.options.copy(syncOnly = true))
+        }
+        assertEquals(ForegroundHealthTaskRunResult.Superseded, fixture.runner.run(TASK_ID))
+        assertEquals(0, fixture.ai.submissions)
+        assertTrue(fixture.writer.batches.isEmpty())
+        assertTrue(fixture.notifier.batches.isEmpty())
+    }
+
+    @Test fun explicit_cloud_only_setting_skips_device_request() = runTest {
+        val fixture = fixture()
+        fixture.store.config = fixture.store.config.copy(options = HealthTaskOptions(syncBeforeMessage = false))
+        fixture.runner.run(TASK_ID)
+        assertEquals(0, fixture.source.deviceRequests)
+        assertEquals(1, fixture.source.calls)
+    }
+
     @Test
     fun changed_revision_generates_batch_and_persists_revision() = runTest {
         val fixture = fixture()
@@ -283,6 +348,7 @@ class DefaultForegroundHealthTaskRunnerTest {
         aiFailure: Throwable? = null,
         sourceYield: Boolean = false,
         sourceObservation: HealthCloudObservation = observation(),
+        progress: HealthTaskProgressPublisher = HealthTaskProgressPublisher.None,
     ): Fixture {
         val config = task(lastRevision, lastAttemptAt)
         val store = FakeStore(config)
@@ -291,7 +357,7 @@ class DefaultForegroundHealthTaskRunnerTest {
         val writer = FakeWriter()
         val notifier = FakeNotifier()
         return Fixture(
-            runner = DefaultForegroundHealthTaskRunner(store, source, ai, writer, notifier) { NOW },
+            runner = DefaultForegroundHealthTaskRunner(store, source, ai, writer, notifier, progress) { NOW },
             store = store,
             source = source,
             ai = ai,
@@ -358,10 +424,18 @@ class DefaultForegroundHealthTaskRunnerTest {
         var afterRefresh: (() -> Unit)? = null
         var thrownFailure: RuntimeException? = null
         var calls = 0
+        var deviceRequests = 0
+        var requestedBeforeRead = false
         var maxActive = 0
         private val active = AtomicInteger()
 
+        override suspend fun requestDeviceSync(withSubmissionLease: suspend (() -> Unit) -> Boolean): com.campusai.core.health.mifitness.MiFitnessDeviceSyncStatus {
+            withSubmissionLease { deviceRequests++ }
+            return com.campusai.core.health.mifitness.MiFitnessDeviceSyncStatus.REQUESTED
+        }
+
         override suspend fun refreshToday(): Result<HealthCloudObservation> {
+            requestedBeforeRead = deviceRequests > 0
             thrownFailure?.let { throw it }
             calls++
             maxActive = maxOf(maxActive, active.incrementAndGet())
@@ -373,12 +447,31 @@ class DefaultForegroundHealthTaskRunnerTest {
     }
 
     private class FakeAi(private val failure: Throwable?) : HealthAutoMessageClient {
+        var freeCalls = 0
+        var localCalls = 0
         var calls = 0
         var submissions = 0
         var lastProvider: CloudAiProvider? = null
         var lastModel: String? = null
         var beforeSubmission: suspend () -> Unit = {}
         var afterSubmission: suspend () -> Unit = {}
+        override suspend fun generateCaesarCloudFree(ownerUserId: String, summary: CloudDailyHealthSummary,
+            withSubmissionLease: suspend (() -> Unit) -> Boolean): Result<AutoMessageBatch> {
+            freeCalls++
+            assertEquals("owner", ownerUserId)
+            return alternateBatch(withSubmissionLease)
+        }
+        override suspend fun generateLocal(modelId: String, summary: CloudDailyHealthSummary,
+            withSubmissionLease: suspend (() -> Unit) -> Boolean): Result<AutoMessageBatch> {
+            localCalls++
+            assertEquals("qwen3.5-2b-mnn", modelId)
+            return alternateBatch(withSubmissionLease)
+        }
+        private suspend fun alternateBatch(lease: suspend (() -> Unit) -> Boolean): Result<AutoMessageBatch> {
+            beforeSubmission()
+            if (!lease { submissions++ }) return Result.failure(HealthTaskException("request_superseded", "superseded"))
+            return Result.success(AutoMessageBatch(listOf("今天走得不少呀", "继续保持就好")))
+        }
         override suspend fun validate(provider: CloudAiProvider, modelId: String): Result<Unit> =
             failure?.let { Result.failure(it) } ?: Result.success(Unit)
 

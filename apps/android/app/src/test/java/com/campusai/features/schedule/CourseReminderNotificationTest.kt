@@ -8,6 +8,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import java.time.LocalDate
 
@@ -66,6 +67,10 @@ class CourseReminderNotificationTest {
             val params = CourseIslandStyle.params(item, at).getJSONObject("param_v2")
             val target = if (at < item.start) item.start else item.end
             val island = params.getJSONObject("param_island")
+            val compactTitle = island.getJSONObject("bigIslandArea").getJSONObject("imageTextInfoLeft")
+                .getJSONObject("textInfo").getString("title")
+            assertTrue(compactTitle.trim().length <= 3)
+            assertTrue(compactTitle.endsWith("\u2002"))
             val compactTimer = island.getJSONObject("bigIslandArea").getJSONObject("sameWidthDigitInfo").getJSONObject("timerInfo")
             val expandedTimer = params.getJSONObject("hintInfo").getJSONObject("timerInfo")
             assertEquals(target, compactTimer.getLong("timerWhen"))
@@ -75,10 +80,27 @@ class CourseReminderNotificationTest {
             assertEquals((item.end - at + 59999) / 60000, params.getLong("timeout"))
             assertFalse("Expanded progress replaces the countdown template on HyperOS", params.has("progressInfo"))
         }
-        val notification = CourseReminderNotifications.build(context, "owner", item, CourseReminderConfig(), now)
-        CourseIslandStyle.apply(context, notification, item, now)
-        val open = notification.extras.getBundle("miui.focus.actions")!!.getParcelable<Notification.Action>(CourseIslandStyle.OPEN)!!
-        assertEquals(notification.contentIntent, open.actionIntent)
+    }
+
+    @Test fun `native course action keeps its bundled activity intent without URI overrides`() {
+        for (at in listOf(now, item.start)) {
+            val notification = CourseReminderNotifications.build(context, "owner", item, CourseReminderConfig(), at)
+            CourseIslandStyle.apply(context, notification, item, at)
+            val action = org.json.JSONObject(notification.extras.getString("miui.focus.param")!!)
+                .getJSONObject("param_v2").getJSONObject("hintInfo").getJSONObject("actionInfo")
+            assertEquals(CourseIslandStyle.OPEN, action.getString("action"))
+            assertEquals("查看课表", action.getString("actionTitle"))
+            assertFalse(action.has("actionIntentType"))
+            assertFalse(action.has("actionIntent"))
+            val open = notification.extras.getBundle("miui.focus.actions")!!
+                .getParcelable<Notification.Action>(action.getString("action"))!!
+            assertEquals("查看课表", open.title)
+            assertEquals(notification.contentIntent, open.actionIntent)
+            val intent = shadowOf(open.actionIntent).savedIntent
+            assertEquals(CourseReminderNotifications.ACTION_OPEN, intent.action)
+            assertEquals(item.course.id, intent.getIntExtra(CourseReminderNotifications.EXTRA_COURSE_ID, -1))
+            assertEquals("owner", intent.getStringExtra("owner"))
+        }
     }
 
     @Test fun `new appearance persists per account and colorful template remains available`() {

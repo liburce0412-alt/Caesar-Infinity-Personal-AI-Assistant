@@ -94,7 +94,7 @@ class CommunityPrivacyUiTest {
         }
         compose.onNodeWithContentDescription("心愿图片").assertDoesNotExist()
         compose.onNodeWithText("¥0.00").assertDoesNotExist()
-        compose.onNodeWithText("仅自己可见").assertDoesNotExist()
+        compose.onNodeWithText("仅自己可见").assertExists()
         compose.onNodeWithText("周末，想去看一场日出").performClick()
         compose.runOnIdle { assertTrue(opened) }
         compose.onRoot().captureRoboImage("../../../artifacts/glass-text-card-${theme.name.lowercase()}-$fontScale.png")

@@ -8,6 +8,7 @@ import com.campusai.core.health.*
 import java.time.Instant
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
@@ -71,6 +72,26 @@ class AiHealthDayControllerTest {
         assertNull(controller.healthState.value.snapshot)
         assertFalse(controller.healthState.value.loading)
         controller.close()
+    }
+
+    @Test fun `cache commit refreshes the visible timestamp without waiting for an automation message`() = runTest {
+        var now = midnight + 1
+        val updates = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+        val gateway = Gateway { Result.success(snapshot(now)) }
+        val controller = AiHealthController(context, this, gateway, updates) { now }
+        controller.refreshHealthStatus()
+        runCurrent()
+        assertEquals(now, controller.healthState.value.snapshot?.lastSyncAt)
+        now += 10_000L
+        updates.emit(Unit)
+        runCurrent()
+        assertEquals(now, controller.healthState.value.snapshot?.lastSyncAt)
+        assertFalse(controller.healthState.value.loading)
+        controller.close()
+        val reads = gateway.periods.size
+        updates.emit(Unit)
+        runCurrent()
+        assertEquals(reads, gateway.periods.size)
     }
 
     private fun snapshot(now: Long) = HealthSnapshot(setOf("local.health"), HealthPeriods.parse("today", now),

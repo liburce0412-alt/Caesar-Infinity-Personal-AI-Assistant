@@ -18,6 +18,38 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class NoBackupScheduledTaskStoreTest {
+    @Test fun customIntervalSurvivesReloadWithoutBeingReplacedByBackgroundMinimum() = runTest {
+        val store = NoBackupScheduledTaskStore(context)
+        val config = ScheduledTaskConfig("daily", ScheduledTaskType.HEALTH_CLOUD_STATUS, true, 7,
+            CloudAiProvider.GOOGLE_GEMINI, ScheduledTaskConfig.CLOUD_FREE_MODEL, false,
+            options = HealthTaskOptions(syncOnly = true, runInBackground = true,
+                aiMode = HealthTaskAiMode.CAESAR_CLOUD_FREE))
+        store.save(config).getOrThrow()
+        val restored = checkNotNull(NoBackupScheduledTaskStore(context).read("daily"))
+        assertEquals(config, restored)
+        assertEquals(7, restored.intervalMinutes)
+        assertEquals(15, restored.backgroundIntervalMinutes)
+    }
+
+    @Test fun options_roundtrip_and_legacy_config_remains_cloud_only() = runTest {
+        val store = NoBackupScheduledTaskStore(context)
+        val config = ScheduledTaskConfig("daily", ScheduledTaskType.HEALTH_CLOUD_STATUS, true, 15,
+            CloudAiProvider.GOOGLE_GEMINI, ScheduledTaskConfig.CLOUD_FREE_MODEL, true,
+            options = HealthTaskOptions(syncOnly = true, runInBackground = true,
+                aiMode = HealthTaskAiMode.CAESAR_CLOUD_FREE, cloudFreeOwnerUserId = "owner"))
+        store.save(config).getOrThrow()
+        assertEquals(config, store.read("daily"))
+        val legacy = org.json.JSONObject(file.readText())
+        val row = legacy.getJSONArray("tasks").getJSONObject(0)
+        listOf("syncOnly", "syncBeforeMessage", "runInBackground", "aiMode", "cloudFreeOwnerUserId").forEach(row::remove)
+        row.put("modelId", "gemini-2.5-flash")
+        file.writeText(legacy.toString())
+        val restored = checkNotNull(store.read("daily"))
+        assertFalse(restored.options.syncBeforeMessage)
+        assertFalse(restored.options.runInBackground)
+        assertEquals(HealthTaskAiMode.PERSONAL_CLOUD, restored.options.aiMode)
+    }
+
     private val context = ApplicationProvider.getApplicationContext<Context>()
     private val file = File(context.noBackupFilesDir, "automation/scheduled_tasks_v1.json")
 

@@ -31,6 +31,7 @@ internal fun CaesarHealthUiState.forCurrentHealthDay(nowMillis: Long = System.cu
     val expired = (snapshot != null && current == null) || (miFitnessLastSyncAt != null && syncAt == null)
     return copy(snapshot = current, miFitnessLastSyncAt = syncAt,
         miFitnessStatus = if (expired && miFitnessStatus == MiFitnessUiStatus.SUCCESS) MiFitnessUiStatus.IDLE else miFitnessStatus,
+        miFitnessDeviceSyncStatus = if (expired && !miFitnessSyncing) null else miFitnessDeviceSyncStatus,
         actionMessage = if (expired) null else actionMessage)
 }
 

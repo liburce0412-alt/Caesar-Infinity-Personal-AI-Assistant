@@ -14,7 +14,18 @@ enum class ScheduledTaskRunStatus {
     UPDATED,
     UNCHANGED,
     ERROR,
+    SYNCED,
 }
+
+enum class HealthTaskAiMode { CAESAR_CLOUD_FREE, LOCAL, PERSONAL_CLOUD }
+
+data class HealthTaskOptions(
+    val syncBeforeMessage: Boolean = true,
+    val syncOnly: Boolean = false,
+    val runInBackground: Boolean = false,
+    val aiMode: HealthTaskAiMode = HealthTaskAiMode.PERSONAL_CLOUD,
+    val cloudFreeOwnerUserId: String = "",
+)
 
 data class ScheduledTaskConfig(
     val id: String,
@@ -30,11 +41,16 @@ data class ScheduledTaskConfig(
     val lastStatus: ScheduledTaskRunStatus = ScheduledTaskRunStatus.IDLE,
     /** Stable diagnostic code only; never contains provider or health payloads. */
     val lastErrorCode: String? = null,
+    val options: HealthTaskOptions = HealthTaskOptions(),
 ) {
     init {
         require(ID_PATTERN.matches(id)) { "Invalid scheduled task id" }
         require(intervalMinutes in ALLOWED_INTERVAL_MINUTES) { "Invalid scheduled task interval" }
-        require(modelId == provider.normalizeModelId(modelId) && provider.acceptsModelId(modelId)) {
+        require(when (options.aiMode) {
+            HealthTaskAiMode.CAESAR_CLOUD_FREE -> modelId == CLOUD_FREE_MODEL
+            HealthTaskAiMode.LOCAL -> com.campusai.core.localai.LocalModelMode.entries.any { it.modelId == modelId }
+            HealthTaskAiMode.PERSONAL_CLOUD -> modelId == provider.normalizeModelId(modelId) && provider.acceptsModelId(modelId)
+        }) {
             "Invalid scheduled task model"
         }
         require(lastAttemptAt == null || lastAttemptAt >= 0L) { "Invalid scheduled task timestamp" }
@@ -46,6 +62,9 @@ data class ScheduledTaskConfig(
         }
     }
 
+    /** WorkManager cannot schedule periodic work more frequently than 15 minutes. */
+    val backgroundIntervalMinutes: Int get() = intervalMinutes.coerceAtLeast(MIN_BACKGROUND_INTERVAL_MINUTES)
+
     fun isDue(nowMillis: Long): Boolean {
         if (!enabled) return false
         val lastAttempt = lastAttemptAt ?: return true
@@ -53,8 +72,10 @@ data class ScheduledTaskConfig(
     }
 
     companion object {
-        val ALLOWED_INTERVAL_MINUTES = setOf(5, 10, 15, 30)
+        val ALLOWED_INTERVAL_MINUTES = 3..60
+        const val MIN_BACKGROUND_INTERVAL_MINUTES = 15
         const val DEFAULT_INTERVAL_MINUTES = 5
+        const val CLOUD_FREE_MODEL = "glm-4-flash-250414"
 
         private val ID_PATTERN = Regex("[a-zA-Z0-9._-]{1,64}")
         private val REVISION_PATTERN = Regex("[0-9a-f]{64}")
@@ -122,9 +143,10 @@ fun mergeEnabledHealthTaskConfig(
     modelId: String,
     intervalMinutes: Int,
     includeHealthSummary: Boolean,
+    options: HealthTaskOptions = HealthTaskOptions(),
 ): ScheduledTaskConfig {
     val sameExecution = current?.type == ScheduledTaskType.HEALTH_CLOUD_STATUS &&
-        current.provider == provider && current.modelId == modelId
+        current.provider == provider && current.modelId == modelId && current.options == options
     val preserveRuntime = current?.enabled == true && sameExecution
     return ScheduledTaskConfig(
         id = HealthTaskDefaults.TASK_ID,
@@ -134,6 +156,7 @@ fun mergeEnabledHealthTaskConfig(
         provider = provider,
         modelId = modelId,
         includeHealthSummary = includeHealthSummary,
+        options = options,
         lastAttemptAt = current?.lastAttemptAt?.takeIf { preserveRuntime },
         lastSourceRevision = current?.lastSourceRevision?.takeIf { sameExecution },
         lastStatus = current?.lastStatus?.takeIf { preserveRuntime } ?: ScheduledTaskRunStatus.IDLE,
@@ -151,6 +174,7 @@ sealed interface ForegroundHealthTaskRunResult {
     data object Disabled : ForegroundHealthTaskRunResult
     data object NotDue : ForegroundHealthTaskRunResult
     data object Superseded : ForegroundHealthTaskRunResult
+    data object Synced : ForegroundHealthTaskRunResult
     data class Updated(
         val conversationId: String,
         val messageCount: Int,
@@ -167,7 +191,7 @@ sealed interface ForegroundHealthTaskRunResult {
 
 interface ForegroundHealthTaskRunner {
     /** Runs at most one iteration. Lifecycle owners decide when to call it again. */
-    suspend fun run(taskId: String, force: Boolean = false): ForegroundHealthTaskRunResult
+    suspend fun run(taskId: String, force: Boolean = false, background: Boolean = false): ForegroundHealthTaskRunResult
 }
 
 object HealthTaskDefaults {

@@ -107,6 +107,8 @@ data class HealthCloudObservation(
 }
 
 interface ForegroundHealthCloudSource {
+    suspend fun requestDeviceSync(withSubmissionLease: suspend (() -> Unit) -> Boolean): com.campusai.core.health.mifitness.MiFitnessDeviceSyncStatus =
+        com.campusai.core.health.mifitness.MiFitnessDeviceSyncStatus.APP_UNAVAILABLE
     suspend fun refreshToday(): Result<HealthCloudObservation>
 }
 
@@ -174,6 +176,26 @@ data class AutoMessageBatch(
 }
 
 interface HealthAutoMessageClient {
+    suspend fun validateLocal(modelId: String): Result<Unit> =
+        Result.failure(HealthTaskException("local_model_unavailable", "请先下载并校验本地模型。"))
+
+    suspend fun generateLocal(
+        modelId: String,
+        summary: CloudDailyHealthSummary,
+        withSubmissionLease: suspend (submit: () -> Unit) -> Boolean,
+    ): Result<AutoMessageBatch> =
+        Result.failure(HealthTaskException("local_model_unavailable", "本地模型暂不可用。"))
+
+    suspend fun validateCaesarCloudFree(ownerUserId: String): Result<Unit> =
+        Result.failure(HealthTaskException("task_model_unavailable", "免费云端暂不可用。"))
+
+    suspend fun generateCaesarCloudFree(
+        ownerUserId: String,
+        summary: CloudDailyHealthSummary,
+        withSubmissionLease: suspend (submit: () -> Unit) -> Boolean,
+    ): Result<AutoMessageBatch> =
+        Result.failure(HealthTaskException("task_model_unavailable", "免费云端暂不可用。"))
+
     /** Must validate this exact model against the provider's current model list. */
     suspend fun validate(provider: CloudAiProvider, modelId: String): Result<Unit>
 

@@ -33,8 +33,8 @@ android {
     applicationId = "com.aistudio.campusai.ywtpzx"
     minSdk = 24
     targetSdk = 36
-    versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 14
-    versionName = System.getenv("VERSION_NAME") ?: "3.0.0"
+    versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 15
+    versionName = System.getenv("VERSION_NAME") ?: "3.1.0"
     buildConfigField("String", "CAESAR_CLOUD_TEST_ENDPOINT", "\"\"")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -105,6 +105,7 @@ android {
     }
   }
   sourceSets.getByName("androidTest").assets.directories.add("$projectDir/schemas")
+  sourceSets.getByName("androidTest").assets.directories.add("$projectDir/src/test/resources/timetables")
   // Robolectric reads Room migration schemas through the debug app's
   // AssetManager; keep them out of release builds while making local tests real.
   sourceSets.getByName("debug").assets.directories.add("$projectDir/schemas")

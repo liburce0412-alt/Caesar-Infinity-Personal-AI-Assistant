@@ -128,10 +128,10 @@ internal fun ListingDetails(
                         UiState.Loading -> item { Text("正在读取留言", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         UiState.Empty -> item { Text(if (ownListing) "今天，离它近了一点吗？把这一小步记在这里。" else "一句真诚的回应，也能让期待多一点温度。", color = MaterialTheme.colorScheme.onSurface.copy(.65f)) }
                         is UiState.Error -> item { Text(comments.message, color = MaterialTheme.colorScheme.error); SpectraAction("重试", onRetry) }
-                        is UiState.Data -> items(comments.value, key = { it.id }) { CommentRow(it) }
+                        is UiState.Data -> items(comments.value, key = { it.id }) { CommentRow(it, listing.isPublic) }
                         is UiState.Offline -> {
                             item { SpectraAction("重新读取留言", onRetry) }
-                            items(comments.value, key = { it.id }) { CommentRow(it) }
+                            items(comments.value, key = { it.id }) { CommentRow(it, listing.isPublic) }
                         }
                     }
                 }

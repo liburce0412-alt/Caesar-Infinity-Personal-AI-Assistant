@@ -2,12 +2,14 @@ package com.campusai.features.ai
 
 import com.campusai.core.health.HealthAvailability
 import com.campusai.core.health.HealthSnapshot
+import com.campusai.core.health.mifitness.MiFitnessDeviceSyncStatus
 
 data class CaesarHealthUiState(
     val loading: Boolean = false,
     val miFitnessConfigured: Boolean = false,
     val miFitnessSyncing: Boolean = false,
     val miFitnessStatus: MiFitnessUiStatus = MiFitnessUiStatus.IDLE,
+    val miFitnessDeviceSyncStatus: MiFitnessDeviceSyncStatus? = null,
     val miFitnessLastSyncAt: Long? = null,
     val miFitnessFormResetKey: Long = 0L,
     val availability: HealthAvailability? = null,

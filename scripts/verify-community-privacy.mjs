@@ -1,7 +1,10 @@
 // Isolated PostgreSQL/WASM verification. Never connects to the configured Supabase project.
 // npm install --prefix artifacts/privacy-db --no-save --package-lock=false @electric-sql/pglite
 // node scripts/verify-community-privacy.mjs
-import { PGlite } from '../artifacts/privacy-db/node_modules/@electric-sql/pglite/dist/index.js'
+import { pathToFileURL } from 'node:url'
+const { PGlite } = await import(process.env.CAMPUSAI_PGLITE_MODULE
+  ? pathToFileURL(process.env.CAMPUSAI_PGLITE_MODULE).href
+  : '../artifacts/privacy-db/node_modules/@electric-sql/pglite/dist/index.js')
 import { readFile, readdir } from 'node:fs/promises'
 import assert from 'node:assert/strict'
 
@@ -184,6 +187,61 @@ try {
   await run(`select edit_community_post_visibility('${publicPost}','Hidden again','',false,null,false)`)
   await asUser(stranger)
   await equal(`select count(*) from storage.objects where name='${owner}/legacy.jpg'`, 0)
+  await run('reset role')
+  await run(await readFile('supabase/migrations/20261020111414_unified_community_moderation.sql', 'utf8'))
+  // Previously approved comments remain published, new ones must await review.
+  await equal(`select moderation_status from listing_comments where listing_id='${publicWish}'`, 'approved')
+  await asUser(owner)
+  const hiddenWish = await scalar(`insert into listings(seller_id,title,category,condition,price_cents)
+    values('${owner}','Private review boundary','其他','良好',null) returning id`)
+  const hiddenComment = await scalar(`select create_wish_comment('${hiddenWish}','Private progress')`)
+  const pendingWishComment = await scalar(`select create_wish_comment('${publicWish}','New pending comment')`)
+  await equal(`select moderation_status from listing_comments where id='${pendingWishComment}'`, 'pending')
+  await denied(`update listing_comments set moderation_status='approved' where id='${pendingWishComment}'`)
+  await denied(`select moderate_content('listing_comment','${pendingWishComment}','approved')`)
+  await asUser(stranger)
+  await equal(`select count(*) from listing_comments where id='${pendingWishComment}'`, 0)
+  await asUser(staff)
+  await equal(`select count(*) from listing_comments where id='${pendingWishComment}'`, 1)
+  await equal(`select count(*) from listing_comments where id='${hiddenComment}'`, 0)
+  await denied(`select moderate_content('listing_comment','${hiddenComment}','approved')`)
+  await denied(`select moderate_content('listing','${hiddenWish}','approved')`)
+  await denied(`select moderate_content('post','${publicPost}','approved')`) // now private
+  await denied(`select moderate_content('listing_comment','${pendingWishComment}',null)`)
+  await run(`select moderate_content('listing_comment','${pendingWishComment}','approved')`)
+  await asUser(stranger)
+  await equal(`select count(*) from listing_comments where id='${pendingWishComment}'`, 1)
+  await asUser(staff)
+  await run(`select moderate_content('listing_comment','${pendingWishComment}','rejected')`)
+  await asUser(stranger)
+  await equal(`select count(*) from listing_comments where id='${pendingWishComment}'`, 0)
+  await asUser(owner)
+  await equal(`select moderation_status from listing_comments where id='${pendingWishComment}'`, 'rejected')
+  await run(`select edit_community_post_visibility('${publicPost}','Visible pending','',false,null,true)`)
+  await asUser(stranger)
+  await equal(`select count(*) from posts where id='${publicPost}'`, 0)
+  await asUser(staff)
+  await run(`select moderate_content('post','${publicPost}','approved')`)
+  await asUser(owner)
+  const comment = await scalar(`select (create_comment('${publicPost}','Count only after approval')).id`)
+  await equal(`select comment_count from posts where id='${publicPost}'`, 0)
+  await asUser(stranger)
+  await equal(`select count(*) from comments where id='${comment}'`, 0)
+  await asUser(staff)
+  await run(`select moderate_content('comment','${comment}','approved')`)
+  await equal(`select comment_count from posts where id='${publicPost}'`, 1)
+  await asUser(stranger)
+  await equal(`select count(*) from comments where id='${comment}'`, 1)
+  await asUser(staff)
+  await run(`select moderate_content('comment','${comment}','removed')`)
+  await equal(`select comment_count from posts where id='${publicPost}'`, 0)
+  await asUser(stranger)
+  await equal(`select count(*) from comments where id='${comment}'`, 0)
+  await asUser(owner)
+  await run(`update posts set body='Edited, needs review again' where id='${publicPost}'`)
+  await equal(`select moderation_status from posts where id='${publicPost}'`, 'pending')
+  await run('reset role')
+  await equal(`select count(*) from audit_logs where resource_id='${pendingWishComment}' and action='MODERATE_CONTENT'`, 2)
   console.log(`PASS: ${checks} privacy/price assertions; real migrations + RLS + RPCs in isolated PostgreSQL/WASM.`)
 } finally {
   await db.close()

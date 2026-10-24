@@ -62,6 +62,7 @@ class MiFitnessAccountService internal constructor(
                             "Mi Fitness 云端尚未返回今天的步数记录。",
                         ),
                     )
+                MiFitnessStepsSyncService.notifyCacheUpdated()
                 Result.success(summary)
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -89,6 +90,7 @@ class MiFitnessAccountService internal constructor(
                     MiFitnessAccountException("credential_delete_failed", "小米运动健康凭据未删除。"),
                 )
             }
+            MiFitnessStepsSyncService.notifyCacheUpdated()
             Result.success(Unit)
         } catch (cancelled: CancellationException) {
             throw cancelled

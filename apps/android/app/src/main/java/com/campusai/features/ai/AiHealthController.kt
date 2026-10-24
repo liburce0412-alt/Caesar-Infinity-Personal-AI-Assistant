@@ -11,14 +11,18 @@ import com.campusai.core.health.HealthPeriods
 import com.campusai.core.health.mifitness.MiFitnessAccountException
 import com.campusai.core.health.mifitness.MiFitnessAccountService
 import com.campusai.core.health.mifitness.MiFitnessCredentialStore
+import com.campusai.core.health.mifitness.MiFitnessDeviceSyncStatus
 import com.campusai.core.health.mifitness.MiFitnessStepsSyncException
 import com.campusai.core.health.mifitness.MiFitnessStepsSyncScheduler
 import com.campusai.core.health.mifitness.MiFitnessStepsSyncWorker
+import com.campusai.core.health.mifitness.MiFitnessStepsSyncService
 import com.campusai.core.health.mifitness.MiFitnessSummaryHealthGateway
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -28,6 +32,7 @@ internal class AiHealthController(
     private val appContext: Context,
     private val viewModelScope: kotlinx.coroutines.CoroutineScope,
     private val healthGateway: HealthGateway,
+    cacheUpdates: Flow<Unit> = MiFitnessStepsSyncService.updates,
     private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
     private val network = NetworkAvailability(appContext)
@@ -41,6 +46,9 @@ internal class AiHealthController(
         CaesarHealthUiState(miFitnessConfigured = miFitnessCredentialStore.hasCredentials()),
     )
     val healthState: StateFlow<CaesarHealthUiState> = _healthState.asStateFlow()
+    private val cacheUpdateJob = viewModelScope.launch {
+        cacheUpdates.collect { loadHealthStatus() }
+    }
     fun refreshHealthStatus() {
         if (_healthState.value.loading) return
         viewModelScope.launch { loadHealthStatus() }
@@ -53,6 +61,7 @@ internal class AiHealthController(
             loading = false,
             miFitnessSyncing = true,
             miFitnessStatus = MiFitnessUiStatus.VALIDATING,
+            miFitnessDeviceSyncStatus = null,
             healthError = null,
             actionMessage = "正在验证 Mi Fitness 凭据。",
         )
@@ -126,8 +135,9 @@ internal class AiHealthController(
             miFitnessConfigured = true,
             miFitnessSyncing = true,
             miFitnessStatus = MiFitnessUiStatus.REFRESHING,
+            miFitnessDeviceSyncStatus = null,
             healthError = null,
-            actionMessage = "正在同步 Mi Fitness 今日健康。",
+            actionMessage = "正在请求手环后台同步并刷新云端今日健康。",
         )
         observeMiFitnessWork(requestId)
     }
@@ -144,6 +154,7 @@ internal class AiHealthController(
             loading = false,
             miFitnessSyncing = true,
             miFitnessStatus = MiFitnessUiStatus.DELETING,
+            miFitnessDeviceSyncStatus = null,
             actionMessage = null,
         )
         viewModelScope.launch {
@@ -202,6 +213,7 @@ internal class AiHealthController(
             miFitnessConfigured = configured,
             miFitnessSyncing = previous.miFitnessSyncing,
             miFitnessStatus = previous.miFitnessStatus,
+            miFitnessDeviceSyncStatus = previous.miFitnessDeviceSyncStatus,
             miFitnessLastSyncAt = cloudLastSync ?: previous.miFitnessLastSyncAt,
             miFitnessFormResetKey = previous.miFitnessFormResetKey,
             availability = availability,
@@ -218,7 +230,14 @@ internal class AiHealthController(
         val liveData = workManager.getWorkInfoByIdLiveData(requestId)
         lateinit var observer: Observer<WorkInfo?>
         observer = Observer { info ->
-            if (info == null || !info.state.isFinished) return@Observer
+            if (info == null) return@Observer
+            val deviceStatus = (if (info.state.isFinished) info.outputData else info.progress)
+                .getString(MiFitnessStepsSyncWorker.KEY_DEVICE_SYNC_STATUS)
+                ?.let { name -> MiFitnessDeviceSyncStatus.entries.find { it.name == name } }
+            if (deviceStatus != null) {
+                _healthState.value = _healthState.value.copy(miFitnessDeviceSyncStatus = deviceStatus)
+            }
+            if (!info.state.isFinished) return@Observer
             liveData.removeObserver(observer)
             if (miFitnessWorkObserver === observer) {
                 miFitnessWorkLiveData = null
@@ -230,7 +249,7 @@ internal class AiHealthController(
                         miFitnessSyncing = false,
                         miFitnessStatus = MiFitnessUiStatus.SUCCESS,
                     )
-                    loadHealthStatus("Mi Fitness 今日健康已同步。")
+                    loadHealthStatus("Mi Fitness 云端今日健康已刷新。")
                 } else {
                     val code = info.outputData.getString(MiFitnessStepsSyncWorker.KEY_ERROR_CODE)
                     _healthState.value = _healthState.value.copy(
@@ -277,6 +296,7 @@ internal class AiHealthController(
     }
 
     fun close() {
+        cacheUpdateJob.cancel()
         healthLoadEpoch.incrementAndGet()
         detachMiFitnessWorkObserver()
     }

@@ -12,7 +12,16 @@ import com.campusai.core.health.HealthPeriod
 import com.campusai.core.health.HealthTimeSeriesPoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeout
 import java.time.Clock
 import java.time.LocalDate
@@ -134,6 +143,8 @@ private class MiFitnessAuthenticatedSession(
     private var activeCredential = credential
     private lateinit var current: MiFitnessSession
     private var reauthenticationUsed = false
+    private val sessionMutex = Mutex()
+    private val readSlots = Semaphore(3)
     var refreshedPassToken: String? = null
         private set
 
@@ -141,13 +152,22 @@ private class MiFitnessAuthenticatedSession(
         current = exchange()
     }
 
-    suspend fun <T> read(block: suspend (MiFitnessSession) -> T): T = try {
-        block(current)
-    } catch (authentication: MiFitnessAuthenticationException) {
-        if (reauthenticationUsed) throw authentication
-        reauthenticationUsed = true
-        current = exchange()
-        block(current)
+    suspend fun <T> read(block: suspend (MiFitnessSession) -> T): T = readSlots.withPermit {
+        val startedWith = sessionMutex.withLock { current }
+        try {
+            block(startedWith)
+        } catch (authentication: MiFitnessAuthenticationException) {
+            val renewed = sessionMutex.withLock {
+                // Concurrent failures of the same old session share one renewal.
+                if (current === startedWith) {
+                    if (reauthenticationUsed) throw authentication
+                    reauthenticationUsed = true
+                    current = exchange()
+                }
+                current
+            }
+            block(renewed)
+        }
     }
 
     private suspend fun exchange(): MiFitnessSession = transport.exchangePassToken(activeCredential).also { session ->
@@ -209,6 +229,7 @@ class MiFitnessStepsSyncService internal constructor(
         }
         val summary = outcome.summary
             ?: return@serialized failure("no_cloud_data", "Mi Fitness 云端尚未返回今天的官方日步数。")
+        notifyCacheUpdated()
         Result.success(summary)
     }
 
@@ -257,13 +278,19 @@ class MiFitnessStepsSyncService internal constructor(
                     throw error("response_invalid", "小米运动健康官方日步数格式无效。")
                 }
             }
-            MiFitnessMetricRegistry.definitions.drop(1).forEach { definition ->
-                metricValues.mergeOptional(loadOptionalAggregate(session, definition, window))
+            val (workouts, series) = coroutineScope {
+                val aggregates = MiFitnessMetricRegistry.definitions.drop(1).map { definition ->
+                    async { loadOptionalAggregate(session, definition, window) }
+                }
+                val workouts = async { loadWorkouts(session, window) }
+                val series = async { loadStepSeries(session, window) }
+                // Merge in registry order, regardless of network completion order.
+                aggregates.awaitAll().forEach { metricValues.mergeOptional(it) }
+                workouts.await() to series.await()
             }
-            val workouts = loadWorkouts(session, window)
             metricValues += workouts.metrics
             val metricTimeSeries = mapOf(
-                HealthMetricKey.STEPS to loadStepSeries(session, window),
+                HealthMetricKey.STEPS to series,
             )
 
             val steps = metricValues[HealthMetricKey.STEPS]
@@ -592,6 +619,14 @@ class MiFitnessStepsSyncService internal constructor(
         private const val MAX_CURSOR_CHARS = 4_096
         private const val MAX_SYNC_DURATION_MILLIS = 90_000L
         private val syncMutex = Mutex()
+        private val cacheUpdates = MutableSharedFlow<Unit>(
+            extraBufferCapacity = 1,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        )
+        internal val updates = cacheUpdates.asSharedFlow()
+
+        // Publish only after both cache and any rotated credential are committed.
+        internal fun notifyCacheUpdated() { cacheUpdates.tryEmit(Unit) }
 
         internal suspend fun <T> serialized(block: suspend () -> T): T {
             syncMutex.lock()

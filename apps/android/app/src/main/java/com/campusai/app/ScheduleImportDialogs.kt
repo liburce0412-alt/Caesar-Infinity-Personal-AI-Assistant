@@ -33,7 +33,7 @@ internal fun ImportScheduleSourceDialog(onDismiss:()->Unit,onImage:()->Unit,onIc
     SpectraDialog(onDismissRequest=onDismiss) {
         Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement=Arrangement.spacedBy(10.dp)){
             Text("导入课程表", style = MaterialTheme.typography.titleLarge)
-            Text("可一次多选不同周次的截图，自动按“第几周”归档；识别一张，保存一张。", style=MaterialTheme.typography.bodyMedium)
+            Text("可多选课表截图，识别课程、时间和周次；核对确认后统一保存。", style=MaterialTheme.typography.bodyMedium)
             SpectraPrimaryButton("批量选择课程表截图",onImage,Modifier.fillMaxWidth(),icon=Icons.Rounded.ImageSearch)
             TextButton(onClick=onIcs,Modifier.fillMaxWidth()){Text("从 .ics 日历文件导入")}
             TextButton(onClick=onManual,Modifier.fillMaxWidth()){Text("手动添加课程")}
@@ -61,7 +61,7 @@ private data class CoursePreviewEntry(
 
 @Composable
 internal fun SchedulePreviewDialog(initial: List<CourseDraft>, onDismiss: () -> Unit, onConfirm: (List<CourseDraft>) -> Unit,
-    isSaving: Boolean = false, saveError: String? = null) {
+    isSaving: Boolean = false, saveError: String? = null, sourceNotice: String? = null) {
     var entries by remember(initial) { mutableStateOf(initial.mapIndexed { index, draft -> CoursePreviewEntry(index, draft, expanded = initial.size == 1) }) }
     val periods = remember(initial) { initial.flatMap { listOfNotNull(it.periodStart, it.periodEnd) }.distinct().sorted() }
     var periodTimes by remember(initial) { mutableStateOf(periods.associateWith { "" to "" }) }
@@ -81,6 +81,7 @@ internal fun SchedulePreviewDialog(initial: List<CourseDraft>, onDismiss: () -> 
             Text("确认课程（${entries.size}）", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             Text("${entries.count { it.validated() != null }} 项已就绪 · ${entries.count { it.startText.isBlank() || it.endText.isBlank() }} 项待设置时间", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).testTag("schedule-import-list"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (sourceNotice != null) item { Text(sourceNotice, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 item {
                     val notice = "核对课程名、教室和周次，展开课程可修改；重复安排会自动跳过。" +
                         if (entries.any { it.draft.reviewNote.contains("截断") }) "截图中省略的文字需要手动补全。" else ""
@@ -88,8 +89,8 @@ internal fun SchedulePreviewDialog(initial: List<CourseDraft>, onDismiss: () -> 
                 }
                 if (periods.isNotEmpty()) item(key = "period-setup") {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("这张截图只有节次，没有钟点", style = MaterialTheme.typography.titleSmall)
-                        Text("设置一次学校作息，即可为所有课程填写时间。", style = MaterialTheme.typography.bodySmall)
+                        Text(if (entries.any { it.startText.isBlank() || it.endText.isBlank() }) "部分课程只有节次，需要补全钟点" else "已识别节次和钟点", style = MaterialTheme.typography.titleSmall)
+                        Text("可按学校作息统一调整，已有时间请先核对原图。", style = MaterialTheme.typography.bodySmall)
                         TextButton(enabled = !isSaving, onClick = { showPeriods = !showPeriods }) { Text(if (showPeriods) "收起节次时间" else "设置节次时间") }
                         if (showPeriods) {
                             TextButton(enabled = !isSaving, onClick = {
@@ -145,6 +146,8 @@ internal fun SchedulePreviewDialog(initial: List<CourseDraft>, onDismiss: () -> 
                                     val periodLabel = draft.periodStart?.let { " · 第 $it–${draft.periodEnd ?: it} 节" }.orEmpty()
                                     Text("周${"一二三四五六日"[draft.weekday.coerceIn(1, 7) - 1]}$periodLabel", style = MaterialTheme.typography.bodySmall)
                                     if (entry.startText.isNotBlank() && entry.endText.isNotBlank()) Text("${entry.startText} – ${entry.endText}", style = MaterialTheme.typography.bodySmall)
+                                    Text(draft.weeks.ifBlank { "周次待补全" }, style = MaterialTheme.typography.bodySmall)
+                                    if (draft.teacher.isNotBlank()) Text(draft.teacher, style = MaterialTheme.typography.bodySmall)
                                 }
                                 IconButton(enabled = !isSaving, onClick = { update(entry.copy(expanded = !entry.expanded)) }) {
                                     Icon(if (entry.expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, contentDescription = if (entry.expanded) "收起${draft.name}" else "编辑${draft.name}")

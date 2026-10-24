@@ -13,9 +13,74 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.test.runCurrent
 
 @RunWith(RobolectricTestRunner::class)
 class MiFitnessStepsSyncServiceTest {
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test fun `slow independent reads overlap within three slots and publish only after commit`() = runTest {
+        val start = LocalDate.of(2026, 8, 27).atStartOfDay().toEpochSecond(ZoneOffset.ofHours(8))
+        val fixture = fixture(page(listOf(start to 321L), hasMore = false))
+        var active = 0
+        var peak = 0
+        var updates = 0
+        fixture.transport.beforeRead = { _, _ ->
+            active++
+            peak = maxOf(peak, active)
+            delay(100L)
+            active--
+        }
+        val observer = backgroundScope.launch {
+            MiFitnessStepsSyncService.updates.collect {
+                assertTrue(fixture.storage.writes.any { write -> write.second.contains("\"steps\":321") })
+                updates++
+            }
+        }
+        runCurrent()
+        val began = testScheduler.currentTime
+        val summary = fixture.service.syncToday().getOrThrow()
+        runCurrent()
+        assertEquals(321L, summary.steps)
+        assertEquals(3, peak)
+        assertEquals(500L, testScheduler.currentTime - began)
+        assertEquals(1, updates)
+        observer.cancel()
+    }
+
+    @Test fun `concurrent expired reads share one credential renewal`() = runTest {
+        val start = LocalDate.of(2026, 8, 27).atStartOfDay().toEpochSecond(ZoneOffset.ofHours(8))
+        val fixture = fixture(page(listOf(start to 321L), hasMore = false))
+        var expiredReads = 0
+        fixture.transport.beforeRead = { key, session ->
+            if (key != "steps" && session.serviceToken == "synthetic-service-token-1") {
+                delay(100L)
+                expiredReads++
+                throw MiFitnessAuthenticationException("synthetic expired session")
+            }
+        }
+        assertTrue(fixture.service.syncToday().isSuccess)
+        assertEquals(3, expiredReads)
+        assertEquals(2, fixture.transport.exchangeCount)
+        assertEquals(MiFitnessMetricRegistry.definitions.size - 1, fixture.transport.aggregateCalls.size)
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test fun `failed credential commit does not announce an update`() = runTest {
+        val start = LocalDate.of(2026, 8, 27).atStartOfDay().toEpochSecond(ZoneOffset.ofHours(8))
+        val fixture = fixture(page(listOf(start to 321L), hasMore = false))
+        fixture.transport.refreshedPassToken = "rotated-pass-token"
+        fixture.storage.rejectCredentialWrites = true
+        var updates = 0
+        backgroundScope.launch { MiFitnessStepsSyncService.updates.collect { updates++ } }
+        runCurrent()
+        assertTrue(fixture.service.syncToday().isFailure)
+        runCurrent()
+        assertEquals(0, updates)
+    }
+
     @Test fun `default day window uses Beijing despite a different clock and device zone`() {
         val original = java.util.TimeZone.getDefault()
         try {
@@ -406,6 +471,7 @@ class MiFitnessStepsSyncServiceTest {
         var exchangeFailure: RuntimeException? = null
         var refreshedPassToken: String? = null
         var authenticationFailuresRemaining = 0
+        var beforeRead: suspend (String, MiFitnessSession) -> Unit = { _, _ -> }
 
         override suspend fun exchangePassToken(credential: MiFitnessCredential): MiFitnessSession {
             exchangeCount += 1
@@ -413,7 +479,7 @@ class MiFitnessStepsSyncServiceTest {
             return MiFitnessSession(
                 userId = credential.userId,
                 cUserId = "synthetic-c-user",
-                serviceToken = "synthetic-service-token",
+                serviceToken = "synthetic-service-token-$exchangeCount",
                 ssecurityBase64 = "c3NlY3VyaXR5LXZlY3Rvcg==",
                 deviceId = "synthetic-device",
                 tokenRefreshed = refreshedPassToken != null,
@@ -427,6 +493,7 @@ class MiFitnessStepsSyncServiceTest {
             endEpochSecondsExclusive: Long,
             nextKey: String,
         ): String {
+            beforeRead("steps", session)
             calls += FetchCall(startEpochSeconds, endEpochSecondsExclusive, nextKey)
             if (authenticationFailuresRemaining > 0) {
                 authenticationFailuresRemaining -= 1
@@ -448,6 +515,7 @@ class MiFitnessStepsSyncServiceTest {
                 endEpochSecondsExclusive,
                 nextKey,
             )
+            beforeRead(metric, session)
             aggregateCalls += metric
             return aggregateResponses[metric]
                 ?: "{\"code\":0,\"result\":{\"data_list\":[],\"has_more\":false,\"next_key\":\"\"}}"
@@ -459,9 +527,20 @@ class MiFitnessStepsSyncServiceTest {
             endEpochSecondsExclusive: Long,
             nextKey: String,
         ): String {
+            beforeRead("step_series", session)
             seriesCalls += nextKey
             return seriesResponses.removeFirstOrNull()
                 ?: "{\"code\":0,\"result\":{\"data_list\":[],\"has_more\":false,\"next_key\":\"\"}}"
+        }
+
+        override suspend fun fetchSportRecords(
+            session: MiFitnessSession,
+            startEpochSeconds: Long,
+            endEpochSecondsExclusive: Long,
+            nextKey: String,
+        ): String {
+            beforeRead("sport_records", session)
+            return "{\"code\":0,\"result\":{\"sport_records\":[],\"has_more\":false,\"next_key\":\"\"}}"
         }
     }
 

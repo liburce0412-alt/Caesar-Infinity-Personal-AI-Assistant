@@ -1,5 +1,10 @@
 package com.campusai.app
 
+import com.campusai.core.health.mifitness.MiFitnessDeviceSyncStatus
+import com.campusai.features.ai.MiFitnessSyncNotice
+import com.campusai.core.automation.HealthTaskOptions
+import com.campusai.core.automation.HealthTaskAiMode
+
 import com.campusai.core.time.CaesarTime
 import com.campusai.core.time.rememberCaesarDate
 
@@ -72,6 +77,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import com.campusai.core.designsystem.SpectraTextField
 import androidx.compose.material3.IconButton
@@ -186,6 +192,7 @@ fun ProfileScreen(
     miFitnessSyncing: Boolean = false,
     miFitnessLastSyncAtMillis: Long? = null,
     miFitnessStatus: MiFitnessSettingsStatus = MiFitnessSettingsStatus.IDLE,
+    miFitnessDeviceSyncStatus: MiFitnessDeviceSyncStatus? = null,
     miFitnessFormResetKey: Long = 0L,
     onSaveMiFitnessCredentials: (userId: String, passToken: String) -> Unit = { _, _ -> },
     onRefreshMiFitnessSteps: () -> Unit = {},
@@ -197,8 +204,11 @@ fun ProfileScreen(
     healthAutomationNotificationsEnabled: Boolean = true,
     healthAutomationMessage: String? = null,
     healthAutomationMessageIsError: Boolean = false,
-    onSaveHealthAutomation: (CloudAiProvider, String, Int, Boolean) -> Unit = { _, _, _, _ -> },
+    onSaveHealthAutomation: (CloudAiProvider, String, Int, Boolean, HealthTaskOptions) -> Unit = { _, _, _, _, _ -> },
     onDisableHealthAutomation: () -> Unit = {},
+    courseSchedules: List<com.campusai.core.model.CourseSchedule> = emptyList(),
+    openIslandSettings: Boolean = false,
+    onIslandSettingsOpened: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val layout = SpectraTheme.layout
@@ -268,45 +278,29 @@ fun ProfileScreen(
         item {
             Box(Modifier.fillMaxWidth()) {
                 Column {
-                    SettingLink(Icons.Rounded.Edit, "编辑资料", "头像、名称、简介与背景") { if (authState.signedIn) sheet = ProfileSheet.EDIT else onLogin() }
-                    DividerInset()
-                    SettingLink(Icons.Rounded.Cloud, "AI 运行方式", aiProviderLabel(preferences.aiProvider)) { sheet = ProfileSheet.AI }
-                    DividerInset()
-                    SettingLink(
-                        Icons.Rounded.Cloud,
-                        "Mi Fitness",
-                        miFitnessEntrySubtitle(miFitnessConfigured, miFitnessSyncing, miFitnessLastSyncAtMillis, miFitnessStatus),
-                    ) { sheet = ProfileSheet.MI_FITNESS }
-                    DividerInset()
                     SettingLink(
                         Icons.Rounded.Notifications,
                         "健康自动化",
                         healthAutomationEntrySubtitle(healthAutomationConfig),
                     ) { sheet = ProfileSheet.HEALTH_AUTOMATION }
                     DividerInset()
-                    SettingLink(Icons.Rounded.Palette, "组件与内容", "首页内容、课程表的折叠与展开") { sheet = ProfileSheet.COMPONENTS }
+                    SettingLink(Icons.Rounded.Notifications, "超级岛", "课程提醒、AI 交互与健康自动化") { sheet = ProfileSheet.ISLANDS }
                     DividerInset()
-                    SettingLink(Icons.Rounded.Palette, "外观与体验", environmentLabel(preferences.environment)) { sheet = ProfileSheet.APPEARANCE }
-                    DividerInset()
-                    val updateContext = LocalContext.current
-                    SettingLink(Icons.Rounded.Download, "应用更新", "当前版本 ${com.campusai.BuildConfig.VERSION_NAME}") {
-                        com.campusai.core.update.AppUpdateManager.get(updateContext).open()
-                    }
+                    SettingLink(Icons.Rounded.Settings, "设置", "AI、Mi Fitness、外观与应用更新") { sheet = ProfileSheet.SETTINGS }
                     DividerInset()
                     SettingLink(Icons.Rounded.Forum, if (unreadMessages > 0) "消息 · $unreadMessages 条未读" else "消息", onClick = if (authState.signedIn) onOpenMessages else onLogin)
-                    DividerInset()
-                    if (authState.signedIn) SettingLink(
-                        Icons.AutoMirrored.Rounded.Logout,
-                        "退出登录",
-                        authState.email.ifBlank { "当前账户" },
-                        onSignOut,
-                    )
-                    else SettingLink(Icons.AutoMirrored.Rounded.Login, "登录以同步、聊天和使用 AI", onClick = onLogin)
+                    if (!authState.signedIn) {
+                        DividerInset()
+                        SettingLink(Icons.AutoMirrored.Rounded.Login, "登录以同步、聊天和使用 AI", onClick = onLogin)
+                    }
                 }
             }
         }
     }
 
+    LaunchedEffect(openIslandSettings) {
+        if (openIslandSettings) { sheet = ProfileSheet.ISLANDS; onIslandSettingsOpened() }
+    }
     sheet?.let { selected ->
         val haptic = LocalHapticFeedback.current
         SpectraModalBottomSheet(
@@ -322,9 +316,15 @@ fun ProfileScreen(
                 verticalArrangement = Arrangement.spacedBy(layout.sectionGap),
             ) {
                 item {
+                    if (selected in setOf(ProfileSheet.EDIT, ProfileSheet.AI, ProfileSheet.MI_FITNESS,
+                            ProfileSheet.COMPONENTS, ProfileSheet.APPEARANCE)) {
+                        TextButton(onClick = { sheet = ProfileSheet.SETTINGS }) { Text("返回设置") }
+                    }
                     Text(
                         when (selected) {
                             ProfileSheet.EDIT -> "编辑资料"
+                            ProfileSheet.SETTINGS -> "设置"
+                            ProfileSheet.ISLANDS -> "超级岛"
                             ProfileSheet.AI -> "AI 运行方式"
                             ProfileSheet.MI_FITNESS -> "Mi Fitness"
                             ProfileSheet.HEALTH_AUTOMATION -> "健康自动化"
@@ -336,6 +336,31 @@ fun ProfileScreen(
                     )
                 }
                 when (selected) {
+                    ProfileSheet.SETTINGS -> item {
+                        val updateContext = LocalContext.current
+                        Column {
+                            SettingLink(Icons.Rounded.Edit, "编辑资料", "头像、名称、简介与背景") { if (authState.signedIn) sheet = ProfileSheet.EDIT else onLogin() }
+                            DividerInset()
+                            SettingLink(Icons.Rounded.Cloud, "AI 运行方式", aiProviderLabel(preferences.aiProvider)) { sheet = ProfileSheet.AI }
+                            DividerInset()
+                            SettingLink(Icons.Rounded.Cloud, "Mi Fitness", miFitnessEntrySubtitle(miFitnessConfigured, miFitnessSyncing, miFitnessLastSyncAtMillis, miFitnessStatus)) { sheet = ProfileSheet.MI_FITNESS }
+                            DividerInset()
+                            SettingLink(Icons.Rounded.Palette, "组件与内容", "首页内容与课表显示") { sheet = ProfileSheet.COMPONENTS }
+                            DividerInset()
+                            SettingLink(Icons.Rounded.Palette, "外观与体验", environmentLabel(preferences.environment)) { sheet = ProfileSheet.APPEARANCE }
+                            DividerInset()
+                            SettingLink(Icons.Rounded.Download, "应用更新", "当前版本 ${com.campusai.BuildConfig.VERSION_NAME}") {
+                                com.campusai.core.update.AppUpdateManager.get(updateContext).open()
+                            }
+                            if (authState.signedIn) {
+                                DividerInset()
+                                SettingLink(Icons.AutoMirrored.Rounded.Logout, "退出登录", authState.email.ifBlank { "当前账户" }, onSignOut)
+                            }
+                        }
+                    }
+                    ProfileSheet.ISLANDS -> item {
+                        SuperIslandSettings(authState.userId.takeIf { authState.signedIn && it.isNotBlank() } ?: "local_user", courseSchedules)
+                    }
                     ProfileSheet.EDIT -> item {
                         ProfileEditor(profileState.profile, profileState.saving, profileState.message, profileState.error, authState.userId, profileRepository)
                     }
@@ -356,6 +381,7 @@ fun ProfileScreen(
                             syncing = miFitnessSyncing,
                             lastSyncAtMillis = miFitnessLastSyncAtMillis,
                             status = miFitnessStatus,
+                            deviceSyncStatus = miFitnessDeviceSyncStatus,
                             formResetKey = miFitnessFormResetKey,
                             onSaveCredentials = onSaveMiFitnessCredentials,
                             onRefreshSteps = onRefreshMiFitnessSteps,
@@ -371,6 +397,8 @@ fun ProfileScreen(
                             messageIsError = healthAutomationMessageIsError,
                             providerStore = personalAiProviderStore,
                             onListModels = onListCloudProviderModels,
+                            localModelManager = localModelManager,
+                            signedIn = authState.signedIn,
                             onSave = onSaveHealthAutomation,
                             onDisable = onDisableHealthAutomation,
                         )
@@ -391,7 +419,7 @@ fun ProfileScreen(
     }
 }
 
-private enum class ProfileSheet { EDIT, AI, MI_FITNESS, HEALTH_AUTOMATION, APPEARANCE, COMPONENTS, ACHIEVEMENTS }
+private enum class ProfileSheet { EDIT, SETTINGS, ISLANDS, AI, MI_FITNESS, HEALTH_AUTOMATION, APPEARANCE, COMPONENTS, ACHIEVEMENTS }
 
 /** Fixed presentation states keep credentials, responses, and raw errors out of the UI contract. */
 enum class MiFitnessSettingsStatus {
@@ -901,7 +929,13 @@ private fun miFitnessEntrySubtitle(
 
 private fun healthAutomationEntrySubtitle(config: ScheduledTaskConfig?): String =
     if (config?.enabled == true) {
-        "每 ${config.intervalMinutes} 分钟 · ${config.provider.displayName}"
+        (if (config.options.runInBackground && config.intervalMinutes < config.backgroundIntervalMinutes) {
+            "前台 ${config.intervalMinutes} / 后台 ${config.backgroundIntervalMinutes} 分钟 · "
+        } else "每 ${config.intervalMinutes} 分钟 · ") + if (config.options.syncOnly) "仅同步" else when (config.options.aiMode) {
+            HealthTaskAiMode.CAESAR_CLOUD_FREE -> "Caesar cloud free"
+            HealthTaskAiMode.LOCAL -> "本地模型"
+            HealthTaskAiMode.PERSONAL_CLOUD -> config.provider.displayName
+        }
     } else {
         "未启用 · 仅前台运行"
     }
@@ -932,6 +966,7 @@ private fun MiFitnessCloudSettings(
     syncing: Boolean,
     lastSyncAtMillis: Long?,
     status: MiFitnessSettingsStatus,
+    deviceSyncStatus: MiFitnessDeviceSyncStatus?,
     formResetKey: Long,
     onSaveCredentials: (userId: String, passToken: String) -> Unit,
     onRefreshSteps: () -> Unit,
@@ -976,7 +1011,7 @@ private fun MiFitnessCloudSettings(
                 }
             }
             Text(
-                "保存凭据后，只有你主动点击同步时才会更新今日健康。CampusAI 不连接手环，也不需要 Health Connect 权限。",
+                "点击同步会请求小米运动健康在后台同步手环，稍候刷新云端今日健康。请保持小米运动健康运行和手环连接；无需跳转或开启无障碍。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(.66f),
             )
@@ -1047,6 +1082,7 @@ private fun MiFitnessCloudSettings(
                     enabled = !busy,
                     icon = Icons.Rounded.Cloud,
                 )
+                MiFitnessSyncNotice(deviceSyncStatus, syncing)
                 TextButton(
                     onClick = { confirmDelete = true },
                     modifier = Modifier.align(Alignment.End),
@@ -1082,10 +1118,20 @@ private fun HealthAutomationSettings(
     messageIsError: Boolean,
     providerStore: PersonalAiProviderStore,
     onListModels: (suspend (CloudAiProvider) -> Result<List<CloudProviderModel>>)? = null,
-    onSave: (CloudAiProvider, String, Int, Boolean) -> Unit,
+    localModelManager: LocalModelManager,
+    signedIn: Boolean,
+    onSave: (CloudAiProvider, String, Int, Boolean, HealthTaskOptions) -> Unit,
     onDisable: () -> Unit,
 ) {
     val configuredProviders = CloudAiProvider.entries.filter(providerStore::hasCredential)
+    var aiMode by remember(config?.id) { mutableStateOf(config?.options?.aiMode ?: HealthTaskAiMode.CAESAR_CLOUD_FREE) }
+    var syncOnly by remember(config?.id) { mutableStateOf(config?.options?.syncOnly ?: false) }
+    var syncBeforeMessage by remember(config?.id) { mutableStateOf(config?.options?.syncBeforeMessage ?: true) }
+    var runInBackground by remember(config?.id) { mutableStateOf(config?.options?.runInBackground ?: false) }
+    var localModelId by remember(config?.id) { mutableStateOf(
+        config?.takeIf { it.options.aiMode == HealthTaskAiMode.LOCAL }?.modelId ?: localModelManager.selection.value.mode.modelId
+    ) }
+    val localStates by localModelManager.states.collectAsState()
     // Runtime status changes (RUNNING -> UPDATED/UNCHANGED) must not reset an
     // unsaved form. Each Provider keeps its own draft model while this sheet is open.
     var provider by remember(config?.id) {
@@ -1100,7 +1146,7 @@ private fun HealthAutomationSettings(
             CloudAiProvider.entries.forEach { candidate ->
                 put(
                     candidate,
-                    config?.takeIf { it.provider == candidate }?.modelId
+                    config?.takeIf { it.provider == candidate && it.options.aiMode == HealthTaskAiMode.PERSONAL_CLOUD }?.modelId
                         ?: providerStore.selectedModel(candidate),
                 )
             }
@@ -1120,15 +1166,27 @@ private fun HealthAutomationSettings(
     var includeHealthSummary by remember(config?.id) {
         mutableStateOf(config?.includeHealthSummary ?: false)
     }
+    fun saveSettings(onlySync: Boolean) {
+        onSave(provider, when (aiMode) {
+            HealthTaskAiMode.CAESAR_CLOUD_FREE -> ScheduledTaskConfig.CLOUD_FREE_MODEL
+            HealthTaskAiMode.LOCAL -> localModelId
+            HealthTaskAiMode.PERSONAL_CLOUD -> modelId.trim().ifBlank { provider.defaultModel(AiMode.FAST) }
+        }, intervalMinutes, !onlySync && aiMode != HealthTaskAiMode.LOCAL && includeHealthSummary,
+            HealthTaskOptions(syncBeforeMessage, onlySync, runInBackground, aiMode))
+    }
+    // A failed immediate save must not leave a switch looking successfully enabled.
+    LaunchedEffect(saving, messageIsError) {
+        if (!saving && messageIsError) syncOnly = config?.options?.syncOnly ?: false
+    }
     val active = config?.enabled == true
     val credentialAvailable = providerStore.hasCredential(provider)
     val latestListModels by rememberUpdatedState(onListModels)
-    LaunchedEffect(provider, credentialAvailable, modelCatalogReload) {
+    LaunchedEffect(provider, credentialAvailable, modelCatalogReload, aiMode, syncOnly) {
         val requestedProvider = provider
         availableModels = emptyList()
         modelCatalogError = null
         modelCatalogLoaded = false
-        if (!credentialAvailable) {
+        if (!credentialAvailable || aiMode != HealthTaskAiMode.PERSONAL_CLOUD || syncOnly) {
             modelCatalogLoading = false
             return@LaunchedEffect
         }
@@ -1166,7 +1224,8 @@ private fun HealthAutomationSettings(
     }
     val selectedModelAvailable = isHealthAutomationModelAvailable(provider, modelId, availableModels)
     val statusText = when (config?.lastStatus) {
-        ScheduledTaskRunStatus.RUNNING -> "正在检查小米云"
+        ScheduledTaskRunStatus.RUNNING -> "正在同步与处理今日健康"
+        ScheduledTaskRunStatus.SYNCED -> if (config.lastErrorCode == null) "已请求手环同步并刷新云端" else "云端已刷新；手环同步请求未发出，请检查小米运动健康"
         ScheduledTaskRunStatus.UPDATED -> "最近一次已发现新数据"
         ScheduledTaskRunStatus.UNCHANGED -> "最近一次云端数据未变化"
         ScheduledTaskRunStatus.ERROR -> automationErrorText(config.lastErrorCode)
@@ -1184,14 +1243,14 @@ private fun HealthAutomationSettings(
                         Text("日常", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                     }
                     Text(
-                        if (active) "仅在 CampusAI 前台运行" else "定时任务未启用",
+                        if (active) { if (config?.options?.runInBackground == true) "已开启前台与后台定时" else "仅在 CampusAI 前台运行" } else "定时任务未启用",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(.58f),
                     )
                 }
             }
             Text(
-                "到时间后只读取 Mi Fitness 云端。数据变化时会生成 2–3 条短消息；没有变化时只发一条状态。不会连接手环或拉起 Mi Fitness。",
+                "定时请求小米运动健康后台同步，再读取今日健康。可只同步，或在数据变化后生成 2–3 条短消息；不会自动跳转界面。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(.66f),
             )
@@ -1208,7 +1267,47 @@ private fun HealthAutomationSettings(
                 )
             }
             HorizontalDivider(color = SpectraColors.Silver.copy(.68f))
+            SettingSwitch(Icons.Rounded.Cloud, "仅同步，不生成或发送消息", syncOnly, enabled = !saving) {
+                syncOnly = it
+                if (it) {
+                    includeHealthSummary = false
+                    saveSettings(onlySync = true)
+                }
+            }
+            Text(
+                if (saving) "正在保存，请稍候…" else if (syncOnly && config?.options?.syncOnly == true && active) {
+                    "仅同步已保存，不会生成或发送 AI 消息。"
+                } else if (!syncOnly && config?.options?.syncOnly == true) {
+                    "尚未启用消息：请确认模型与摘要授权，再点击底部保存。"
+                } else "开启仅同步立即保存；其他设置修改后，请点击底部保存。",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (!syncOnly) {
+            SettingSwitch(Icons.Rounded.Cloud, "发送消息前先请求手环同步", syncBeforeMessage, enabled = !saving) { syncBeforeMessage = it }
             Text("使用的 AI", style = MaterialTheme.typography.labelLarge)
+            com.campusai.core.designsystem.CaesarSlidingSelector(
+                options = listOf("Caesar cloud free", "本地模型", "个人云端"),
+                selectedIndex = HealthTaskAiMode.entries.indexOf(aiMode),
+                onSelected = { index -> aiMode = HealthTaskAiMode.entries[index] },
+                modifier = Modifier.fillMaxWidth(), enabled = !saving,
+            )
+            when (aiMode) {
+                HealthTaskAiMode.CAESAR_CLOUD_FREE -> Text(
+                    if (signedIn) "使用 Caesar cloud free 默认模型，无需个人 Key。" else "请先登录 Caesar 后启用免费云端。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                HealthTaskAiMode.LOCAL -> {
+                    val modes = com.campusai.core.localai.LocalModelMode.entries
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(modes) { mode ->
+                            TelemetryChip(text = localModelManager.manifestFor(mode.modelId).displayName,
+                                selected = localModelId == mode.modelId, onClick = { localModelId = mode.modelId }, enabled = !saving)
+                        }
+                    }
+                    Text(if (localStates[localModelId] == LocalModelState.Ready) "摘要只在本机处理，不发送给云端 AI。" else
+                        "请先在 AI 运行方式中下载并校验所选模型。", style = MaterialTheme.typography.bodySmall)
+                }
+                HealthTaskAiMode.PERSONAL_CLOUD -> {
             com.campusai.core.designsystem.CaesarSlidingSelector(
                 options = CloudAiProvider.entries.map(CloudAiProvider::displayName),
                 selectedIndex = CloudAiProvider.entries.indexOf(provider).coerceAtLeast(0),
@@ -1310,16 +1409,31 @@ private fun HealthAutomationSettings(
                     )
                 }
             }
-            Text("检查间隔", style = MaterialTheme.typography.labelLarge)
-            com.campusai.core.designsystem.CaesarSlidingSelector(
-                options = ScheduledTaskConfig.ALLOWED_INTERVAL_MINUTES.sorted().map { "$it 分钟" },
-                selectedIndex = ScheduledTaskConfig.ALLOWED_INTERVAL_MINUTES.sorted().indexOf(intervalMinutes).coerceAtLeast(0),
-                onSelected = { index ->
-                    ScheduledTaskConfig.ALLOWED_INTERVAL_MINUTES.sorted().getOrNull(index)?.let { intervalMinutes = it }
-                },
+                }
+            }
+            }
+            SettingSwitch(Icons.Rounded.Notifications, "允许后台定时", runInBackground, enabled = !saving) {
+                runInBackground = it
+            }
+            Text(if (runInBackground) {
+                val backgroundMinutes = intervalMinutes.coerceAtLeast(ScheduledTaskConfig.MIN_BACKGROUND_INTERVAL_MINUTES)
+                "前台每 $intervalMinutes 分钟；后台每 $backgroundMinutes 分钟（系统最短 15 分钟，省电可能延后）。小米运动健康需保持运行并连接手环。"
+            } else "仅在 App 前台每 $intervalMinutes 分钟执行。", style = MaterialTheme.typography.bodySmall)
+            Text("同步与检查间隔 · $intervalMinutes 分钟", style = MaterialTheme.typography.labelLarge)
+            val intervals = ScheduledTaskConfig.ALLOWED_INTERVAL_MINUTES
+            Slider(
+                value = intervalMinutes.toFloat(),
+                onValueChange = { intervalMinutes = it.roundToInt().coerceIn(intervals) },
+                valueRange = intervals.first.toFloat()..intervals.last.toFloat(),
+                steps = intervals.last - intervals.first - 1,
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !saving,
             )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("3 分钟", style = MaterialTheme.typography.bodySmall)
+                Text("60 分钟", style = MaterialTheme.typography.bodySmall)
+            }
+            if (!syncOnly && aiMode != HealthTaskAiMode.LOCAL) {
             SettingSwitch(
                 Icons.Rounded.PrivacyTip,
                 "附带必要的今日汇总",
@@ -1331,6 +1445,7 @@ private fun HealthAutomationSettings(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(.58f),
             )
+            }
             if (saving) {
                 LinearProgressIndicator(
                     modifier = Modifier.fillMaxWidth(),
@@ -1347,13 +1462,18 @@ private fun HealthAutomationSettings(
             }
             SpectraPrimaryButton(
                 text = when {
-                    saving -> "正在验证…"
+                    saving -> "正在保存…"
+                    syncOnly -> if (active) "保存设置" else "保存并启用同步"
                     active -> "验证并保存设置"
                     else -> "验证并启用"
                 },
-                onClick = { onSave(provider, modelId.trim(), intervalMinutes, includeHealthSummary) },
+                onClick = { saveSettings(syncOnly) },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = !saving && credentialAvailable && selectedModelAvailable && includeHealthSummary,
+                enabled = !saving && (syncOnly || when (aiMode) {
+                    HealthTaskAiMode.CAESAR_CLOUD_FREE -> signedIn && includeHealthSummary
+                    HealthTaskAiMode.LOCAL -> localStates[localModelId] == LocalModelState.Ready
+                    HealthTaskAiMode.PERSONAL_CLOUD -> credentialAvailable && selectedModelAvailable && includeHealthSummary
+                }),
                 icon = Icons.Rounded.Notifications,
             )
             if (active) {

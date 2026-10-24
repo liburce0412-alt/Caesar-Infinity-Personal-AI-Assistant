@@ -106,6 +106,11 @@ class NoBackupScheduledTaskStore internal constructor(
         .put("provider", config.provider.name)
         .put("modelId", config.modelId)
         .put("includeHealthSummary", config.includeHealthSummary)
+        .put("syncBeforeMessage", config.options.syncBeforeMessage)
+        .put("syncOnly", config.options.syncOnly)
+        .put("runInBackground", config.options.runInBackground)
+        .put("aiMode", config.options.aiMode.name)
+        .put("cloudFreeOwnerUserId", config.options.cloudFreeOwnerUserId)
         .put("lastAttemptAt", config.lastAttemptAt ?: JSONObject.NULL)
         .put("lastSourceRevision", config.lastSourceRevision ?: JSONObject.NULL)
         .put("lastStatus", config.lastStatus.name)
@@ -119,6 +124,14 @@ class NoBackupScheduledTaskStore internal constructor(
         provider = com.campusai.core.ai.CloudAiProvider.valueOf(row.getString("provider")),
         modelId = row.getString("modelId"),
         includeHealthSummary = row.getBoolean("includeHealthSummary"),
+        // Existing installations remain cloud-read-only until the new settings are saved.
+        options = HealthTaskOptions(
+            syncBeforeMessage = row.optBoolean("syncBeforeMessage", false),
+            syncOnly = row.optBoolean("syncOnly", false),
+            runInBackground = row.optBoolean("runInBackground", false),
+            aiMode = HealthTaskAiMode.valueOf(row.optString("aiMode", HealthTaskAiMode.PERSONAL_CLOUD.name)),
+            cloudFreeOwnerUserId = row.optString("cloudFreeOwnerUserId", ""),
+        ),
         lastAttemptAt = row.optNullableLong("lastAttemptAt"),
         lastSourceRevision = row.optNullableString("lastSourceRevision"),
         lastStatus = ScheduledTaskRunStatus.valueOf(row.getString("lastStatus")),

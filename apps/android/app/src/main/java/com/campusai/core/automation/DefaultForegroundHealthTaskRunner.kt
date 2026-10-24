@@ -17,17 +17,19 @@ class DefaultForegroundHealthTaskRunner(
     private val aiClient: HealthAutoMessageClient,
     private val conversationWriter: HealthTaskConversationWriter,
     private val notificationPublisher: HealthTaskNotificationPublisher,
+    private val progress: HealthTaskProgressPublisher = HealthTaskProgressPublisher.None,
     private val nowMillis: () -> Long = System::currentTimeMillis,
 ) : ForegroundHealthTaskRunner {
     private val statusRotation = AtomicInteger()
 
-    override suspend fun run(taskId: String, force: Boolean): ForegroundHealthTaskRunResult = PROCESS_MUTEX.withLock {
+    override suspend fun run(taskId: String, force: Boolean, background: Boolean): ForegroundHealthTaskRunResult = PROCESS_MUTEX.withLock {
         val config = try {
             store.read(taskId)
         } catch (failure: Exception) {
             return@withLock failedStoreRead(failure)
         } ?: return@withLock ForegroundHealthTaskRunResult.Failed("task_not_found", "定时任务不存在。")
         if (!config.enabled) return@withLock ForegroundHealthTaskRunResult.Disabled
+        if (background && !config.options.runInBackground) return@withLock ForegroundHealthTaskRunResult.Disabled
         if (config.type != ScheduledTaskType.HEALTH_CLOUD_STATUS) {
             return@withLock ForegroundHealthTaskRunResult.Failed("task_type_unsupported", "定时任务类型不受支持。")
         }
@@ -44,11 +46,15 @@ class DefaultForegroundHealthTaskRunner(
         }
         if (!started) return@withLock ForegroundHealthTaskRunResult.Superseded
         try {
-            execute(running, now)
+            val result = execute(running, now)
+            if (result == ForegroundHealthTaskRunResult.Superseded) progress.clear()
+            else showProgress(if (result is ForegroundHealthTaskRunResult.Failed) HealthTaskStage.ERROR else HealthTaskStage.COMPLETE)
+            result
         } catch (cancelled: CancellationException) {
-            withContext(NonCancellable) { rollbackOwnedAttempt(running, config) }
+            withContext(NonCancellable) { progress.clear(); rollbackOwnedAttempt(running, config) }
             throw cancelled
         } catch (failure: Exception) {
+            showProgress(HealthTaskStage.ERROR)
             withContext(NonCancellable) { recoverUnexpectedFailure(running, failure) }
         }
     }
@@ -57,6 +63,13 @@ class DefaultForegroundHealthTaskRunner(
         running: ScheduledTaskConfig,
         now: Long,
     ): ForegroundHealthTaskRunResult {
+        showProgress(HealthTaskStage.SYNCING)
+        val deviceStatus = if (running.options.syncBeforeMessage || running.options.syncOnly) {
+            if (!stillOwnsAttempt(running)) return ForegroundHealthTaskRunResult.Superseded
+            source.requestDeviceSync { submit -> withOwnedSubmissionLease(running, submit) }.also {
+                if (!stillOwnsAttempt(running)) return ForegroundHealthTaskRunResult.Superseded
+            }
+        } else null
         val observation = source.refreshToday().getOrElse { failure ->
             return fail(running, now, failureCode(failure), "小米云这次没连上")
         }
@@ -65,23 +78,43 @@ class DefaultForegroundHealthTaskRunner(
             return fail(running, now, code, "小米云这次没同步完整")
         }
         val revision = observation.revision.value
+        showProgress(HealthTaskStage.REFRESHED, healthTaskSummaryPreview(observation.allowedCloudSummary()))
+        if (running.options.syncOnly) {
+            val code = deviceStatus?.takeUnless {
+                it == com.campusai.core.health.mifitness.MiFitnessDeviceSyncStatus.REQUESTED
+            }?.let { "device_sync_${it.name.lowercase(java.util.Locale.ROOT)}" }
+            return when (val commit = commitAttempt(running, revision, ScheduledTaskRunStatus.SYNCED, code)) {
+                is AttemptCommit.Saved -> ForegroundHealthTaskRunResult.Synced
+                AttemptCommit.Superseded -> ForegroundHealthTaskRunResult.Superseded
+                is AttemptCommit.Failed -> commit.result
+            }
+        }
         if (revision == running.lastSourceRevision) {
             return deliverStatus(running, now, revision, unchangedMessage())
         }
 
-        if (!running.includeHealthSummary) {
+        if (!running.includeHealthSummary && running.options.aiMode != HealthTaskAiMode.LOCAL) {
             return fail(running, now, "health_summary_not_authorized", "数据更新了，但还没授权摘要")
         }
         val summary = observation.allowedCloudSummary()
         if (!summary.hasAnyValue()) {
             return deliverStatus(running, now, revision, "小米云暂时还没有今天的数据")
         }
-        val batch = aiClient.generate(
+        showProgress(HealthTaskStage.GENERATING)
+        val batch = (if (running.options.aiMode == HealthTaskAiMode.LOCAL) aiClient.generateLocal(
+            modelId = running.modelId,
+            summary = summary,
+            withSubmissionLease = { submit -> withOwnedSubmissionLease(running, submit) },
+        ) else if (running.options.aiMode == HealthTaskAiMode.CAESAR_CLOUD_FREE) aiClient.generateCaesarCloudFree(
+            ownerUserId = running.options.cloudFreeOwnerUserId,
+            summary = summary,
+            withSubmissionLease = { submit -> withOwnedSubmissionLease(running, submit) },
+        ) else aiClient.generate(
             provider = running.provider,
             modelId = running.modelId,
             summary = summary,
             withSubmissionLease = { submit -> withOwnedSubmissionLease(running, submit) },
-        ).getOrElse { failure ->
+        )).getOrElse { failure ->
             return fail(running, now, failureCode(failure), "数据更新了，AI 这次没接上")
         }
         if (!stillOwnsAttempt(running)) return ForegroundHealthTaskRunResult.Superseded
@@ -167,6 +200,7 @@ class DefaultForegroundHealthTaskRunner(
             AttemptCommit.Superseded -> return ForegroundHealthTaskRunResult.Superseded
             is AttemptCommit.Failed -> return commit.result
         }
+        if (running.options.syncOnly) return ForegroundHealthTaskRunResult.Failed(safeCode, failureMessage(safeCode))
         val conversationId = appendCommitted(committed, listOf(statusMessage), now, null).getOrNull()
         if (conversationId != null) {
             when (publishCommitted(committed, listOf(statusMessage), now)) {
@@ -226,6 +260,8 @@ class DefaultForegroundHealthTaskRunner(
         emittedAt: Long,
     ): HealthTaskNotificationDelivery {
         currentCoroutineContext().ensureActive()
+        if (!isCommittedOutcome(committed)) return HealthTaskNotificationDelivery.Superseded
+        showProgress(HealthTaskStage.SENDING, messages.joinToString("\n"))
         return try {
             notificationPublisher.publish(
                 taskId = committed.id,
@@ -357,6 +393,7 @@ class DefaultForegroundHealthTaskRunner(
         current.provider == running.provider &&
         current.modelId == running.modelId &&
         current.includeHealthSummary == running.includeHealthSummary &&
+        current.options == running.options &&
         current.lastAttemptAt == running.lastAttemptAt &&
         current.lastStatus == ScheduledTaskRunStatus.RUNNING
 
@@ -369,9 +406,16 @@ class DefaultForegroundHealthTaskRunner(
         current.provider == committed.provider &&
         current.modelId == committed.modelId &&
         current.includeHealthSummary == committed.includeHealthSummary &&
+        current.options == committed.options &&
         current.lastAttemptAt == committed.lastAttemptAt &&
         current.lastSourceRevision == committed.lastSourceRevision &&
         current.lastStatus == committed.lastStatus
+
+    private suspend fun showProgress(stage: HealthTaskStage, preview: String? = null) {
+        try { progress.publish(stage, preview) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { /* Optional island status cannot prevent synchronization. */ }
+    }
 
     private suspend fun rollbackOwnedAttempt(
         running: ScheduledTaskConfig,

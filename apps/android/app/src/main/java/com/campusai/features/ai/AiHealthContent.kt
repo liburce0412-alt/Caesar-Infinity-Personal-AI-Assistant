@@ -236,8 +236,9 @@ internal fun MiFitnessCloudStatus(
                 enabled = !state.loading && !state.miFitnessSyncing,
                 mood = PageMood.HEALTH,
             )
+            MiFitnessSyncNotice(current.miFitnessDeviceSyncStatus, state.miFitnessSyncing)
             Text(
-                "CampusAI 不连接手环，也不需要 Health Connect 权限。",
+                "点击同步会请求小米运动健康在后台同步手环，再刷新云端数据；请保持小米运动健康运行和手环连接。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(.52f),
             )

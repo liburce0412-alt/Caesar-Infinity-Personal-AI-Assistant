@@ -5,14 +5,19 @@ import com.campusai.core.database.CampusDao
 import com.campusai.core.network.PersonalCloudHealthAutoMessageClient
 import com.campusai.core.security.PersonalAiProviderStore
 
-/** App-scoped foreground runtime. It owns no service, worker, or background lifecycle. */
+/** Shared by the foreground timer and opt-in WorkManager timer; the runner serializes attempts. */
 class ForegroundHealthTaskRuntime(
     context: Context,
     dao: CampusDao,
 ) {
+    // Restore the existing session for free-cloud requests even after a cold background start.
+    private val auth = com.campusai.core.auth.AuthRepository.getInstance(context.applicationContext)
     val store: ScheduledTaskStore = NoBackupScheduledTaskStore(context.applicationContext)
     val aiClient: HealthAutoMessageClient = PersonalCloudHealthAutoMessageClient(
         PersonalAiProviderStore(context.applicationContext),
+        localRuntime = { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+            com.campusai.core.localai.LocalAiRuntime.get(context.applicationContext)
+        } },
     )
     val runner: ForegroundHealthTaskRunner = DefaultForegroundHealthTaskRunner(
         store = store,
@@ -20,6 +25,7 @@ class ForegroundHealthTaskRuntime(
         aiClient = aiClient,
         conversationWriter = RoomHealthTaskConversationWriter(dao),
         notificationPublisher = AndroidHealthTaskNotificationPublisher(context.applicationContext),
+        progress = AndroidHealthTaskProgressPublisher(context.applicationContext),
     )
 
     companion object {

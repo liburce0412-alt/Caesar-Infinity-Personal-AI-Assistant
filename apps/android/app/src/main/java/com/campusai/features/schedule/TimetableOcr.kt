@@ -3,13 +3,39 @@ package com.campusai.features.schedule
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-internal data class OcrLine(val text: String, val left: Int, val top: Int, val right: Int, val bottom: Int) {
+internal data class OcrLine(val text: String, val left: Int, val top: Int, val right: Int, val bottom: Int, val confidence: Float = 0f) {
     val x get() = (left + right) / 2
     val y get() = (top + bottom) / 2
 }
 
-internal data class TimetableCell(val weekday: Int, val left: Int, val top: Int, val right: Int, val bottom: Int)
+/** Pick the most confident full row across independent contrast/scale passes. */
+internal fun bestOcrRows(passes: List<List<OcrLine>>): List<OcrLine> {
+    val candidates = passes.flatMap { lines ->
+        val rows = mutableListOf<MutableList<OcrLine>>()
+        lines.sortedBy { it.y }.forEach { line ->
+            val row = rows.lastOrNull()?.takeIf { abs(it.first().y - line.y) < maxOf(5, (line.bottom - line.top) / 2) }
+            if (row == null) rows += mutableListOf(line) else row += line
+        }
+        rows.map { row ->
+            OcrLine(row.sortedBy { it.left }.joinToString("") { it.text }, row.minOf { it.left }, row.minOf { it.top },
+                row.maxOf { it.right }, row.maxOf { it.bottom },
+                row.sumOf { it.confidence.toDouble() * it.text.length }.toFloat() / row.sumOf { it.text.length }.coerceAtLeast(1))
+        }
+    }
+    val rows = mutableListOf<MutableList<OcrLine>>()
+    candidates.sortedBy { it.y }.forEach { line ->
+        val row = rows.lastOrNull()?.takeIf { abs(it.first().y - line.y) < maxOf(5, (line.bottom - line.top) / 2) }
+        if (row == null) rows += mutableListOf(line) else row += line
+    }
+    return rows.map { it.maxWith(compareBy<OcrLine> { line -> line.confidence }.thenBy { line -> line.text.length }) }
+}
+
+internal data class TimetableCell(val weekday: Int, val left: Int, val top: Int, val right: Int, val bottom: Int,
+    val gridPeriod: Int? = null)
 internal data class TimetablePixels(val width: Int, val height: Int, val argb: IntArray)
+internal val courseCodeRow = Regex("^[A-Z][0-9OIl]{5,8}[A-Z0-9]?(?:\\[\\d{1,3}])?$", RegexOption.IGNORE_CASE)
+internal val courseGroupRow = Regex("^\\[[0-9OIl]{1,3}]$", RegexOption.IGNORE_CASE)
+internal val weekRowStart = Regex("^(?:第|[#＃])?[0-9OoIl]{1,2}(?:[-—–~至,，、.．]|周)")
 
 private val weekdayHeader = Regex("^(?:\\d{1,2}日)?(?:星期|周)([一二三四五六日天])$")
 private val weekdays = mapOf('一' to 1, '二' to 2, '三' to 3, '四' to 4, '五' to 5, '六' to 6, '日' to 7, '天' to 7)
@@ -52,10 +78,13 @@ private fun periodAxis(lines: List<OcrLine>, anchors: List<Pair<Int, OcrLine>>):
 private fun columnWidth(anchors: List<Pair<Int, OcrLine>>): Int = anchors.zipWithNext()
     .map { (a, b) -> (b.second.x - a.second.x) / (b.first - a.first) }.sorted().let { it[it.size / 2] }.coerceAtLeast(1)
 
+internal fun timetableAxisRight(lines: List<OcrLine>): Int = weekdayAnchors(lines).let { it.first().second.x - columnWidth(it) / 2 }
+
 /** Locate colored course rectangles before OCR: wrapped lines belong to a cell, not to separate courses. */
 internal fun detectTimetableCells(lines: List<OcrLine>, pixels: TimetablePixels): List<TimetableCell> {
     require(pixels.width > 0 && pixels.height > 0 && pixels.argb.size == pixels.width * pixels.height)
     val anchors = weekdayAnchors(lines)
+    detectRuledCells(lines, anchors, pixels).takeIf { it.isNotEmpty() }?.let { return it }
     val width = columnWidth(anchors)
     val top = anchors.maxOf { it.second.bottom }.coerceIn(0, pixels.height - 1)
     val axis = periodAxis(lines, anchors)
@@ -88,6 +117,72 @@ internal fun detectTimetableCells(lines: List<OcrLine>, pixels: TimetablePixels)
         finish()
     }
     return cells.sortedWith(compareBy({ it.weekday }, { it.top }))
+}
+
+/** Faint monochrome grid lines are independent of row height and course text wrapping. */
+private fun detectRuledCells(lines: List<OcrLine>, anchors: List<Pair<Int, OcrLine>>, pixels: TimetablePixels): List<TimetableCell> {
+    val width = columnWidth(anchors)
+    val left = (anchors.first().second.x - width / 2).coerceAtLeast(0)
+    val right = (anchors.last().second.x + width / 2).coerceAtMost(pixels.width)
+    val headerBottom = anchors.maxOf { it.second.bottom }
+    val markers = lines.filter { it.x < left && it.y > headerBottom }.mapNotNull { line ->
+        Regex("^第\\s*(\\d{1,2})\\s*节$").matchEntire(line.text.trim())?.let { it.groupValues[1].toInt() to line.y }
+    }.distinct()
+    if (markers.map { it.first }.distinct().size < 3) return emptyList()
+    fun gray(x: Int, y: Int): Int = pixels.argb[y * pixels.width + x].let {
+        (((it shr 16) and 255) * 30 + ((it shr 8) and 255) * 59 + (it and 255) * 11) / 100
+    }
+    val distance = maxOf(3, width / 40)
+    val boundaries = mutableListOf<Int>()
+    var bandEnd = -distance * 2
+    for (y in maxOf(distance, headerBottom) until pixels.height - distance) {
+        var hits = 0; var count = 0
+        for (x in left + 4 until right - 4 step maxOf(2, width / 20)) {
+            val value = gray(x, y)
+            if (abs(value - gray(x, y - distance)) >= 7 && abs(value - gray(x, y + distance)) >= 7) hits++
+            count++
+        }
+        if (count > 0 && hits >= count * .8) {
+            if (y - bandEnd > distance) boundaries += y
+            bandEnd = y
+        }
+    }
+    if (boundaries.size < 4) return emptyList()
+    // Web tables often left-align weekday labels. Snap to real vertical rules
+    // instead of treating label centres as column centres (which clips text).
+    val verticals = mutableListOf<Int>()
+    var lastVertical = -distance * 2
+    for (x in maxOf(distance, left - width / 2) until minOf(pixels.width - distance, right + width / 2)) {
+        var hits = 0; var count = 0
+        for (y in boundaries.first() + 6 until boundaries.last() - 6 step maxOf(3, pixels.height / 600)) {
+            val value = gray(x, y)
+            if (abs(value - gray(x - distance, y)) >= 7 && abs(value - gray(x + distance, y)) >= 7) hits++
+            count++
+        }
+        if (count > 0 && hits >= count * .75) {
+            if (x - lastVertical > distance) verticals += x
+            lastVertical = x
+        }
+    }
+    if (verticals.size < anchors.last().first - anchors.first().first + 1) return emptyList()
+    return boundaries.zipWithNext().flatMap { (top, bottom) ->
+        val period = markers.filter { it.second in top until bottom }.map { it.first }.distinct().singleOrNull()
+            ?: return@flatMap emptyList()
+        (anchors.first().first..anchors.last().first).mapNotNull { day ->
+            val headerX = anchors.first().second.x + (day - anchors.first().first) * width
+            val cellLeft = verticals.lastOrNull { it < headerX } ?: return@mapNotNull null
+            val cellRight = verticals.firstOrNull { it > headerX } ?: pixels.width
+            // Empty rows and browser controls never become courses.
+            val background = gray((cellLeft + 6).coerceAtMost(cellRight - 1), (top + bottom) / 2)
+            var ink = 0; var samples = 0
+            for (y in top + 7 until bottom - 7 step 3) for (x in cellLeft + 8 until cellRight - 8 step 3) {
+                if (abs(gray(x, y) - background) > 55) ink++
+                samples++
+            }
+            if (samples == 0 || ink < samples * .005) null
+            else TimetableCell(day, cellLeft, top, cellRight, bottom, period)
+        }
+    }.sortedWith(compareBy({ it.weekday }, { it.top }))
 }
 
 private fun isCellColor(color: Int): Boolean {
@@ -126,7 +221,7 @@ internal fun parseTimetableOcr(lines: List<OcrLine>, cells: List<TimetableCell> 
         if (hour !in 0..23 || minute !in 0..59) null else axis.periodAt(line.y) to (hour * 60 + minute)
     }.toMap()
     val periodTimes = if (periodStarts.isEmpty()) "" else (1..axis!!.last).joinToString(",") { periodStarts[it]?.toString().orEmpty() }
-    val sourceWeek = lines.firstNotNullOfOrNull { Regex("第\\s*(\\d{1,2})\\s*周").find(it.text)?.groupValues?.get(1) }
+    val sourceWeek = lines.filter { it.y <= top }.firstNotNullOfOrNull { Regex("第\\s*(\\d{1,2})\\s*周").find(it.text)?.groupValues?.get(1) }
     val times = lines.filter { it.x < left }.mapNotNull { line ->
         val values = interval.matchEntire(line.text)?.groupValues?.drop(1)?.map(String::toInt) ?: return@mapNotNull null
         val (h1, m1, h2, m2) = values
@@ -136,15 +231,27 @@ internal fun parseTimetableOcr(lines: List<OcrLine>, cells: List<TimetableCell> 
     }
     val candidates = lines.filter { it.y > top && it.x >= contentLeft && (axis == null || it.y < axis.bottom) && it.text.isNotBlank() &&
         !weekdayHeader.matches(it.text) && (cells.isNotEmpty() || !Regex("^(?:第?\\d+[节周]?|上午|下午|晚上)$").matches(it.text)) }
-    if (cells.isNotEmpty()) return cells.mapNotNull { cell ->
+    if (cells.isNotEmpty()) return cells.flatMap { cell ->
         val content = candidates.filter { it.x in cell.left until cell.right && it.y in cell.top until cell.bottom }
-        if (content.isEmpty()) return@mapNotNull null
+        if (content.isEmpty()) return@flatMap emptyList()
+        if (cell.gridPeriod != null) {
+            val axisText = lines.filter { it.x < contentLeft && it.y in cell.top until cell.bottom }
+                .distinctBy { it.text to it.y }.sortedBy { it.y }.joinToString("") { it.text }
+            val clocks = Regex("(\\d{1,2})[:：](\\d{2})").findAll(axisText)
+                .mapNotNull { match ->
+                    val h = match.groupValues[1].toInt(); val m = match.groupValues[2].toInt()
+                    if (h in 0..23 && m in 0..59) h * 60 + m else null
+                }.distinct().toList()
+            val start = clocks.getOrNull(0) ?: -1
+            val end = clocks.getOrNull(1)?.takeIf { it > start } ?: -1
+            return@flatMap structuredCourses(content, cell.weekday, start, end, cell.gridPeriod)
+        }
         // Sample row interiors: period numbers may sit above the clock, away from row centres.
         val periods = axis?.let { it.periodAt((cell.top + it.step / 2).roundToInt()) to it.periodAt((cell.bottom - it.step / 2).roundToInt()) }
         val slots = times.filter { it.first.y in cell.top until cell.bottom }
-        draftFromCell(content, cell.weekday, slots.minOfOrNull { it.second } ?: periodStarts[periods?.first] ?: -1,
+        listOf(draftFromCell(content, cell.weekday, slots.minOfOrNull { it.second } ?: periodStarts[periods?.first] ?: -1,
             slots.maxOfOrNull { it.third } ?: -1, periods)
-            .copy(periodStartTimes = periodTimes, weeks = sourceWeek?.let { "第${it}周（截图）" }.orEmpty())
+            .copy(periodStartTimes = periodTimes, weeks = sourceWeek?.let { "第${it}周（截图）" }.orEmpty()))
     }
     // A monochrome table with a real time axis can still be grouped by that axis.
     // Without cell boundaries or time rows, fail closed instead of importing every wrapped line.
@@ -157,14 +264,64 @@ internal fun parseTimetableOcr(lines: List<OcrLine>, cells: List<TimetableCell> 
     }
 }
 
-private fun draftFromCell(lines: List<OcrLine>, day: Int, start: Int, end: Int, periods: Pair<Int, Int>?): CourseDraft {
+private fun orderedRows(lines: List<OcrLine>): List<String> {
     val rows = mutableListOf<MutableList<OcrLine>>()
     lines.sortedBy { it.y }.forEach { line ->
         val row = rows.lastOrNull()?.takeIf { abs(it.first().y - line.y) < maxOf(5, (line.bottom - line.top) / 2) }
         if (row != null) row += line else rows += mutableListOf(line)
     }
-    val ordered = rows.map { row -> row.sortedBy { it.left }.joinToString("") { it.text.trim().trim('|', '｜') }.trim() }
+    return rows.map { row -> row.sortedBy { it.left }.joinToString("") { it.text.trim().trim('|', '｜') }.trim() }
         .filter(String::isNotEmpty).mapIndexed { index, value -> if (index > 0 && value.startsWith('©')) "@" + value.drop(1) else value }
+}
+
+private fun structuredCourses(lines: List<OcrLine>, day: Int, start: Int, end: Int, period: Int): List<CourseDraft> {
+    val rows = orderedRows(lines)
+    val groups = mutableListOf<MutableList<String>>()
+    rows.forEach { row ->
+        val text = row.replace(Regex("\\s+"), "").replace('（', '(').replace('）', ')')
+            .replace('［', '[').replace('］', ']').replace('【', '[').replace('】', ']')
+        if (courseCodeRow.matches(text)) groups += mutableListOf<String>()
+        else {
+            if (groups.isEmpty()) groups += mutableListOf<String>()
+            groups.last() += text
+        }
+    }
+    return groups.filter { it.isNotEmpty() }.map { group ->
+        val raw = group.joinToString("").replace(Regex("^\\[[0-9OIl]{1,3}]", RegexOption.IGNORE_CASE), "")
+        val week = Regex("(?:第|[#＃])?[0-9OoIl]{1,2}(?:[-—–~至,，、.．][0-9OoIl]{1,2})*周(?:[（(]?[单双](?:周)?[）)]?)?").find(raw)
+        val beforeWeek = week?.let { raw.take(it.range.first) } ?: raw
+        val name = beforeWeek.replace(Regex("\\[本]?|本]"), "").trim()
+        val rest = week?.let { raw.drop(it.range.last + 1) }.orEmpty()
+        val campus = Regex("[\\p{IsHan}]*校区").find(rest)
+        // The first line after the week expression is the teacher; the next row
+        // starts the campus. Keep row boundaries to avoid swallowing the teacher.
+        val afterWeekRows = if (week == null) emptyList() else {
+            var skipped = 0
+            group.map { row ->
+                val part = row.drop((week.range.last + 1 + (group.joinToString("").length - raw.length) - skipped).coerceIn(0, row.length))
+                skipped += row.length
+                part
+            }.filter(String::isNotBlank)
+        }
+        val campusRow = afterWeekRows.indexOfFirst { row -> row.contains("校区") || row.contains("校") && rest.contains("校区") }
+        val locationStart = if (campus != null && campusRow >= 0) afterWeekRows.take(campusRow).sumOf { it.length }
+            else Regex("(?:地点|网络课|专?第?九教|[A-Z]{1,3}\\d{3})").find(rest)?.range?.first
+        val teacher = if (locationStart != null) rest.take(locationStart) else ""
+        val location = if (locationStart != null) rest.drop(locationStart) else rest
+        CourseDraft(name.ifBlank { "待填写课程名" }, day, start, end, location = location, teacher = teacher,
+            weeks = week?.value?.replace(Regex("^(?:第|[#＃])?"), "第")?.replace(Regex("[，、.．]"), ",")?.replace(Regex("[—–~至]"), "-")
+                ?.replace(Regex("[Oo]"), "0")?.replace(Regex("[Il]"), "1").orEmpty(),
+            periodStart = period, periodEnd = period,
+            reviewNote = buildString {
+                append("请核对课程名、教师、周次和时间。")
+                if (week == null) append("未识别到周次，原文：$raw")
+                if (start < 0 || end < 0) append("请补全截图中的实际钟点。")
+            })
+    }
+}
+
+private fun draftFromCell(lines: List<OcrLine>, day: Int, start: Int, end: Int, periods: Pair<Int, Int>?): CourseDraft {
+    val ordered = orderedRows(lines)
     val combined = ordered.joinToString("").replace("＠", "@").replace(Regex("\\s+"), " ")
     val marker = combined.indexOf('@')
     val name = if (marker >= 0) combined.take(marker).trim() else ordered.first()

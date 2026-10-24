@@ -18,6 +18,8 @@ import com.campusai.core.database.AiReportEntity
 import com.campusai.core.database.CampusDao
 import com.campusai.core.ai.ResolvedExecution
 import com.campusai.core.model.AiMode
+import com.campusai.features.ai.IslandSettingsStore
+import com.campusai.features.schedule.CourseReminderRuntime
 import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
@@ -118,7 +120,7 @@ object HealthTaskNotificationContract {
 }
 
 /** Shared by settings and the publisher so a user-muted channel is never shown as enabled. */
-fun healthTaskNotificationsEnabled(context: Context): Boolean {
+fun healthTaskNotificationsEnabled(context: Context, channelId: String = HealthTaskNotificationContract.CHANNEL_ID): Boolean {
     val appContext = context.applicationContext
     if (!NotificationManagerCompat.from(appContext).areNotificationsEnabled()) return false
     if (
@@ -130,7 +132,7 @@ fun healthTaskNotificationsEnabled(context: Context): Boolean {
     }
     if (Build.VERSION.SDK_INT >= 26) {
         val manager = appContext.getSystemService(NotificationManager::class.java)
-        val channel = manager.getNotificationChannel(HealthTaskNotificationContract.CHANNEL_ID)
+        val channel = manager.getNotificationChannel(channelId)
         if (channel?.importance == NotificationManager.IMPORTANCE_NONE) return false
     }
     return true
@@ -151,6 +153,7 @@ class AndroidHealthTaskNotificationPublisher(
         withValidityLease: suspend (() -> Unit) -> Boolean,
     ): HealthTaskNotificationDelivery {
         require(messages.size in 1..3)
+        val owner = CourseReminderRuntime.owner(appContext)
         ensureChannel()
         if (!healthTaskNotificationsEnabled(appContext)) {
             return HealthTaskNotificationDelivery.PermissionDisabled
@@ -173,20 +176,26 @@ class AndroidHealthTaskNotificationPublisher(
                     .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
-            val notification = NotificationCompat.Builder(appContext, HealthTaskNotificationContract.CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_launcher_monochrome)
-                .setContentTitle(NOTIFICATION_TITLE)
-                .setContentText(message)
-                .setStyle(NotificationCompat.BigTextStyle().bigText(message))
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
-                .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-                .setAutoCancel(true)
-                .setContentIntent(pendingIntent)
-                .build()
             try {
-                val delivered = withValidityLease { manager.notify(notificationId, notification) }
-                if (!delivered) return HealthTaskNotificationDelivery.Superseded
+                val delivered = withValidityLease {
+                    if (owner == CourseReminderRuntime.owner(appContext)) {
+                        val text = if (IslandSettingsStore(appContext).read(owner).healthContentPreview) message
+                            else "收到一条日常短消息，点击查看"
+                        val notification = NotificationCompat.Builder(appContext, HealthTaskNotificationContract.CHANNEL_ID)
+                            .setSmallIcon(R.drawable.ic_launcher_monochrome)
+                            .setContentTitle(NOTIFICATION_TITLE)
+                            .setContentText(text)
+                            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+                            .setPriority(NotificationCompat.PRIORITY_HIGH)
+                            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                            .setAutoCancel(true)
+                            .setContentIntent(pendingIntent)
+                            .build()
+                        manager.notify(TAG, notificationId, notification)
+                    }
+                }
+                if (!delivered || owner != CourseReminderRuntime.owner(appContext)) return HealthTaskNotificationDelivery.Superseded
             } catch (_: SecurityException) {
                 return HealthTaskNotificationDelivery.PermissionDisabled
             }
@@ -211,10 +220,15 @@ class AndroidHealthTaskNotificationPublisher(
     private fun notificationId(deliveryId: String, index: Int): Int =
         ("$deliveryId:$index".hashCode() and Int.MAX_VALUE).coerceAtLeast(1)
 
-    private companion object {
-        const val CHANNEL_NAME = "Caesar∞ 日常"
-        const val CHANNEL_DESCRIPTION = "Caesar∞ 的日常短消息"
-        const val NOTIFICATION_TITLE = "Caesar∞"
-        const val DEFAULT_MESSAGE_DELAY_MILLIS = 1_500L
+    companion object {
+        private const val TAG = "caesar-health-daily-messages"
+        fun cancelVisible(context: Context) {
+            val manager = context.getSystemService(NotificationManager::class.java)
+            manager.activeNotifications.filter { it.tag == TAG }.forEach { manager.cancel(TAG, it.id) }
+        }
+        private const val CHANNEL_NAME = "Caesar∞ 日常"
+        private const val CHANNEL_DESCRIPTION = "Caesar∞ 的日常短消息"
+        private const val NOTIFICATION_TITLE = "Caesar∞"
+        private const val DEFAULT_MESSAGE_DELAY_MILLIS = 1_500L
     }
 }

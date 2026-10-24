@@ -22,6 +22,7 @@ data class CommunityPost(
     val createdAt: String,
     val isPublic: Boolean = false,
     val mediaPaths: List<String> = emptyList(),
+    val moderationStatus: String = "pending",
 )
 
 data class CommunityComment(
@@ -134,7 +135,7 @@ open class CampusRepository {
         val postsResult = SupabaseClient.restGet(
             table = "posts",
             parameters = mapOf(
-                "select" to "id,author_id,body,topic,media_paths,is_anonymous,is_public,like_count,comment_count,created_at,author:profiles!posts_author_id_fkey(display_name,avatar_path)",
+                "select" to "id,author_id,body,topic,media_paths,is_anonymous,is_public,moderation_status,like_count,comment_count,created_at,author:profiles!posts_author_id_fkey(display_name,avatar_path)",
                 "deleted_at" to "is.null",
                 "order" to "created_at.desc",
                 "limit" to "50",
@@ -471,6 +472,7 @@ open class CampusRepository {
             mediaUrl = media.optString(0).takeIf { it.isNotBlank() }?.let { communityMediaUrl("post", it, item.optBoolean("is_public")) }.orEmpty(),
             anonymous = anonymous,
             isPublic = item.optBoolean("is_public"),
+            moderationStatus = item.optString("moderation_status", "pending"),
             mediaPaths = List(media.length()) { media.getString(it) },
             likes = item.optInt("like_count"),
             likedByMe = postId in likedPostIds,

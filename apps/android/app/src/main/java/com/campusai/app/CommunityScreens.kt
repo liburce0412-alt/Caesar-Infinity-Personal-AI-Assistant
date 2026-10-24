@@ -279,6 +279,7 @@ internal fun PostCard(post: CommunityPost, onLike: () -> Unit, onBookmark: () ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text(post.author, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        CommunityVisibilityStatus(post.isPublic, post.moderationStatus)
                         Text(remoteTime(post.createdAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     SpectraIconAction(Icons.Rounded.MoreHoriz, "更多操作", onReport)
@@ -404,7 +405,7 @@ internal fun PostDetails(
                             )
                         }
                         is UiState.Error -> item { RemoteError(comments.message, true, {}, onRetry, PageMood.SOCIAL) }
-                        is UiState.Data -> items(comments.value, key = { it.id }) { comment -> CommentRow(comment) }
+                        is UiState.Data -> items(comments.value, key = { it.id }) { comment -> CommentRow(comment, post.isPublic) }
                         is UiState.Offline -> {
                             item {
                                 SpectraStatePane(
@@ -416,7 +417,7 @@ internal fun PostDetails(
                                     onAction = onRetry,
                                 )
                             }
-                            items(comments.value, key = { it.id }) { comment -> CommentRow(comment) }
+                            items(comments.value, key = { it.id }) { comment -> CommentRow(comment, post.isPublic) }
                         }
                     }
                 }
@@ -454,13 +455,11 @@ internal fun PostDetails(
 }
 
 @Composable
-internal fun CommentRow(comment: CommunityComment) {
+internal fun CommentRow(comment: CommunityComment, isPublic: Boolean = true) {
     SpectraSurface(Modifier.fillMaxWidth(), mood = PageMood.SOCIAL) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(comment.author, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            if (comment.moderationStatus == "pending") {
-                SpectraStatus("待审核", tone = SpectraStatusTone.WARNING)
-            }
+            CommunityVisibilityStatus(isPublic, comment.moderationStatus)
         }
         Text(comment.body, style = MaterialTheme.typography.bodyLarge)
         Text(remoteTime(comment.createdAt), color = MaterialTheme.colorScheme.onSurface.copy(.48f), style = MaterialTheme.typography.bodySmall)
@@ -631,6 +630,7 @@ internal fun ListingCardView(listing: MarketplaceListing, today: java.time.Local
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(listing.title, maxLines = 3, overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.titleMedium)
+                CommunityVisibilityStatus(listing.isPublic, listing.moderationStatus)
                 if (listing.description.isNotBlank()) Text(listing.description, maxLines = 3, overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (listing.completedAt.isNotBlank()) Text("已实现 · 把这一刻留下", style = MaterialTheme.typography.labelMedium,
@@ -1122,7 +1122,13 @@ private fun ErrorBar(message: String, mood: PageMood, onDismiss: () -> Unit) {
 }
 
 private fun remoteTime(value: String): String = CaesarTime.formatRemote(value)
-private fun moderationText(value: String): String = when (value) { "pending" -> "待审核"; "approved" -> "已通过"; "rejected" -> "未通过"; else -> value }
+@Composable
+internal fun CommunityVisibilityStatus(isPublic: Boolean, status: String) {
+    if (!isPublic) Text("仅自己可见", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    else if (status != "approved") SpectraStatus(moderationText(status), tone = SpectraStatusTone.WARNING)
+}
+
+private fun moderationText(value: String): String = when (value) { "pending" -> "待审核"; "approved" -> "已通过"; "rejected" -> "未通过"; "removed" -> "已移除"; else -> value }
 
 internal suspend fun readUploadImage(context: Context, uri: Uri): UploadImage = withContext(Dispatchers.IO) {
     val contentType = context.contentResolver.getType(uri).orEmpty().lowercase()

@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.currentCoroutineContext
@@ -24,7 +25,6 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.Callback
@@ -36,8 +36,6 @@ import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
 import okio.ByteString.Companion.toByteString
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 
 class CaesarCloudFreeEngine internal constructor(
     private val baseUrl: () -> String,
@@ -58,7 +56,12 @@ class CaesarCloudFreeEngine internal constructor(
 
     private val active = AtomicReference<Call?>(null)
 
-    override fun stream(request: AiRequest): Flow<AiEvent> = channelFlow {
+    override fun stream(request: AiRequest): Flow<AiEvent> = stream(request) { submit -> submit(); true }
+
+    internal fun stream(
+        request: AiRequest,
+        withSubmissionLease: suspend (submit: () -> Unit) -> Boolean,
+    ): Flow<AiEvent> = channelFlow {
         try {
             withContext(Dispatchers.IO) {
                 val payload = cloudFreePayload(request)
@@ -76,7 +79,7 @@ class CaesarCloudFreeEngine internal constructor(
                     try { awaitCancellation() } finally { call.cancel() }
                 }
                 try {
-                    call.awaitCloudResponse().use { response ->
+                    call.awaitCloudResponse(withSubmissionLease).use { response ->
                         if (!response.isSuccessful) {
                             val error = runCatching { JSONObject(response.peekBody(8192).string()).optJSONObject("error") }.getOrNull()
                             if (payload.has("toolProtocol") && error?.optString("code") == "invalid_request") {
@@ -174,16 +177,34 @@ class CaesarCloudFreeEngine internal constructor(
 
 private fun sessionChanged() = AiRoutingException("authentication_required", "登录状态已变化，请重新打开对话。")
 
-private suspend fun Call.awaitCloudResponse(): Response = suspendCancellableCoroutine { continuation ->
-    continuation.invokeOnCancellation { cancel() }
-    enqueue(object : Callback {
+private suspend fun Call.awaitCloudResponse(
+    withSubmissionLease: suspend (submit: () -> Unit) -> Boolean,
+): Response {
+    val responseRef = AtomicReference<Response?>(null)
+    val deferred = CompletableDeferred<Response>()
+    val callback = object : Callback {
         override fun onFailure(call: Call, e: IOException) {
-            if (!continuation.isCancelled) continuation.resumeWithException(e)
+            deferred.completeExceptionally(e)
         }
         override fun onResponse(call: Call, response: Response) {
-            continuation.resume(response) { _, value, _ -> value.close() }
+            responseRef.set(response)
+            if (!deferred.complete(response)) {
+                responseRef.compareAndSet(response, null)
+                response.close()
+            }
         }
-    })
+    }
+    try {
+        if (!withSubmissionLease { enqueue(callback) }) {
+            throw AiRoutingException("request_superseded", "请求已被新的设置取消。")
+        }
+        return deferred.await().also { responseRef.compareAndSet(it, null) }
+    } catch (failure: Throwable) {
+        deferred.cancel()
+        responseRef.getAndSet(null)?.close()
+        cancel()
+        throw failure
+    }
 }
 
 internal fun cloudFreePayload(request: AiRequest): JSONObject {

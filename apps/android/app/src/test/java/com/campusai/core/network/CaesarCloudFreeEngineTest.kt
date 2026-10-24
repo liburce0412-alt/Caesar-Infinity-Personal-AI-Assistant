@@ -23,6 +23,18 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class CaesarCloudFreeEngineTest {
+    @Test fun `revoked automation lease never submits an HTTP request`() = runTest {
+        var requests = 0
+        val client = OkHttpClient.Builder().addInterceptor {
+            requests++
+            error("HTTP must not be submitted")
+        }.build()
+        val engine = CaesarCloudFreeEngine({ "https://backend.example" }, { "session" }, { true }, client)
+        val events = engine.stream(request()) { false }.toList()
+        assertEquals(0, requests)
+        assertEquals("request_superseded", events.filterIsInstance<AiEvent.Error>().single().code)
+    }
+
     private fun request() = AiRequest(AiMode.FAST, listOf(AiConversationMessage("user", "你好")), ownerUserId = "owner")
 
     @Test fun `new install defaults to cloud while existing choices remain unchanged`() {
