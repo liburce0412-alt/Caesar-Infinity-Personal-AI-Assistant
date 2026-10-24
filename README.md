@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="design/brand/campusai-infinity-icon.png" width="104" alt="Caesar infinity mark" />
+  <img src="design/brand/caesar-brand-pearl.png" width="104" alt="Caesar∞ 当前珠光编结图标" />
 </p>
 
 <h1 align="center">Caesar∞ · 懂你日常的私人 AI 助手</h1>
@@ -20,9 +20,9 @@
   <a href="docs/local-ai-architecture.md">架构文档</a>
 </p>
 
-**3.1.0 / versionCode 15：[版本说明](docs/releases/v3.1.0.md) · [下载 APK](https://github.com/liburce0412-alt/Caesar-Infinity-Personal-AI-Assistant/releases/tag/v3.1.0) · [验收与发布状态](docs/caesar-3.1-acceptance.md)**
+**最新正式版 3.1.0 / versionCode 15：[版本说明](docs/releases/v3.1.0.md) · [下载 APK](https://github.com/liburce0412-alt/Caesar-Infinity-Personal-AI-Assistant/releases/tag/v3.1.0) · [验收与发布状态](docs/caesar-3.1-acceptance.md)**
 
-3.1 改善超级岛布局与回复跳转，加入健康后台任务、自然短消息、课表确认导入和统一审核。保留 3.0 的北京时间与 AI 时钟、受控免费云端工具、历史分页、账号隔离和自适应渲染。生产 relay 已部署直用 GLM-4-Flash-250414 的路由，服务处于 active；正式 APK 已由发布工作流签名生成，GitHub 与国内更新源已同步。验证范围见 [3.0 验收清单](docs/caesar-3.0-acceptance.md)。
+3.1 改善超级岛布局与回复跳转，加入健康后台任务、自然短消息、课表确认导入和统一审核。保留 3.0 的北京时间与 AI 时钟、受控免费云端工具、历史分页、账号隔离和自适应渲染。生产 relay 已部署直用 GLM-4-Flash-250414 的路由，服务处于 active；正式 APK 已由发布工作流签名生成，GitHub 与国内更新源已同步。验证范围见 [3.1 验收记录](docs/caesar-3.1-acceptance.md)。
 
 免费文字直接使用 GLM-4-Flash-250414，图片保留 GLM-4V-Flash；不增加付费兜底、GLM-OCR 或每日次数限制。覆盖安装保留本地记录和已有 Provider 选择。历史版本见 [v2.2.2 发布说明](docs/releases/v2.2.2.md)；此前的滚动与高刷新率优化保留，历史[性能记录](docs/android-performance-20261011.md)不代表新版已达到稳定 120 fps。
 
@@ -30,7 +30,7 @@
 
 ## 先看使用场景
 
-3.0 延续 [Caesar 玻璃气泡](docs/caesar-glass-orb.md)：新对话、语音输入、生成/朗读状态及首页 AI 入口共用气泡材质。首页减少信息密度，独立品牌标题复用开屏艺术字；流体背景保留运动速度、宽淡光晕与平行暖光带。小米超级岛使用静态气泡、状态表情和原生操作；健康任务仅在本次消息保存后提供“查看回复”，仅同步不显示回复按钮。展示与实机验证范围见 [健康自动化与超级岛](docs/health-automation-and-island-settings.md)。保留语音权限、系统识别同意及手动发送流程。
+3.1 使用 [Caesar 玻璃气泡](docs/caesar-glass-orb.md)：新对话、语音输入、生成/朗读状态及首页 AI 入口共用气泡材质。首页减少信息密度，独立品牌标题复用开屏艺术字；流体背景保留运动速度、宽淡光晕与平行暖光带。小米超级岛使用静态气泡、状态表情和原生操作；健康任务仅在本次消息保存后提供“查看回复”，仅同步不显示回复按钮。展示与实机验证范围见 [健康自动化与超级岛](docs/health-automation-and-island-settings.md)。保留语音权限、系统识别同意及手动发送流程。
 
 **适合想围绕健康数据与日常记录继续追问的 Android 用户。** 登录后可直接选择 Caesar cloud free，也可自行配置个人 Provider 或本地模型。
 
@@ -40,16 +40,17 @@
   <a href="design/readme/caesar-profile.png"><img src="design/readme/caesar-profile.png" width="31%" alt="新版个人页：统一透明材质与组件入口" /></a>
 </p>
 
-截图更新于 **2026-10-05**。首页、个人页及下方界面来自实际 Compose / GL 模拟器，使用明确的演示数据；课表来自用户授权截图导入后的真机。截图不是生成效果图，演示健康数据不代表真实健康记录。
+截图更新于 **2026-10-24 · 3.1.0**。所有界面均由当前 Compose / GL 代码在隔离 Android 35 模拟器中实际运行并截图；人物、健康、课程、对话与社区内容均为演示数据。顶部图标直接复用应用当前珠光品牌资源，未使用生成效果图或私人手机数据。
 
-当前源码支持多张课表截图识别后进入核对弹窗，确认后才保存并同步云端；新增黑白长表格、不等高行、同格多课程和分周安排解析。3.1 纳入确认导入及统一审核改动，见[本次修改记录](docs/moderation-timetable-20261020.md)。在「我的 → 组件与内容」可折叠课程表。浅色触摸彩光只在手指附近的边框及紧邻边缘淡淡出现，深色保留白色追光。见[课表与外观使用说明](docs/timetable-and-appearance.md)和[历史验证记录](docs/frontend-timetable-20261005.md)。
+当前源码支持多张课表截图识别后进入核对弹窗，确认后才保存并同步云端；新增黑白长表格、不等高行、同格多课程和分周安排解析。3.1 纳入确认导入及统一审核改动，见[本次修改记录](docs/moderation-timetable-20261020.md)。在「我的 → 设置 → 组件与内容」可折叠课程表。浅色触摸彩光只在手指附近的边框及紧邻边缘淡淡出现，深色保留白色追光。见[课表与外观使用说明](docs/timetable-and-appearance.md)和[历史验证记录](docs/frontend-timetable-20261005.md)。
 
 <p align="center">
   <a href="design/readme/caesar-achievement-icons.png"><img src="design/readme/caesar-achievement-icons.png" width="31%" alt="16 种成就徽章：实际 Compose 组件演示" /></a>
   <a href="design/readme/caesar-course-editor.png"><img src="design/readme/caesar-course-editor.png" width="31%" alt="课程编辑：可在导入后填写教室、教师和调整时间" /></a>
+  <a href="design/readme/caesar-shortcuts.png"><img src="design/readme/caesar-shortcuts.png" width="31%" alt="3.1 个人页快捷入口：健康自动化、超级岛与设置" /></a>
 </p>
 
-上方两张 v2.1.1 新图由实际 Compose 组件渲染，使用演示课程与徽章状态；并非生成效果图。它们展示编辑表单和图标细节，完整真机背景以应用为准。
+成就、课程编辑与快捷入口同样来自当前实际组件。健康自动化、超级岛独立进入；AI、Mi Fitness、外观与应用更新收纳在「设置」。
 
 ### 第一次可以这样用
 
@@ -74,13 +75,13 @@
 
 ### 安装前准备
 
-- **设备：** 当前重点适配 Xiaomi 15 Pro（Android 16、16 GB RAM），其他设备的兼容性与本地模型表现仍需验证。
+- **设备：** 当前重点适配 Xiaomi 15 Pro（本轮 Android 17 / HyperOS 4、16 GB RAM），其他设备的兼容性与本地模型表现仍需验证。
 - **模型：** Caesar cloud free 登录后可用，无需个人 Key；本地模式需另行下载模型并预留空间。个人云端 Provider 需要自己的可用 API Key，费用与网络可达性取决于所选服务。健康自动化也支持这三种运行方式；仅同步无需 AI。
 - **健康接入：** 小米手环体验需要 Mi Fitness 运行并连接手环，以及 App 内配置的小米账户凭据；手动同步会先请求小米后台同步，完整步骤见[手环接入](#小米手环与健康数据)。
 
 ### 下载与开始
 
-1. 前往 [Releases 下载 APK](https://github.com/liburce0412-alt/Caesar-Infinity-Personal-AI-Assistant/releases)，选择已实际发布的条目，核对该条目的 SHA-256 和签名说明。3.0 变更可查看 [v3.0.0 发布说明](docs/releases/v3.0.0.md)。
+1. 前往 [Releases 下载 APK](https://github.com/liburce0412-alt/Caesar-Infinity-Personal-AI-Assistant/releases)，选择已实际发布的条目，核对该条目的 SHA-256 和签名说明。3.1 变更可查看 [v3.1.0 发布说明](docs/releases/v3.1.0.md)。
 2. 如需注册账号，添加微信 **`jokerB0906L`** 获取内测邀请码，在注册页填写邮箱、密码、确认密码与邀请码。已有账号可直接登录；本地能力无需登录，树洞等账户功能需要登录。
 3. 在「我的 → 设置 → AI 运行方式」选择 Caesar cloud free，或选择本地模型并完成下载，也可配置个人云端 Key 和可用模型。仓库中的默认 Codex 地址属于私人网络配置，体验者需自行配置可访问的兼容服务。
 4. 按上面的[第一次体验步骤](#第一次可以这样用)完成一次数据同步和对话；暂不接入健康数据时，可以先尝试普通对话。
@@ -109,12 +110,12 @@ Caesar∞ 把模型、工具、个人上下文和原生界面放进同一个受�
 
 ## V3 能做什么
 
-| 能力 | 3.0 实现 | 明确边界 |
+| 能力 | 3.1 实现 | 明确边界 |
 | --- | --- | --- |
 | 本地 Agent | Qwen3.5-2B FAST 与 Qwen3.5-4B DEEP，MNN Q4，按会话锁定 | 两个模型独立下载，不同时常驻，也不会在会话中静默换模 |
 | 多模态 | 文字、相册、拍照、截图分享、OCR 辅助、语音输入与 TTS；明确选择 Codex 时默认上传当前轮图片 | Codex 每轮最多 4 张，经旋转校正、缩放、JPEG 重编码并移除 EXIF；不持续监听、持续摄像或理解视频 |
 | App 工具 | 32 个 App 工具与 1 个只读 `web.search`，Tool Registry、DAG、类型校验、确认、幂等与动态结果卡片 | 模型不能绕过 Repository / UseCase 直接碰数据库或令牌；每轮只投影与意图相关的工具 |
-| 按周课程表 | 多张截图识别并核对确认、分周多课程、七天节次网格、重复跳过、本地先存与账号云同步 | 新导入流程见上述未发布说明；截图省略的名称不能恢复；缺失钟点需补全；可在组件与内容折叠 |
+| 按周课程表 | 多张截图识别并核对确认、分周多课程、七天节次网格、重复跳过、本地先存与账号云同步 | 导入确认流程见上文；截图省略的名称不能恢复；缺失钟点需补全；可在组件与内容折叠 |
 | 个人记忆 | 短期任务状态、结构化摘要、确认式长期记忆 | 原始健康序列不写入记忆；拒绝后不落库 |
 | 健康感知 | Health Connect 聚合、来源、新鲜度、首页折叠卡和 Agent 健康工具 | Caesar∞ 解释状态与趋势，不提供医疗诊断 |
 | 小米手环健康 | 手动请求 Mi Fitness 后台同步，再读取每日健康汇总、步数分时趋势与本机加密缓存 | 请求发出不等于手环同步完成；新鲜度取决于小米云上传，CampusAI 不建立 BLE/SPP 连接 |
@@ -202,7 +203,7 @@ npm run test
 
 该入口通过Caesar服务器转发，智谱Key仅保存在服务器，用户无需个人Key。生产relay已部署直用250414及固定白名单文字工具协议，服务处于active；工具实际执行由App的权限、确认策略、按用户轮次幂等和账号边界控制。支持时间记录读取/新建/编辑/删除/撤销、课程读取、待确认记忆提议及只读搜索。图片只上传当前新附的一张处理后JPEG，最多4MiB，不附工具。配置与验证范围见 [Caesar cloud free](docs/caesar-cloud-free.md)及[3.0验收记录](docs/caesar-3.0-acceptance.md)；服务部署不等于正式APK已发布。
 
-历史生产基线：2026-10-13部署的2.2.2使用4.7优先、快速文本失败后250414免费回退，深度固定4.7；该部署记录不等于当前3.0源码路由。4.7当日曾有一次真实上游成功，不能说从未成功；移除前隔离联调的7次4.7请求全部失败，250414的6次请求均200。移除后的独立手机验收仅2次上游，均为250414且HTTP200；与此前13次分账，不回写历史结果。
+历史生产基线：2026-10-13部署的2.2.2使用4.7优先、快速文本失败后250414免费回退，深度固定4.7；该部署记录不等于当前3.1源码路由。4.7当日曾有一次真实上游成功，不能说从未成功；移除前隔离联调的7次4.7请求全部失败，250414的6次请求均200。移除后的独立手机验收仅2次上游，均为250414且HTTP200；与此前13次分账，不回写历史结果。
 
 图片导入的路径问题已修复。2026-10-14 服务器内存故障恢复后，手机免费兜底文字回复和 GLM-4V-Flash 图片理解均已完整通过。后端补充有序启动和较低频率健康检查，长期稳定性仍需观察。本功能纳入 [v2.2.2](docs/releases/v2.2.2.md)。
 
@@ -341,7 +342,7 @@ Android 客户端能保证自身不做云端会话同步，但无法替 Provider
 
 ## 历史 V2 验证与 Codex 接入检查
 
-以下为 V2 阶段记录；3.0 的验证范围见[3.0 验收清单](docs/caesar-3.0-acceptance.md)。当时已完成：
+以下为 V2 阶段记录；当前版本验证范围见[3.1 验收记录](docs/caesar-3.1-acceptance.md)。当时已完成：
 
 - Android 主应用 debug 构建；
 - arm64 MNN JNI 编译与链接；

@@ -119,6 +119,13 @@ class PromoCaptureActivity : ComponentActivity() {
                 ).mapValues { (_, metric) -> HealthMetricValue(metric.first, metric.second, HealthMetricStatus.AVAILABLE, HealthMetricProvenance("mi_fitness_cloud", "local-demo", "daily")) }),
         )
         lifecycleScope.launch {
+            dao.importCourseSchedules(listOf(
+                CourseSchedule(name = "高等数学", weekday = 1, startMinute = 480, endMinute = 580, location = "示例楼 A101", teacher = "张老师", sourceHash = "promo-math", periodStart = 1, periodEnd = 2),
+                CourseSchedule(name = "大学英语", weekday = 2, startMinute = 600, endMinute = 700, location = "示例楼 A202", teacher = "李老师", sourceHash = "promo-english", periodStart = 3, periodEnd = 4),
+                CourseSchedule(name = "程序设计", weekday = 3, startMinute = 840, endMinute = 940, location = "示例楼 B301", teacher = "王老师", sourceHash = "promo-code", periodStart = 6, periodEnd = 7),
+                CourseSchedule(name = "读书与表达", weekday = 4, startMinute = 480, endMinute = 580, location = "示例楼 A201", teacher = "陈老师", sourceHash = "promo-reading", periodStart = 1, periodEnd = 2),
+                CourseSchedule(name = "体育", weekday = 5, startMinute = 840, endMinute = 940, location = "示例操场", teacher = "周老师", sourceHash = "promo-sports", periodStart = 6, periodEnd = 7),
+            ).map { com.campusai.core.database.CourseScheduleEntity.fromDomain(it) })
             delay(700)
             seedState(profiles, "_state", ProfileState(CampusProfile(displayName = "小夏", coverPath = "promo/cover.png", bio = "慢慢来，每一步都算数", level = 7, experience = 1280, streakDays = 12)))
             if (initialScreen == "daily") seedState(ai, "_state", AiUiState(messages = listOf(

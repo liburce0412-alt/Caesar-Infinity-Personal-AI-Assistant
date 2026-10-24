@@ -2,19 +2,19 @@
 
 ## 3.1.0 发布
 
-本次发布目标为 `3.1.0 / versionCode 15`，版本内容见 [v3.1.0 发布说明](releases/v3.1.0.md)，实时进度见 [3.1 验收记录](caesar-3.1-acceptance.md)。此前 3.0.0 的生产免费 relay 已部署直用 `glm-4-flash-250414` 与受控文字工具协议，服务处于 active；签名APK、GitHub Release与国内更新元数据均已发布并核验。验收依据见 [3.0 验收记录](caesar-3.0-acceptance.md)。
+当前正式版为 `3.1.0 / versionCode 15`，见 [发布说明](releases/v3.1.0.md)及[验收记录](caesar-3.1-acceptance.md)。GitHub 正式签名包与国内镜像均已发布，并从公网下载校验一致。
 
 仅在签名一致时保留数据覆盖安装，禁止卸载或清数据。数据库 11 为既有 AI 历史补上本机所有者与分页索引，旧内容保留在“本机旧记录”，不自动归属当前登录账号；新诊断记录应用存储上限，历史聊天不随诊断清理。免费文字不再使用4.7或跨模型兜底；图片仍用4V，不接入GLM-OCR、不增加付费路线或每日次数限制。
 
 | 版本 | versionCode | 对照 |
 | --- | --- | --- |
-| 3.1.0 | 15 | 本次发布目标；超级岛、健康自动化、课表与审核 |
+| 3.1.0 | 15 | 当前正式版；超级岛、健康自动化、课表与审核 |
 | 3.0.0 | 14 | 历史发布；免费受控工具、账号隔离与历史分页 |
 | 2.2.2 | 13 | 历史发布；免费云端与旧文字兜底路线 |
 
 ## 使用
 
-从 v2.1.1 开始支持应用内更新。首次安装该版本后，后续正式版可通过「我的 → 应用更新」下载；进入主界面也会检查新版并展示版本说明。自动检查成功后缓存 24 小时，手动检查不受限制。选择“稍后”后，同一版本不重复弹窗，手动入口仍可更新。
+从 v2.1.1 开始支持应用内更新。当前入口为「我的 → 设置 → 应用更新」；进入主界面也会检查新版并展示版本说明。自动检查成功后缓存 24 小时，手动检查不受限制。选择“稍后”后，同一版本不重复弹窗，手动入口仍可更新。
 
 默认从杭州服务器下载，支持切换 GitHub；下载失败会自动尝试另一来源。下载期间可切换应用内页面，但请保持应用运行，进程被系统结束后需重新下载。下载结束后校验大小、SHA-256、包名、版本及签名，再打开系统安装界面。首次需要允许本应用安装 APK；系统安装确认不会被绕过。覆盖更新保留本机数据。
 
@@ -23,10 +23,11 @@ v2.1.0 及更早版本没有检查更新功能，必须先手动覆盖安装 v2.
 ## 发布
 
 1. 更新 `apps/android/app/build.gradle.kts`：递增 versionCode，并填写新的 versionName。
-2. 添加 `docs/releases/vX.Y.Z.md`。`<!-- updater -->` 后面的正文会显示在更新弹窗。
+2. 添加 `docs/releases/vX.Y.Z.md`。`<!-- updater -->` 后面的正文会显示在更新弹窗。同时核对 README 及维护中的语言版本：版本、功能文字、入口路径、图标必须与当前应用一致；前端变化时重新抓取真实界面截图，使用演示数据并逐张检查，不把旧截图继续标作当前版本。
 3. 提交并推送，创建对应 `vX.Y.Z` 标签触发 Release Android。保留现有签名密钥。
 4. 工作流构建、检查、签名 APK，从实际 `output-metadata.json` 提取版本信息，生成 SHA256SUMS.txt 和 update.json，一起发布 GitHub 正式 Release。
-5. 服务器每 15 分钟检查公开的最新正式版；校验 APK 后才原子替换 `/updates/latest.json`。若需立即生效，可执行 `systemctl start caesar-release-mirror.service`。
+5. 人工发布默认从 GitHub 下载正式 APK 与 `update.json`，核验版本、包名、签名、大小和 SHA-256 后，通过已授权 SSH 连接直传国内服务器的私有暂存路径。使用服务器原镜像脚本的 `validate` 与 `verified` 再核验，才移动到精确版本目录并交给 www-data。不得直接覆盖 `latest.json`。
+6. 运行 `caesar-release-mirror.service`：它重新获取 GitHub 正式清单、校验已到位 APK 后原子切换 `/updates/latest.json`。若有本轮慢速下载正在运行，先停止该镜像任务，完成校验后仅清理该版本的 `download.part`。每 15 分钟的定时同步保持启用，作为遗漏发布的兜底。最后从公网读取清单并下载验证国内 APK。
 
 服务器元数据：`https://campusai.campus3ai.xyz/updates/latest.json`。
 GitHub 元数据：`https://github.com/liburce0412-alt/Caesar-Infinity-Personal-AI-Assistant/releases/latest/download/update.json`。

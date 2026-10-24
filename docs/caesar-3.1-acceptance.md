@@ -7,13 +7,17 @@
 - 2026-10-24：Android 全量 727 项单元测试通过，`lintBenchmark` 与候选包构建通过。测试结束后日志仍有协程线程异常前缀，Gradle 与 JUnit 均成功；不将其解释为手机崩溃证据。
 - 私人课表原图不发布：单元测试改用合成黑白网格，3 项定向测试通过；真实原图 OCR 改为显式传入 `monochromeFixturePath`，Android 测试源码编译通过。原图模拟器识别结果见历史修改记录。
 - 2026-10-23 至 24：Xiaomi 15 Pro 原生紧凑岛、健康摘要、三条消息展开、已存回复跳转、课程跳转、双岛停止及停止态展开完成视觉/操作复验；最终停止态仍显示「打开对话」，不再显示停止按钮。SystemUI 进程在本次复验中保持稳定。
-- 设备保持 15 分钟仅同步、允许后台、云端摘要授权关闭；未为发布验收另行生成健康消息。
+- 设备保持 15 分钟仅同步、允许后台、云端摘要授权关闭；未为发布验收另行生成健康消息。升级后用户确认三个超级岛开关由其手动关闭，按要求保持关闭；要求开关开启的回复复验因此不适用，不计作升级丢失设置，也不宣称正式包已重新通过该项视觉复验。
 - 隔离 PostgreSQL/WASM 117 项权限与审核断言通过。生产迁移 `20261020111414_unified_community_moderation.sql` 已在数据库备份后以事务执行；默认待审、审核 RPC 权限、父内容可见性与批准评论计数回读通过。7 个 Supabase 服务继续健康，免费 relay active，独立激活站点返回 200。
 
 ## 发布检查
 
-- 待完成：远端 Verify、正式签名构建、GitHub Release、国内镜像、签名一致的真机覆盖升级。
+- [Verify 全部通过](https://github.com/liburce0412-alt/Caesar-Infinity-Personal-AI-Assistant/actions/runs/40059884917)，正式发布源码为 `a7c0c2dac187704b874a2af17a0498b038e74ed1`。
+- [正式签名构建通过](https://github.com/liburce0412-alt/Caesar-Infinity-Personal-AI-Assistant/actions/runs/40060420509)，[v3.1.0 Release](https://github.com/liburce0412-alt/Caesar-Infinity-Personal-AI-Assistant/releases/tag/v3.1.0) 为正式发行，非草稿、非预发布。
+- GitHub 与国内镜像的 APK 均为 46,034,022 字节，公网下载 SHA-256 一致：`5bdc7d766201b6f373dc4f71f1152364360f0f796e2e08781cf54a1a1208ec72`。国内包先通过已授权 SSH 直传，仍由原镜像脚本校验并原子发布清单。
+- 证书与手机原安装及 3.0.0 正式版一致；`adb install -r` 成功，手机回读版本 `3.1.0 / 15`，首次安装时间保持不变。实际打开主界面与个人页，既有记录仍可见；只读存储审计确认本地模型大小保持不变，SystemUI 进程保持稳定。
 - 本地证据保留在 `artifacts/release-3.1.0-20261024/` 与 `artifacts/island-polish-20261023/`，不将私人截图、原始课表或用户记录提交到公开仓库。
+- README 顶部改用当前珠光品牌图标，10 张当前界面截图逐张视觉检查完成；全部来自隔离模拟器与演示数据。补齐新版快捷入口，修正旧版本、旧菜单路径和未发布描述，11 个图片引用与 29 个本地文档链接存在性检查通过。演示夹具仅新增内存中的虚构课表，Debug 编译与实际界面运行通过，不改变正式包。
 
 ## 边界
 
