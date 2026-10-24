@@ -24,23 +24,23 @@ class TimetableScreenshotOcrTest {
         val fixturePath = InstrumentationRegistry.getArguments().getString("monochromeFixturePath")
         assumeTrue("Pass monochromeFixturePath for the private original screenshot", !fixturePath.isNullOrBlank())
         val fixture = File(fixturePath!!)
-            val courses = ScheduleImporter.fromImage(context, Uri.fromFile(fixture))
-            val json = JSONArray(courses.map { course -> JSONObject().apply {
-                put("name", course.name); put("weekday", course.weekday); put("period", course.periodStart)
-                put("startMinute", course.startMinute); put("endMinute", course.endMinute)
-                put("weeks", course.weeks); put("teacher", course.teacher); put("location", course.location)
-            } })
-            File(context.cacheDir, "web-grid-result.json").writeText(json.toString(2))
-            assertEquals(json.toString(), 23, courses.size)
-            assertEquals(mapOf(1 to 7, 2 to 4, 3 to 4, 4 to 1, 5 to 4, 6 to 2, 7 to 1), courses.groupingBy { it.weekday }.eachCount())
-            val times = mapOf(1 to (480 to 590), 2 to (610 to 720), 4 to (850 to 960), 5 to (980 to 1090), 6 to (1140 to 1250), 7 to (1260 to 1310))
-            courses.forEach { assertEquals(it.toString(), times[it.periodStart], it.startMinute to it.endMinute) }
-            assertTrue(courses.all { it.reviewNote.isNotBlank() && it.weeks.isNotBlank() })
-            assertTrue(courses.none { Regex("^[A-Z]\\d{5}").containsMatchIn(it.name) })
-            assertTrue(courses.any { it.weekday == 1 && it.periodStart == 5 && it.name == "职业规划与能力提升" && it.weeks == "第09-16周" })
-            assertTrue(courses.any { it.weekday == 5 && it.name == "复变函数与积分变换" && it.weeks == "第02,04,06,08,10,12,14,16周" })
-            assertTrue(courses.any { it.weekday == 5 && it.name == "马克思主义基本原理" && it.weeks == "第01,03,05,07,09,11,13,15周" })
-            assertTrue(courses.any { it.weekday == 6 && it.name == "人工智能编程实践" && it.weeks == "第18周" })
+        val courses = ScheduleImporter.fromImage(context, Uri.fromFile(fixture))
+        val json = JSONArray(courses.map { course -> JSONObject().apply {
+            put("name", course.name); put("weekday", course.weekday); put("period", course.periodStart)
+            put("startMinute", course.startMinute); put("endMinute", course.endMinute)
+            put("weeks", course.weeks); put("teacher", course.teacher); put("location", course.location)
+        } })
+        File(context.cacheDir, "web-grid-result.json").writeText(json.toString(2))
+        assertEquals(json.toString(), 23, courses.size)
+        assertEquals(mapOf(1 to 7, 2 to 4, 3 to 4, 4 to 1, 5 to 4, 6 to 2, 7 to 1), courses.groupingBy { it.weekday }.eachCount())
+        val times = mapOf(1 to (480 to 590), 2 to (610 to 720), 4 to (850 to 960), 5 to (980 to 1090), 6 to (1140 to 1250), 7 to (1260 to 1310))
+        courses.forEach { assertEquals(it.toString(), times[it.periodStart], it.startMinute to it.endMinute) }
+        assertTrue(courses.all { it.reviewNote.isNotBlank() && it.weeks.isNotBlank() })
+        assertTrue(courses.none { Regex("^[A-Z]\\d{5}").containsMatchIn(it.name) })
+        assertTrue(courses.any { it.weekday == 1 && it.periodStart == 5 && it.name == "职业规划与能力提升" && it.weeks == "第09-16周" })
+        assertTrue(courses.any { it.weekday == 5 && it.name == "复变函数与积分变换" && it.weeks == "第02,04,06,08,10,12,14,16周" })
+        assertTrue(courses.any { it.weekday == 5 && it.name == "马克思主义基本原理" && it.weeks == "第01,03,05,07,09,11,13,15周" })
+        assertTrue(courses.any { it.weekday == 6 && it.name == "人工智能编程实践" && it.weeks == "第18周" })
     }
 
     @Test fun cancelledImportCanBeFollowedByAnotherImport() = runBlocking {

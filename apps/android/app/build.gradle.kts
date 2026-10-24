@@ -105,7 +105,6 @@ android {
     }
   }
   sourceSets.getByName("androidTest").assets.directories.add("$projectDir/schemas")
-  sourceSets.getByName("androidTest").assets.directories.add("$projectDir/src/test/resources/timetables")
   // Robolectric reads Room migration schemas through the debug app's
   // AssetManager; keep them out of release builds while making local tests real.
   sourceSets.getByName("debug").assets.directories.add("$projectDir/schemas")
